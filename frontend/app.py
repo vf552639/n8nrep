@@ -609,6 +609,16 @@ div[data-testid="stHorizontalBlock"] {
                     ("site_name", "Название целевого сайта"),
                     ("site_template_html", "HTML-шаблон целевого сайта (из site_templates)"),
                     ("site_template_name", "Название шаблона сайта"),
+                    ("competitor_titles", "Titles конкурентов из SERP (JSON-список)"),
+                    ("competitor_descriptions", "Descriptions/сниппеты конкурентов (JSON-список)"),
+                    ("highlighted_keywords", "Слова, выделенные Google в сниппетах (JSON-список)"),
+                    ("paa_with_answers", "People Also Ask с ответами (Q: ... A: ...)"),
+                    ("featured_snippet", "Featured Snippet (JSON: title, description, type, domain)"),
+                    ("knowledge_graph", "Knowledge Graph (JSON: title, description, facts)"),
+                    ("ai_overview", "Google AI Overview текст (если есть)"),
+                    ("answer_box", "Answer Box текст (если есть)"),
+                    ("serp_features", "Список SERP-элементов на странице (JSON)"),
+                    ("search_intent_signals", "Сигналы поискового интента (JSON)"),
                 ]
                 
                 col1, col2 = st.columns([1, 2])

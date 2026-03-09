@@ -143,24 +143,91 @@ def call_agent(db: Session, agent_name: str, context: str, response_format=None,
     
     return generate_text(**kwargs)
 
+MAX_COMPETITOR_TITLES = 10
+MAX_COMPETITOR_DESCRIPTIONS = 10
+MAX_PAA_WITH_ANSWERS = 8
+MAX_HIGHLIGHTED_KEYWORDS = 30
+MAX_AI_OVERVIEW_CHARS = 2000
+MAX_ANSWER_BOX_CHARS = 500
+MAX_KG_FACTS = 15
+
 def setup_vars(ctx: PipelineContext):
     scrape_info = ctx.outline_data.get("scrape_info", {})
     avg_words = scrape_info.get("avg_words", 800)
     headers_info = scrape_info.get("headers", [])
     
-    paa = ctx.task.serp_data.get("paa", []) if ctx.task.serp_data else []
-    related = ctx.task.serp_data.get("related_searches", []) if ctx.task.serp_data else []
+    serp = ctx.task.serp_data or {}
+    
+    paa = serp.get("paa", [])
+    related = serp.get("related_searches", [])
+    
+    organic_results = serp.get("organic_results", [])
+    paa_full = serp.get("paa_full", [])
+    featured_snippet = serp.get("featured_snippet")
+    knowledge_graph = serp.get("knowledge_graph")
+    ai_overview = serp.get("ai_overview")
+    answer_box = serp.get("answer_box")
+    serp_features = serp.get("serp_features", [])
+    intent_signals = serp.get("search_intent_signals", {})
+    
+    competitor_titles = [r["title"] for r in organic_results if r.get("title")][:MAX_COMPETITOR_TITLES]
+    competitor_descriptions = [r["description"] for r in organic_results if r.get("description")][:MAX_COMPETITOR_DESCRIPTIONS]
+    highlighted_keywords = list(set(
+        kw for r in organic_results for kw in r.get("highlighted", [])
+    ))[:MAX_HIGHLIGHTED_KEYWORDS]
+    
+    paa_with_answers = "\n".join([
+        f"Q: {p['question']}\nA: {p['answer']}" 
+        for p in paa_full if p.get("answer")
+    ][:MAX_PAA_WITH_ANSWERS]) if paa_full else ""
+    
     add_kw_text = f"\nAdditional Keywords: {ctx.task.additional_keywords}" if ctx.task.additional_keywords else ""
 
     ctx.base_context = (
         f"Keyword: {ctx.task.main_keyword}{add_kw_text}\n"
         f"Country: {ctx.task.country}\n"
         f"Language: {ctx.task.language}\n"
-        f"People Also Ask: {json.dumps(paa, ensure_ascii=False)}\n"
+        f"SERP Features Present: {json.dumps(serp_features)}\n"
+        f"Search Intent Signals: {json.dumps(intent_signals)}\n"
+        f"Competitor Titles: {json.dumps(competitor_titles, ensure_ascii=False)}\n"
+        f"Competitor Descriptions: {json.dumps(competitor_descriptions, ensure_ascii=False)}\n"
+        f"Google Highlighted Keywords: {json.dumps(highlighted_keywords, ensure_ascii=False)}\n"
+        f"People Also Ask (with answers):\n{paa_with_answers}\n"
         f"Related Searches: {json.dumps(related, ensure_ascii=False)}\n"
         f"Competitors Headers: {json.dumps(headers_info, ensure_ascii=False)}\n"
         f"Target word count: {avg_words}"
     )
+
+    if featured_snippet:
+        ctx.base_context += (
+            f"\n\nFeatured Snippet (Google's preferred answer):\n"
+            f"Type: {featured_snippet.get('type')}\n"
+            f"Title: {featured_snippet.get('title')}\n"
+            f"Text: {featured_snippet.get('description')}\n"
+            f"Source: {featured_snippet.get('domain')}"
+        )
+        
+    if knowledge_graph:
+        facts = knowledge_graph.get('facts', [])[:MAX_KG_FACTS]
+        ctx.base_context += (
+            f"\n\nKnowledge Graph:\n"
+            f"Entity: {knowledge_graph.get('title')}"
+            f" ({knowledge_graph.get('subtitle', '')})\n"
+            f"Description: {knowledge_graph.get('description', '')}\n"
+            f"Facts: {json.dumps(facts, ensure_ascii=False)}"
+        )
+        
+    if ai_overview:
+        ctx.base_context += (
+            f"\n\nGoogle AI Overview:\n"
+            f"{ai_overview.get('text', '')[:MAX_AI_OVERVIEW_CHARS]}"
+        )
+        
+    if answer_box:
+        ctx.base_context += (
+            f"\n\nAnswer Box:\n"
+            f"{answer_box.get('text', '')[:MAX_ANSWER_BOX_CHARS]}"
+        )
 
     ctx.analysis_vars = {
         "keyword": ctx.task.main_keyword,
@@ -173,6 +240,16 @@ def setup_vars(ctx: PipelineContext):
         "competitors_headers": json.dumps(headers_info, ensure_ascii=False),
         "merged_markdown": ctx.task.competitors_text or "",
         "avg_word_count": str(avg_words),
+        "competitor_titles": json.dumps(competitor_titles, ensure_ascii=False),
+        "competitor_descriptions": json.dumps(competitor_descriptions, ensure_ascii=False),
+        "highlighted_keywords": json.dumps(highlighted_keywords, ensure_ascii=False),
+        "paa_with_answers": paa_with_answers,
+        "featured_snippet": json.dumps(featured_snippet, ensure_ascii=False) if featured_snippet else "",
+        "knowledge_graph": json.dumps(knowledge_graph, ensure_ascii=False) if knowledge_graph else "",
+        "ai_overview": ai_overview.get("text", "")[:MAX_AI_OVERVIEW_CHARS] if ai_overview else "",
+        "answer_box": answer_box.get("text", "")[:MAX_ANSWER_BOX_CHARS] if answer_box else "",
+        "serp_features": json.dumps(serp_features),
+        "search_intent_signals": json.dumps(intent_signals),
     }
 
 def setup_template_vars(ctx: PipelineContext):
@@ -229,6 +306,16 @@ def setup_template_vars(ctx: PipelineContext):
         "page_slug": ctx.page_slug,
         "page_title": ctx.page_title,
         "all_site_pages": json.dumps(ctx.all_site_pages, ensure_ascii=False),
+        "competitor_titles": ctx.analysis_vars.get("competitor_titles", ""),
+        "competitor_descriptions": ctx.analysis_vars.get("competitor_descriptions", ""),
+        "highlighted_keywords": ctx.analysis_vars.get("highlighted_keywords", ""),
+        "paa_with_answers": ctx.analysis_vars.get("paa_with_answers", ""),
+        "featured_snippet": ctx.analysis_vars.get("featured_snippet", ""),
+        "knowledge_graph": ctx.analysis_vars.get("knowledge_graph", ""),
+        "ai_overview": ctx.analysis_vars.get("ai_overview", ""),
+        "answer_box": ctx.analysis_vars.get("answer_box", ""),
+        "serp_features": ctx.analysis_vars.get("serp_features", ""),
+        "search_intent_signals": ctx.analysis_vars.get("search_intent_signals", ""),
     }
 
     # Fetch HTML template reference for LLM injection
