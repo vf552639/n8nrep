@@ -68,6 +68,7 @@ def get_task(task_id: str, db: Session = Depends(get_db)):
         "id": str(task.id),
         "main_keyword": task.main_keyword,
         "status": task.status,
+        "total_cost": task.total_cost or 0.0,
         "page_type": task.page_type,
         "outline": task.outline,
         "serp_data": task.serp_data,
@@ -91,6 +92,7 @@ def get_task_steps(task_id: str, db: Session = Depends(get_db)):
     return {
         "task_id": str(task.id),
         "status": task.status,
+        "total_cost": task.total_cost or 0.0,
         "progress": calculate_progress(task.step_results),
         "step_results": task.step_results or {},
         "current_step": next((k for k, v in (task.step_results or {}).items() if isinstance(v, dict) and v.get("status") == "running"), None)

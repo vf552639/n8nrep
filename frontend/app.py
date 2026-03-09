@@ -360,6 +360,10 @@ def render_tasks():
                     current = steps_data.get("current_step", "")
                     steps = steps_data.get("step_results") or {}
                     
+                    total_cost = steps_data.get("total_cost", 0.0)
+                    if total_cost > 0:
+                        st.metric("Общая стоимость генерации", f"${total_cost:.4f}")
+                    
                     if selected_task["status"] == "processing":
                         if steps.get("waiting_for_approval"):
                             st.warning("🛑 Задача приостановлена в режиме тестирования (Режим подтверждения)")
@@ -404,7 +408,19 @@ def render_tasks():
                         
                         with st.expander(f"{icon} {step_label}", expanded=(s_status == "running")):
                             if step.get("result"):
-                                st.text_area("Результат", value=step["result"][:10000], height=200, disabled=True, key=f"res_{step_key}_{selected_task_id}")
+                                result_text = step["result"][:50000]
+                                st.text_area("Результат", value=result_text[:10000], height=200, disabled=True, key=f"res_{step_key}_{selected_task_id}")
+                                
+                                import html as html_lib
+                                escaped = html_lib.escape(result_text).replace("`", "\\`").replace("$", "\\$")
+                                copy_html = f"""
+                                <button onclick="navigator.clipboard.writeText(document.getElementById('copy_{step_key}_{selected_task_id}').value).then(()=>this.innerText='✅ Скопировано!').catch(()=>this.innerText='❌ Ошибка')" 
+                                style="background:#4F46E5;color:white;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px;margin-bottom:10px;">
+                                📋 Копировать результат
+                                </button>
+                                <textarea id="copy_{step_key}_{selected_task_id}" style="position:absolute;left:-9999px;">{escaped}</textarea>
+                                """
+                                st.components.v1.html(copy_html, height=40)
                             if step.get("timestamp"):
                                 st.caption(f"Время: {step['timestamp']}")
                             if step.get("model"):
@@ -687,6 +703,47 @@ div[data-testid="stHorizontalBlock"] {
                     if res:
                         st.success(f"Промпт для {agents_map[agent]} обновлен! Версия: {res.get('version')}")
                         st.rerun()
+                
+            st.markdown("---")
+            st.subheader("🧪 Тестирование промпта (Dry Run)")
+            st.caption("Позволяет проверить генерацию с текущими (несохранёнными) системным и пользовательским промптами. Вызовы тарифицируются OpenRouter.")
+            
+            test_data = st.text_area("Тестовые данные (Фейк-контекст, подставляется вместо LSI/исходников)", value="Привет! Напиши тестовый абзац.", height=150, key=f"test_data_{agent}")
+            
+            if st.button("▶️ Запустить тест", key=f"test_btn_{agent}", type="secondary"):
+                test_payload = {
+                    "system_prompt": p_text,
+                    "user_prompt": u_text,
+                    "test_data": test_data,
+                    "model": model,
+                    "temperature": temp if use_temp else 0.7,
+                    "frequency_penalty": freq_pen if use_freq else 0.0,
+                    "presence_penalty": pres_pen if use_pres else 0.0,
+                    "top_p": top_p if use_topp else 1.0
+                }
+                
+                with st.spinner("Генерация ответа..."):
+                    res = post_data("prompts/test", test_payload)
+                    if res and "result" in res:
+                        st.markdown("### Результат:")
+                        result_text = res["result"]
+                        
+                        cost = res.get("cost", 0.0)
+                        if cost > 0:
+                            st.caption(f"💰 Стоимость тестового запуска: **${cost:.6f}**")
+                            
+                        st.text_area("Ответ LLM", value=result_text, height=300, disabled=True, key=f"test_res_{agent}")
+                        
+                        import html as html_lib
+                        escaped = html_lib.escape(result_text).replace("`", "\\`").replace("$", "\\$")
+                        copy_html = f"""
+                        <button onclick="navigator.clipboard.writeText(document.getElementById('copy_test_{agent}').value).then(()=>this.innerText='✅ Скопировано!').catch(()=>this.innerText='❌ Ошибка')" 
+                        style="background:#4CAF50;color:white;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px;margin-top:-10px;margin-bottom:10px;">
+                        📋 Копировать ответ
+                        </button>
+                        <textarea id="copy_test_{agent}" style="position:absolute;left:-9999px;">{escaped}</textarea>
+                        """
+                        st.components.v1.html(copy_html, height=40)
 
 # ----- TAB: LOGS -----
 def render_logs():
