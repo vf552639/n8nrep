@@ -1,7 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import tasks, articles, sites, authors, prompts, dashboard, settings_api, blueprints, projects
 from app.database import engine, Base
+from app.config import settings
+from app.api.deps import verify_api_key
 
 # Create tables is intentionally removed here.
 # The Supabase tables are managed via manual SQL and Alembic migrations.
@@ -10,13 +12,16 @@ from app.database import engine, Base
 app = FastAPI(
     title="SEO Content Generator API",
     description="Backend API for automatically generating SEO-optimized articles via LLM agents",
-    version="1.0.0"
+    version="1.0.0",
+    dependencies=[Depends(verify_api_key)]
 )
+
+origins = [origin.strip() for origin in settings.CORS_ORIGINS.split(",")] if settings.CORS_ORIGINS else ["*"]
 
 # Allow CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust for production (e.g. Vercel domain)
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

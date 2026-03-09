@@ -273,7 +273,6 @@ def run_pipeline(db: Session, task_id: str):
                 outline_data["chunk_analysis"] = chunk_analysis
                 outline_data["competitor_structure"] = competitor_structure
                 outline_data["final_structure"] = outline_json_str
-                outline_data["fiinal_structure"] = outline_json_str
                 task.outline = outline_data
                 db.commit()
         else:

@@ -27,7 +27,7 @@ def process_generation_task(self, task_id: str):
         # For now, pipeline handles retry inner loops and status update.
         # Just close session.
         pass
-        
+    finally:
         db.close()
 
 @celery_app.task(bind=True, max_retries=1, default_retry_delay=60)

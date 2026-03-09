@@ -7,6 +7,10 @@ class Settings(BaseSettings):
     SUPABASE_URL: str
     SUPABASE_KEY: str
 
+    # Security
+    API_KEY: str = ""
+    CORS_ORIGINS: str = "*"
+
     # Redis (for Celery)
     REDIS_URL: str = "redis://localhost:6379/0"
 

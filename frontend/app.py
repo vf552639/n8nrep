@@ -4,6 +4,10 @@ import pandas as pd
 import os
 
 API_URL = os.environ.get("API_URL", "http://web:8000/api")
+API_KEY = os.environ.get("API_KEY", "")
+
+def get_headers():
+    return {"X-API-Key": API_KEY} if API_KEY else {}
 
 st.set_page_config(page_title="SEO Content Generator", layout="wide")
 
@@ -126,7 +130,7 @@ st.markdown("""
 def fetch_data(endpoint: str):
     with st.spinner("⏳ Загрузка..."):
         try:
-            r = requests.get(f"{API_URL}/{endpoint}")
+            r = requests.get(f"{API_URL}/{endpoint}", headers=get_headers())
             if r.status_code == 200:
                 return r.json()
             st.error(f"Error fetching {endpoint}: {r.status_code} {r.text}")
@@ -137,7 +141,7 @@ def fetch_data(endpoint: str):
 def post_data(endpoint: str, data: dict):
     with st.spinner("⚙️ Сохранение..."):
         try:
-            r = requests.post(f"{API_URL}/{endpoint}", json=data)
+            r = requests.post(f"{API_URL}/{endpoint}", json=data, headers=get_headers())
             if r.status_code in (200, 201):
                 return r.json()
             st.error(f"Error posting to {endpoint}: {r.status_code} {r.text}")
@@ -148,7 +152,7 @@ def post_data(endpoint: str, data: dict):
 def delete_data(endpoint: str):
     with st.spinner("🗑️ Удаление..."):
         try:
-            r = requests.delete(f"{API_URL}/{endpoint}")
+            r = requests.delete(f"{API_URL}/{endpoint}", headers=get_headers())
             if r.status_code == 200:
                 return True
             st.error(f"Error deleting {endpoint}: {r.status_code} {r.text}")
@@ -264,7 +268,7 @@ def render_tasks():
             if st.button("Импортировать"):
                 try:
                     files = {"file": (uploaded_file.name, uploaded_file.getvalue(), "text/csv")}
-                    r = requests.post(f"{API_URL}/tasks/bulk", files=files)
+                    r = requests.post(f"{API_URL}/tasks/bulk", files=files, headers=get_headers())
                     if r.status_code == 200:
                         res = r.json()
                         st.success(f"Создано задач: {res.get('tasks_created')}")
@@ -700,7 +704,7 @@ def render_settings():
                 
                 if payload:
                     try:
-                        r = requests.put(f"{API_URL}/settings/", json=payload)
+                        r = requests.put(f"{API_URL}/settings/", json=payload, headers=get_headers())
                         if r.status_code == 200:
                             st.success("✅ Настройки успешно сохранены в .env!")
                             st.warning("Требуется вручную перезапустить backend/celery контейнеры для применения новых ключей.")
