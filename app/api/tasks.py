@@ -52,6 +52,7 @@ def get_tasks(skip: int = 0, limit: int = 50, status: Optional[str] = None, db: 
         "language": t.language,
         "page_type": t.page_type,
         "status": t.status,
+        "total_cost": t.total_cost,
         "target_site_id": str(t.target_site_id),
         "created_at": t.created_at.isoformat(),
         "error_log": t.error_log
@@ -78,7 +79,7 @@ def get_task(task_id: str, db: Session = Depends(get_db)):
 def calculate_progress(step_results: dict) -> int:
     """Returns progress percentage 0-100 based on 14 steps"""
     total_steps = 14
-    completed = sum(1 for v in (step_results or {}).values() if v.get("status") == "completed")
+    completed = sum(1 for v in (step_results or {}).values() if isinstance(v, dict) and v.get("status") == "completed")
     return int((completed / total_steps) * 100)
 
 @router.get("/{task_id}/steps")
@@ -92,7 +93,7 @@ def get_task_steps(task_id: str, db: Session = Depends(get_db)):
         "status": task.status,
         "progress": calculate_progress(task.step_results),
         "step_results": task.step_results or {},
-        "current_step": next((k for k, v in (task.step_results or {}).items() if v.get("status") == "running"), None)
+        "current_step": next((k for k, v in (task.step_results or {}).items() if isinstance(v, dict) and v.get("status") == "running"), None)
     }
 
 @router.post("/")

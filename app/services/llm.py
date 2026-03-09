@@ -1,6 +1,6 @@
 import os
 import time
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from openai import OpenAI
 from app.config import settings
 
@@ -26,9 +26,9 @@ def generate_text(
     top_p: float = 1.0,
     max_retries: int = 3,
     response_format: Optional[Dict[str, str]] = None
-) -> str:
+) -> Tuple[str, float]:
     """
-    Generic LLM call with retry policy
+    Generic LLM call with retry policy. Returns (generated_text, estimated_cost).
     """
     client = get_openai_client()
     
@@ -57,7 +57,22 @@ def generate_text(
                  kwargs["response_format"] = response_format
                  
             response = client.chat.completions.create(**kwargs)
-            return response.choices[0].message.content
+            
+            # Simple fallback cost estimation if headers/model logic isn't perfectly transparent
+            cost = 0.0
+            if response.usage:
+                prompt_tokens = response.usage.prompt_tokens
+                completion_tokens = response.usage.completion_tokens
+                # Very rough generic estimation: ~ $0.15/1M input, ~ $0.60/1M output (like gpt-4o-mini rates)
+                if "gpt-4o-mini" in model:
+                    cost = (prompt_tokens * 0.15 / 1000000) + (completion_tokens * 0.60 / 1000000)
+                elif "gemini-3" in model or "gemini-2.5" in model:
+                    cost = (prompt_tokens * 0.075 / 1000000) + (completion_tokens * 0.30 / 1000000)
+                else: 
+                    # Default tiny rate to still show it's tracking
+                    cost = (prompt_tokens * 0.1 / 1000000) + (completion_tokens * 0.5 / 1000000)
+                    
+            return response.choices[0].message.content, cost
             
         except Exception as e:
             last_error = str(e)

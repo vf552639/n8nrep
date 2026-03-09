@@ -66,3 +66,25 @@ def generate_full_page(db: Session, site_id: str, html_content: str, title: str,
     db.commit()
     
     return full_html
+
+def get_template_for_reference(db: Session, site_id: str) -> tuple:
+    """
+    Returns HTML template of the site to be used as a reference in LLM prompts.
+    Does NOT increment usage_count.
+    Picks the active template with minimum usage_count deterministically.
+    Returns:
+        tuple: (html_template: str | None, template_name: str | None)
+    """
+    templates = db.query(SiteTemplate).filter(
+        SiteTemplate.site_id == site_id,
+        SiteTemplate.is_active == True
+    ).all()
+    
+    if not templates:
+        return (None, None)
+        
+    min_usage = min(t.usage_count for t in templates)
+    candidate_templates = [t for t in templates if t.usage_count == min_usage]
+    
+    selected = candidate_templates[0]
+    return (selected.html_template, selected.template_name)

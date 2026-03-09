@@ -14,7 +14,7 @@ from app.models.project import SiteProject
 from app.services.serp import fetch_serp_data
 from app.services.scraper import scrape_urls
 from app.services.llm import generate_text
-from app.services.template_engine import generate_full_page
+from app.services.template_engine import generate_full_page, get_template_for_reference
 from app.services.notifier import notify_task_success, notify_task_failed
 from app.config import settings
 
@@ -63,7 +63,7 @@ def get_prompt_obj(db: Session, agent_name: str) -> Prompt:
         raise Exception(f"No active prompt found for agent: {agent_name}")
     return prompt_obj
 
-def save_step_result(db: Session, task: Task, step_name: str, result: str, model: str = None, status: str = "completed"):
+def save_step_result(db: Session, task: Task, step_name: str, result: str, model: str = None, status: str = "completed", cost: float = 0.0):
     if task.step_results is None:
         task.step_results = {}
     
@@ -74,6 +74,8 @@ def save_step_result(db: Session, task: Task, step_name: str, result: str, model
     }
     if model:
         step_data["model"] = model
+    if cost > 0:
+        step_data["cost"] = cost
     
     updated = dict(task.step_results)
     updated[step_name] = step_data
@@ -103,13 +105,14 @@ def apply_template_vars(text: str, variables: dict) -> str:
         return str(variables.get(key, match.group(0)))  # keep original if not found
     return re.sub(r'\{\{(.+?)\}\}', replacer, text)
 
-def call_agent(db: Session, agent_name: str, context: str, response_format=None, variables: dict = None):
+from typing import Tuple
+def call_agent(db: Session, agent_name: str, context: str, response_format=None, variables: dict = None) -> Tuple[str, float]:
     """Helper: load prompt config for agent_name, apply template vars, merge context, call LLM."""
     prompt = get_prompt_obj(db, agent_name)
     
     if getattr(prompt, "skip_in_pipeline", False):
         print(f"Agent {agent_name} skipped (toggle off)")
-        return ""
+        return "", 0.0
     
     system_text = prompt.system_prompt
     user_template = prompt.user_prompt or ""
@@ -228,6 +231,11 @@ def setup_template_vars(ctx: PipelineContext):
         "all_site_pages": json.dumps(ctx.all_site_pages, ensure_ascii=False),
     }
 
+    # Fetch HTML template reference for LLM injection
+    site_template_html, site_template_name = get_template_for_reference(ctx.db, str(ctx.task.target_site_id))
+    ctx.template_vars["site_template_html"] = site_template_html or ""
+    ctx.template_vars["site_template_name"] = site_template_name or ""
+
 def run_phase(db: Session, task: Task, step_key: str, phase_func, *args, **kwargs):
     """Wrapper that skips phase_func if already completed."""
     if task.step_results and step_key in task.step_results:
@@ -275,10 +283,11 @@ def phase_ai_structure(ctx: PipelineContext):
     setup_vars(ctx)
     add_log(ctx.db, ctx.task, "Starting AI Structure Analysis...", step=STEP_AI_ANALYSIS)
     save_step_result(ctx.db, ctx.task, STEP_AI_ANALYSIS, result=None, status="running")
-    ai_structure = call_agent(
+    ai_structure, step_cost = call_agent(
         ctx.db, "ai_structure_analysis", ctx.base_context, 
         response_format={"type": "json_object"}, variables=ctx.analysis_vars
     )
+    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
     ctx.analysis_vars["result_ai_structure_analysis"] = ai_structure
     ctx.outline_data["ai_structure"] = ai_structure
@@ -296,7 +305,7 @@ def phase_ai_structure(ctx: PipelineContext):
     ctx.task.outline = ctx.outline_data
     ctx.db.commit()
     add_log(ctx.db, ctx.task, f"AI Structure Analysis completed ({len(ai_structure)} chars)", step=STEP_AI_ANALYSIS)
-    save_step_result(ctx.db, ctx.task, STEP_AI_ANALYSIS, result=ai_structure, status="completed")
+    save_step_result(ctx.db, ctx.task, STEP_AI_ANALYSIS, result=ai_structure, status="completed", cost=step_cost)
 
 def phase_chunk_analysis(ctx: PipelineContext):
     setup_vars(ctx)
@@ -304,14 +313,15 @@ def phase_chunk_analysis(ctx: PipelineContext):
     save_step_result(ctx.db, ctx.task, STEP_CHUNK_ANALYSIS, result=None, status="running")
     ai_structure = ctx.outline_data.get("ai_structure", "")
     chunk_context = f"{ctx.base_context}\n\nAI Structure Analysis:\n{ai_structure}"
-    chunk_analysis = call_agent(ctx.db, "chunk_cluster_analysis", chunk_context, variables=ctx.analysis_vars)
+    chunk_analysis, step_cost = call_agent(ctx.db, "chunk_cluster_analysis", chunk_context, variables=ctx.analysis_vars)
+    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
     ctx.analysis_vars["result_chunk_cluster_analysis"] = chunk_analysis
     ctx.outline_data["chunk_analysis"] = chunk_analysis
     ctx.task.outline = ctx.outline_data
     ctx.db.commit()
     add_log(ctx.db, ctx.task, f"Chunk Cluster Analysis completed ({len(chunk_analysis)} chars)", step=STEP_CHUNK_ANALYSIS)
-    save_step_result(ctx.db, ctx.task, STEP_CHUNK_ANALYSIS, result=chunk_analysis, status="completed")
+    save_step_result(ctx.db, ctx.task, STEP_CHUNK_ANALYSIS, result=chunk_analysis, status="completed", cost=step_cost)
 
 def phase_competitor_structure(ctx: PipelineContext):
     setup_vars(ctx)
@@ -323,14 +333,15 @@ def phase_competitor_structure(ctx: PipelineContext):
         f"Competitors Text:\n{ctx.task.competitors_text[:20000]}\n\n"
         f"Chunk Analysis:\n{chunk_analysis}"
     )
-    competitor_structure = call_agent(ctx.db, "competitor_structure_analysis", competitor_context, variables=ctx.analysis_vars)
+    competitor_structure, step_cost = call_agent(ctx.db, "competitor_structure_analysis", competitor_context, variables=ctx.analysis_vars)
+    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
     ctx.analysis_vars["result_competitor_structure_analysis"] = competitor_structure
     ctx.outline_data["competitor_structure"] = competitor_structure
     ctx.task.outline = ctx.outline_data
     ctx.db.commit()
     add_log(ctx.db, ctx.task, f"Competitor Structure Analysis completed ({len(competitor_structure)} chars)", step=STEP_COMP_STRUCTURE)
-    save_step_result(ctx.db, ctx.task, STEP_COMP_STRUCTURE, result=competitor_structure, status="completed")
+    save_step_result(ctx.db, ctx.task, STEP_COMP_STRUCTURE, result=competitor_structure, status="completed", cost=step_cost)
 
 def phase_final_structure(ctx: PipelineContext):
     setup_vars(ctx)
@@ -343,17 +354,18 @@ def phase_final_structure(ctx: PipelineContext):
         f"Chunk Analysis:\n{ctx.outline_data.get('chunk_analysis', '')}\n\n"
         f"Competitor Structure Analysis:\n{ctx.outline_data.get('competitor_structure', '')}"
     )
-    outline_json_str = call_agent(
+    outline_json_str, step_cost = call_agent(
         ctx.db, "final_structure_analysis", final_analysis_context,
         response_format={"type": "json_object"}, variables=ctx.analysis_vars
     )
+    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
     ctx.outline_data["final_outline"] = clean_and_parse_json(outline_json_str)
     ctx.outline_data["final_structure"] = outline_json_str
     ctx.task.outline = ctx.outline_data
     ctx.db.commit()
     add_log(ctx.db, ctx.task, f"Final Structure Analysis completed", step=STEP_FINAL_ANALYSIS)
-    save_step_result(ctx.db, ctx.task, STEP_FINAL_ANALYSIS, result=outline_json_str, status="completed")
+    save_step_result(ctx.db, ctx.task, STEP_FINAL_ANALYSIS, result=outline_json_str, status="completed", cost=step_cost)
 
 def phase_primary_gen(ctx: PipelineContext):
     setup_template_vars(ctx)
@@ -366,10 +378,11 @@ def phase_primary_gen(ctx: PipelineContext):
     )
     add_log(ctx.db, ctx.task, "Starting Primary Generation...", step=STEP_PRIMARY_GEN)
     save_step_result(ctx.db, ctx.task, STEP_PRIMARY_GEN, result=None, status="running")
-    draft_html = call_agent(ctx.db, "primary_generation", gen_context, variables=ctx.template_vars)
+    draft_html, step_cost = call_agent(ctx.db, "primary_generation", gen_context, variables=ctx.template_vars)
+    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
     add_log(ctx.db, ctx.task, f"Primary Generation completed ({len(draft_html)} chars)", step=STEP_PRIMARY_GEN)
-    save_step_result(ctx.db, ctx.task, STEP_PRIMARY_GEN, result=draft_html, status="completed")
+    save_step_result(ctx.db, ctx.task, STEP_PRIMARY_GEN, result=draft_html, status="completed", cost=step_cost)
 
 def phase_competitor_comparison(ctx: PipelineContext):
     setup_template_vars(ctx)
@@ -380,10 +393,11 @@ def phase_competitor_comparison(ctx: PipelineContext):
     )
     add_log(ctx.db, ctx.task, "Starting Competitor Comparison...", step=STEP_COMP_COMPARISON)
     save_step_result(ctx.db, ctx.task, STEP_COMP_COMPARISON, result=None, status="running")
-    comparison_review = call_agent(ctx.db, "competitor_comparison", comparison_context, variables=ctx.template_vars)
+    comparison_review, step_cost = call_agent(ctx.db, "competitor_comparison", comparison_context, variables=ctx.template_vars)
+    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
     add_log(ctx.db, ctx.task, f"Competitor Comparison completed", step=STEP_COMP_COMPARISON)
-    save_step_result(ctx.db, ctx.task, STEP_COMP_COMPARISON, result=comparison_review, status="completed")
+    save_step_result(ctx.db, ctx.task, STEP_COMP_COMPARISON, result=comparison_review, status="completed", cost=step_cost)
 
 def phase_reader_opinion(ctx: PipelineContext):
     setup_template_vars(ctx)
@@ -391,10 +405,11 @@ def phase_reader_opinion(ctx: PipelineContext):
     reader_context = f"Article:\n{draft_html}"
     add_log(ctx.db, ctx.task, "Starting Reader Opinion analysis...", step=STEP_READER_OPINION)
     save_step_result(ctx.db, ctx.task, STEP_READER_OPINION, result=None, status="running")
-    reader_feedback = call_agent(ctx.db, "reader_opinion", reader_context, variables=ctx.template_vars)
+    reader_feedback, step_cost = call_agent(ctx.db, "reader_opinion", reader_context, variables=ctx.template_vars)
+    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
     add_log(ctx.db, ctx.task, f"Reader Opinion completed", step=STEP_READER_OPINION)
-    save_step_result(ctx.db, ctx.task, STEP_READER_OPINION, result=reader_feedback, status="completed")
+    save_step_result(ctx.db, ctx.task, STEP_READER_OPINION, result=reader_feedback, status="completed", cost=step_cost)
 
 def phase_interlink(ctx: PipelineContext):
     setup_template_vars(ctx)
@@ -407,10 +422,11 @@ def phase_interlink(ctx: PipelineContext):
     )
     add_log(ctx.db, ctx.task, "Starting Interlinking & Citations...", step=STEP_INTERLINK)
     save_step_result(ctx.db, ctx.task, STEP_INTERLINK, result=None, status="running")
-    interlink_suggestions = call_agent(ctx.db, "interlinking_citations", interlink_context, variables=ctx.template_vars)
+    interlink_suggestions, step_cost = call_agent(ctx.db, "interlinking_citations", interlink_context, variables=ctx.template_vars)
+    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
     add_log(ctx.db, ctx.task, f"Interlinking & Citations completed", step=STEP_INTERLINK)
-    save_step_result(ctx.db, ctx.task, STEP_INTERLINK, result=interlink_suggestions, status="completed")
+    save_step_result(ctx.db, ctx.task, STEP_INTERLINK, result=interlink_suggestions, status="completed", cost=step_cost)
 
 def phase_improver(ctx: PipelineContext):
     setup_template_vars(ctx)
@@ -427,10 +443,11 @@ def phase_improver(ctx: PipelineContext):
     )
     add_log(ctx.db, ctx.task, "Starting Improver (draft enhancement)...", step=STEP_IMPROVER)
     save_step_result(ctx.db, ctx.task, STEP_IMPROVER, result=None, status="running")
-    improved_html = call_agent(ctx.db, "improver", improver_context, variables=ctx.template_vars)
+    improved_html, step_cost = call_agent(ctx.db, "improver", improver_context, variables=ctx.template_vars)
+    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
     add_log(ctx.db, ctx.task, f"Improver completed ({len(improved_html)} chars)", step=STEP_IMPROVER)
-    save_step_result(ctx.db, ctx.task, STEP_IMPROVER, result=improved_html, status="completed")
+    save_step_result(ctx.db, ctx.task, STEP_IMPROVER, result=improved_html, status="completed", cost=step_cost)
 
 def phase_final_editing(ctx: PipelineContext):
     setup_template_vars(ctx)
@@ -447,25 +464,39 @@ def phase_final_editing(ctx: PipelineContext):
     )
     add_log(ctx.db, ctx.task, "Starting Final Editing...", step=STEP_FINAL_EDIT)
     save_step_result(ctx.db, ctx.task, STEP_FINAL_EDIT, result=None, status="running")
-    final_html = call_agent(ctx.db, "final_editing", editing_context, variables=ctx.template_vars)
+    final_html, step_cost = call_agent(ctx.db, "final_editing", editing_context, variables=ctx.template_vars)
+    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
     add_log(ctx.db, ctx.task, f"Final Editing completed ({len(final_html)} chars)", step=STEP_FINAL_EDIT)
-    save_step_result(ctx.db, ctx.task, STEP_FINAL_EDIT, result=final_html, status="completed")
+    save_step_result(ctx.db, ctx.task, STEP_FINAL_EDIT, result=final_html, status="completed", cost=step_cost)
 
 def phase_html_structure(ctx: PipelineContext):
     setup_template_vars(ctx)
     final_html = ctx.task.step_results.get(STEP_FINAL_EDIT, {}).get("result", "")
+    
+    template_ref = ""
+    if ctx.template_vars.get("site_template_html"):
+        template_ref = (
+            f"\n\n[SITE TEMPLATE REFERENCE]\n"
+            f"Template Name: {ctx.template_vars.get('site_template_name', 'N/A')}\n"
+            f"The generated content will be inserted into this template via {{{{content}}}} placeholder.\n"
+            f"Adapt your HTML structure to be compatible with this template:\n"
+            f"{ctx.template_vars['site_template_html']}"
+        )
+        
     html_struct_context = (
         f"Article HTML:\n{final_html}\n\n"
         f"Keyword: {ctx.task.main_keyword}\n"
         f"Language: {ctx.task.language}"
+        f"{template_ref}"
     )
     add_log(ctx.db, ctx.task, "Starting HTML Structure formatting...", step=STEP_HTML_STRUCT)
     save_step_result(ctx.db, ctx.task, STEP_HTML_STRUCT, result=None, status="running")
-    structured_html = call_agent(ctx.db, "html_structure", html_struct_context, variables=ctx.template_vars)
+    structured_html, step_cost = call_agent(ctx.db, "html_structure", html_struct_context, variables=ctx.template_vars)
+    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
     add_log(ctx.db, ctx.task, f"HTML Structure completed ({len(structured_html)} chars)", step=STEP_HTML_STRUCT)
-    save_step_result(ctx.db, ctx.task, STEP_HTML_STRUCT, result=structured_html, status="completed")
+    save_step_result(ctx.db, ctx.task, STEP_HTML_STRUCT, result=structured_html, status="completed", cost=step_cost)
 
 def phase_meta_generation(ctx: PipelineContext):
     setup_template_vars(ctx)
@@ -473,12 +504,13 @@ def phase_meta_generation(ctx: PipelineContext):
     meta_context = f"Article HTML:\n{structured_html}"
     add_log(ctx.db, ctx.task, "Generating Meta Tags (JSON)...", step=STEP_META_GEN)
     save_step_result(ctx.db, ctx.task, STEP_META_GEN, result=None, status="running")
-    meta_json_str = call_agent(
+    meta_json_str, step_cost = call_agent(
         ctx.db, "meta_generation", meta_context,
         response_format={"type": "json_object"}, variables=ctx.template_vars
     )
+    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     add_log(ctx.db, ctx.task, f"Meta Tags Generation completed", step=STEP_META_GEN)
-    save_step_result(ctx.db, ctx.task, STEP_META_GEN, result=meta_json_str, status="completed")
+    save_step_result(ctx.db, ctx.task, STEP_META_GEN, result=meta_json_str, status="completed", cost=step_cost)
 
 def run_pipeline(db: Session, task_id: str):
     ctx = PipelineContext(db, task_id)

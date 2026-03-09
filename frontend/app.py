@@ -332,12 +332,13 @@ def render_tasks():
         
         df = pd.DataFrame(tasks)
         st.dataframe(
-            df[["id", "main_keyword", "status_display", "page_type", "country", "language", "created_at"]],
+            df[["id", "main_keyword", "status_display", "page_type", "total_cost", "country", "language", "created_at"]],
             column_config={
                 "id": st.column_config.TextColumn("ID", width="small"),
                 "main_keyword": st.column_config.TextColumn("Keyword", width="medium"),
                 "status_display": st.column_config.TextColumn("Статус", width="small"),
                 "page_type": st.column_config.TextColumn("Тип", width="small"),
+                "total_cost": st.column_config.NumberColumn("Стоимость", width="small", format="$%.4f"),
                 "country": st.column_config.TextColumn("Страна", width="small"),
                 "language": st.column_config.TextColumn("Язык", width="small"),
                 "created_at": st.column_config.TextColumn("Создано", width="medium"),
@@ -408,6 +409,8 @@ def render_tasks():
                                 st.caption(f"Время: {step['timestamp']}")
                             if step.get("model"):
                                 st.caption(f"Модель: {step['model']}")
+                            if step.get("cost"):
+                                st.caption(f"Стоимость: ${step['cost']:.4f}")
             
             # === Actions ===
             st.write("---")
@@ -589,6 +592,8 @@ div[data-testid="stHorizontalBlock"] {
                     ("rhythms_style", "Ритм и стиль"),
                     ("exclude_words", "Слова-исключения (глобальные)"),
                     ("site_name", "Название целевого сайта"),
+                    ("site_template_html", "HTML-шаблон целевого сайта (из site_templates)"),
+                    ("site_template_name", "Название шаблона сайта"),
                 ]
                 
                 col1, col2 = st.columns([1, 2])

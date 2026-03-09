@@ -22,11 +22,14 @@ def process_generation_task(self, task_id: str):
             db.commit()
             
     except Exception as exc:
-        # If we failed due to Rate limit or timeout in pipeline, the pipeline will set status to failed.
-        # But if we want celery to retry automatically on certain network errors, we can catch them here
-        # For now, pipeline handles retry inner loops and status update.
-        # Just close session.
-        pass
+        import traceback
+        from app.models.task import Task
+        
+        task = db.query(Task).filter(Task.id == task_id).first()
+        if task and task.status != "failed":
+            task.status = "failed"
+            task.error_log = f"Worker crashed: {exc}\n{traceback.format_exc()}"
+            db.commit()
     finally:
         db.close()
 
