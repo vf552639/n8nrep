@@ -60,8 +60,11 @@ def process_site_project(self, project_id: str):
             project.current_page_index = i
             db.commit()
             
-            # Construct keyword
-            keyword = page.keyword_template.replace("{seed}", project.seed_keyword)
+            # Generate Keyword based on brand fallback vs standard template
+            template = page.keyword_template
+            if getattr(project, 'seed_is_brand', False) and getattr(page, 'keyword_template_brand', None):
+                template = page.keyword_template_brand
+            keyword = template.replace("{seed}", project.seed_keyword)
             
             # Create Task
             new_task = Task(

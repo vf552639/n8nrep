@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, Text, ForeignKey, DateTime, BigInteger
+from sqlalchemy import Column, String, Integer, Text, ForeignKey, DateTime, BigInteger, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -15,6 +15,7 @@ class SiteProject(Base):
     seed_keyword = Column(String(500), nullable=False)
     country = Column(String(10), nullable=False)
     language = Column(String(10), nullable=False)
+    seed_is_brand = Column(Boolean, default=False)
     author_id = Column(BigInteger, ForeignKey('authors.id'), nullable=True)
     status = Column(String(50), default='pending')
     current_page_index = Column(Integer, default=0)

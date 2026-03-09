@@ -20,6 +20,7 @@ class BlueprintPageCreate(BaseModel):
     page_title: str
     page_type: str = 'article'
     keyword_template: str
+    keyword_template_brand: Optional[str] = None
     filename: str
     sort_order: int = 0
     nav_label: Optional[str] = None
@@ -68,6 +69,7 @@ def get_blueprint_pages(id: str, db: Session = Depends(get_db)):
         "page_title": p.page_title,
         "page_type": p.page_type,
         "keyword_template": p.keyword_template,
+        "keyword_template_brand": getattr(p, 'keyword_template_brand', None),
         "filename": p.filename,
         "sort_order": p.sort_order,
         "nav_label": p.nav_label,

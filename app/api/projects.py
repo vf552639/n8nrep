@@ -24,6 +24,7 @@ class SiteProjectCreate(BaseModel):
     name: str
     blueprint_id: str
     seed_keyword: str
+    seed_is_brand: bool = False
     target_site: str # Domain or name
     country: str
     language: str
@@ -35,6 +36,7 @@ class SiteProjectResponse(BaseModel):
     blueprint_id: str
     site_id: str
     seed_keyword: str
+    seed_is_brand: bool
     status: str
     current_page_index: int
     build_zip_url: Optional[str]
@@ -52,6 +54,7 @@ def get_projects(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
         "blueprint_id": str(p.blueprint_id),
         "site_id": str(p.site_id),
         "seed_keyword": p.seed_keyword,
+        "seed_is_brand": getattr(p, 'seed_is_brand', False),
         "status": p.status,
         "current_page_index": p.current_page_index,
         "build_zip_url": p.build_zip_url,

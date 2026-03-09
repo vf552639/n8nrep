@@ -27,6 +27,7 @@ class BlueprintPage(Base):
     page_title = Column(String(300), nullable=False)
     page_type = Column(String(50), nullable=False, default='article')
     keyword_template = Column(String(500), nullable=False)
+    keyword_template_brand = Column(String(500), nullable=True)
     filename = Column(String(200), nullable=False)
     sort_order = Column(Integer, nullable=False, default=0)
     nav_label = Column(String(100), nullable=True)

@@ -876,7 +876,7 @@ def render_blueprints():
         if pages:
             df_p = pd.DataFrame(pages)
             df_p = df_p.sort_values(by="sort_order")
-            st.dataframe(df_p[["page_slug", "page_title", "page_type", "keyword_template", "filename", "sort_order", "use_serp"]], use_container_width=True)
+            st.dataframe(df_p[["page_slug", "page_title", "page_type", "keyword_template", "keyword_template_brand", "filename", "sort_order", "use_serp"]], use_container_width=True)
             
             st.markdown("**Удалить страницу**")
             del_page_id = st.selectbox("ID страницы для удаления", options=[""] + [p["id"] for p in pages])
@@ -891,10 +891,11 @@ def render_blueprints():
                 p_title = col2.text_input("Название (e.g. Home Page)")
                 p_type = col1.selectbox("Тип страницы", ["homepage", "category", "article", "info", "legal"])
                 p_kw = col2.text_input("Шаблон ключа (e.g. {seed} online casino)")
-                p_file = col1.text_input("Имя файла (e.g. index.html)")
-                p_sort = col2.number_input("Порядок сортировки (sort_order)", value=len(pages)+1, step=1)
+                p_kw_brand = col1.text_input("Шаблон ключа (Бренд-seed)", help="Используется когда seed — это полное название бренда (напр. lemon kasyno). пустой = основной шаблон")
+                p_file = col2.text_input("Имя файла (e.g. index.html)")
+                p_sort = col1.number_input("Порядок сортировки (sort_order)", value=len(pages)+1, step=1)
                 
-                p_nav_label = col1.text_input("Название в меню")
+                p_nav_label = col2.text_input("Название в меню")
                 p_nav = col2.checkbox("Показывать в меню", value=True)
                 p_footer = col1.checkbox("Показывать в футере", value=True)
                 p_serp = col2.checkbox("Использовать SERP (use_serp)", value=True, help="Отключите для Privacy, Terms и т.д.")
@@ -906,6 +907,7 @@ def render_blueprints():
                             "page_title": p_title,
                             "page_type": p_type,
                             "keyword_template": p_kw,
+                            "keyword_template_brand": p_kw_brand if p_kw_brand else None,
                             "filename": p_file,
                             "sort_order": p_sort,
                             "nav_label": p_nav_label,
@@ -938,8 +940,26 @@ def render_projects():
             pr_name = st.text_input("Название проекта (e.g. CasinoX DE)")
             bp_opts = {b["name"]: b["id"] for b in blueprints}
             pr_bp = st.selectbox("Блупринт", options=list(bp_opts.keys())) if bp_opts else None
-            pr_seed = st.text_input("Seed Keyword (e.g. casinox)")
             pr_site = st.text_input("Сайт (домен)")
+            
+            col_s1, col_s2 = st.columns(2)
+            pr_seed = col_s1.text_input("Seed Keyword (e.g. casinox)")
+            pr_seed_is_brand = col_s2.checkbox("Брендовый Seed (seed_is_brand)", help="Включите, если seed keyword уже содержит тип заведения (напр. 'lemon kasyno' вместо просто 'lemon').")
+            
+            # Preview Seed keywords logic
+            if pr_bp and pr_seed:
+                bp_id_selected = bp_opts[pr_bp]
+                pages_data = fetch_data(f"blueprints/{bp_id_selected}/pages") or []
+                if pages_data:
+                    preview_data = []
+                    for page in pages_data:
+                        template = page.get("keyword_template", "")
+                        if pr_seed_is_brand and page.get("keyword_template_brand"):
+                            template = page["keyword_template_brand"]
+                        final_kw = template.replace("{seed}", pr_seed)
+                        preview_data.append({"Страница": page["page_slug"], "Итоговый ключ": final_kw})
+                    st.markdown("**Превью генерации ключей:**")
+                    st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
             
             countries = list(set([a.get("country") for a in authors if a.get("country")]))
             languages = list(set([a.get("language") for a in authors if a.get("language")]))
@@ -964,6 +984,7 @@ def render_projects():
                         "name": pr_name,
                         "blueprint_id": bp_opts[pr_bp],
                         "seed_keyword": pr_seed,
+                        "seed_is_brand": pr_seed_is_brand,
                         "target_site": pr_site,
                         "country": pr_country,
                         "language": pr_lang,
