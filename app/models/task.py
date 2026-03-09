@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, Text, Boolean, ForeignKey, DateTime, BigInteger
+from sqlalchemy import Column, String, Integer, Text, Boolean, ForeignKey, DateTime, BigInteger, Float
 from sqlalchemy.dialects.postgresql import UUID, JSONB, ENUM
 from app.database import Base
 
@@ -17,6 +17,7 @@ class Task(Base):
     target_site_id = Column(UUID(as_uuid=True), ForeignKey('sites.id'), nullable=False, index=True)
     author_id = Column(BigInteger, ForeignKey('authors.id'), nullable=True)
     status = Column(task_status_enum, default='pending', nullable=False, index=True)
+    total_cost = Column(Float, default=0.0)
     error_log = Column(Text, nullable=True)
     serp_data = Column(JSONB, nullable=True)
     competitors_text = Column(Text, nullable=True)
