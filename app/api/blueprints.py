@@ -1,0 +1,121 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from typing import List, Optional
+from pydantic import BaseModel
+import uuid
+
+from app.database import get_db
+from app.models.blueprint import SiteBlueprint, BlueprintPage
+
+router = APIRouter()
+
+class SiteBlueprintCreate(BaseModel):
+    name: str
+    slug: str
+    description: Optional[str] = None
+    is_active: bool = True
+
+class BlueprintPageCreate(BaseModel):
+    page_slug: str
+    page_title: str
+    page_type: str = 'article'
+    keyword_template: str
+    filename: str
+    sort_order: int = 0
+    nav_label: Optional[str] = None
+    show_in_nav: bool = True
+    show_in_footer: bool = True
+    use_serp: bool = True
+
+
+@router.get("/")
+def get_blueprints(db: Session = Depends(get_db)):
+    blueprints = db.query(SiteBlueprint).all()
+    return [{
+        "id": str(b.id),
+        "name": b.name,
+        "slug": b.slug,
+        "description": b.description,
+        "is_active": b.is_active,
+        "created_at": b.created_at.isoformat() if b.created_at else None
+    } for b in blueprints]
+
+
+@router.post("/")
+def create_blueprint(blueprint_in: SiteBlueprintCreate, db: Session = Depends(get_db)):
+    db_blueprint = SiteBlueprint(**blueprint_in.dict())
+    db.add(db_blueprint)
+    try:
+        db.commit()
+        db.refresh(db_blueprint)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    return {
+        "id": str(db_blueprint.id),
+        "name": db_blueprint.name,
+        "slug": db_blueprint.slug
+    }
+
+
+@router.get("/{id}/pages")
+def get_blueprint_pages(id: str, db: Session = Depends(get_db)):
+    pages = db.query(BlueprintPage).filter(BlueprintPage.blueprint_id == id).order_by(BlueprintPage.sort_order).all()
+    return [{
+        "id": str(p.id),
+        "blueprint_id": str(p.blueprint_id),
+        "page_slug": p.page_slug,
+        "page_title": p.page_title,
+        "page_type": p.page_type,
+        "keyword_template": p.keyword_template,
+        "filename": p.filename,
+        "sort_order": p.sort_order,
+        "nav_label": p.nav_label,
+        "show_in_nav": p.show_in_nav,
+        "show_in_footer": p.show_in_footer,
+        "use_serp": p.use_serp
+    } for p in pages]
+
+
+@router.post("/{id}/pages")
+def create_blueprint_page(id: str, page_in: BlueprintPageCreate, db: Session = Depends(get_db)):
+    db_page = BlueprintPage(blueprint_id=id, **page_in.dict())
+    db.add(db_page)
+    db.commit()
+    db.refresh(db_page)
+    return {
+        "id": str(db_page.id),
+        "blueprint_id": str(db_page.blueprint_id),
+        "page_slug": db_page.page_slug,
+        "page_title": db_page.page_title,
+        "sort_order": db_page.sort_order
+    }
+
+
+@router.put("/{id}/pages/{page_id}")
+def update_blueprint_page(id: str, page_id: str, page_in: BlueprintPageCreate, db: Session = Depends(get_db)):
+    db_page = db.query(BlueprintPage).filter(BlueprintPage.id == page_id, BlueprintPage.blueprint_id == id).first()
+    if not db_page:
+        raise HTTPException(status_code=404, detail="Page not found")
+        
+    for key, value in page_in.dict().items():
+        setattr(db_page, key, value)
+        
+    db.commit()
+    db.refresh(db_page)
+    return {
+        "id": str(db_page.id),
+        "page_slug": db_page.page_slug,
+        "msg": "Updated"
+    }
+
+
+@router.delete("/{id}/pages/{page_id}")
+def delete_blueprint_page(id: str, page_id: str, db: Session = Depends(get_db)):
+    db_page = db.query(BlueprintPage).filter(BlueprintPage.id == page_id, BlueprintPage.blueprint_id == id).first()
+    if not db_page:
+        raise HTTPException(status_code=404, detail="Page not found")
+        
+    db.delete(db_page)
+    db.commit()
+    return {"msg": "Page deleted"}
