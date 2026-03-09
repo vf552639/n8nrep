@@ -37,7 +37,10 @@ def get_settings() -> Dict[str, Any]:
     result = {}
     for k, v in env_vars.items():
         if "KEY" in k or "PASSWORD" in k or "TOKEN" in k:
-            result[k] = f"{v[:4]}...{v[-4:]}" if v and len(v) > 8 else "***"
+            if v and len(v) > 8:
+                result[k] = f"{v[:6]}...****{v[-4:]}"
+            else:
+                 result[k] = "***"
         else:
             result[k] = v
             

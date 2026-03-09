@@ -1,4 +1,5 @@
 from celery import Celery
+from celery.schedules import crontab
 from app.config import settings
 
 celery_app = Celery(
@@ -19,3 +20,10 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True,
     task_acks_late=True,
 )
+
+celery_app.conf.beat_schedule = {
+    'cleanup-stale-tasks-every-hour': {
+        'task': 'app.workers.tasks.cleanup_stale_tasks',
+        'schedule': crontab(minute=0, hour='*'), # every hour
+    },
+}

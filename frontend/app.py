@@ -280,7 +280,12 @@ def render_tasks():
                 except Exception as e:
                     st.error(f"Ошибка загрузки: {e}")
 
-    tasks = fetch_data("tasks/?limit=50")
+    # Pagination controls for Tasks
+    col_limit, col_skip, _ = st.columns([1, 1, 4])
+    task_limit = col_limit.number_input("Лимит", min_value=10, max_value=500, value=50, step=10, key="task_limit")
+    task_skip = col_skip.number_input("Отступ (Skip)", min_value=0, value=0, step=task_limit, key="task_skip")
+    
+    tasks = fetch_data(f"tasks/?limit={task_limit}&skip={task_skip}")
     if tasks:
         # Add status emojis
         status_icons = {"pending": "⚪", "processing": "🔵", "completed": "🟢", "failed": "🔴"}
@@ -377,7 +382,12 @@ def render_tasks():
 # ----- TAB: ARTICLES -----
 def render_articles():
     st.header("Сгенерированные статьи")
-    articles = fetch_data("articles/?limit=50")
+    
+    col_limit, col_skip, _ = st.columns([1, 1, 4])
+    art_limit = col_limit.number_input("Лимит", min_value=10, max_value=500, value=50, step=10, key="art_limit")
+    art_skip = col_skip.number_input("Отступ (Skip)", min_value=0, value=0, step=art_limit, key="art_skip")
+    
+    articles = fetch_data(f"articles/?limit={art_limit}&skip={art_skip}")
     if articles:
         df = pd.DataFrame(articles)
         st.dataframe(df[["id", "title", "word_count", "created_at"]], use_container_width=True)
@@ -789,10 +799,14 @@ def render_blueprints():
 def render_projects():
     st.header("📁 Проекты (Сайты)")
     
+    col_limit, col_skip, _ = st.columns([1, 1, 4])
+    proj_limit = col_limit.number_input("Лимит", min_value=10, max_value=500, value=50, step=10, key="proj_limit")
+    proj_skip = col_skip.number_input("Отступ (Skip)", min_value=0, value=0, step=proj_limit, key="proj_skip")
+    
     blueprints = fetch_data("blueprints/") or []
     authors = fetch_data("authors/") or []
     sites = fetch_data("sites/") or []
-    projects = fetch_data("projects/") or []
+    projects = fetch_data(f"projects/?limit={proj_limit}&skip={proj_skip}") or []
     
     if projects:
         df = pd.DataFrame(projects)
@@ -860,6 +874,44 @@ def render_projects():
                 df_t = pd.DataFrame(tasks)
                 st.dataframe(df_t[["main_keyword", "page_type", "status"]], use_container_width=True)
 
+# ----- TAB: SITES -----
+def render_sites():
+    st.header("🌐 Управление Сайтами")
+    
+    with st.expander("Добавить новый сайт"):
+        with st.form("new_site_form"):
+            col1, col2 = st.columns(2)
+            s_name = col1.text_input("Название (Имя сайта)")
+            s_domain = col2.text_input("Домен (example.com)")
+            s_country = col1.text_input("Страна (Код, e.g. US)")
+            s_language = col2.text_input("Язык (Код, e.g. en)")
+            
+            if st.form_submit_button("Добавить"):
+                if s_name and s_domain and s_country and s_language:
+                    post_data("sites/", {
+                        "name": s_name,
+                        "domain": s_domain,
+                        "country": s_country,
+                        "language": s_language
+                    })
+                    st.success("Сайт добавлен!")
+                    st.rerun()
+                else:
+                    st.error("Заполните все поля.")
+                    
+    sites = fetch_data("sites/") or []
+    if sites:
+        df = pd.DataFrame(sites)
+        st.dataframe(df[["id", "name", "domain", "country", "language", "is_active"]], use_container_width=True)
+        
+        st.subheader("Удалить сайт")
+        del_sel = st.selectbox("Выберите сайт для удаления", options=[f"{s['id']} - {s['name']}" for s in sites])
+        if st.button("Удалить", type="primary", key="del_site"):
+            s_id = del_sel.split(" - ")[0]
+            if delete_data(f"sites/{s_id}"):
+                st.success("Сайт удален!")
+                st.rerun()
+
 # ----- MAIN UI ROUTING -----
 tabs = st.tabs(["📊 Дашборд", "📁 Проекты", "🏗️ Блупринты", "✅ Задачи", "📝 Статьи", "🌐 Сайты", "👥 Авторы", "🤖 Промпты", "📜 Логи", "⚙️ Настройки"])
 
@@ -868,7 +920,7 @@ with tabs[1]: render_projects()
 with tabs[2]: render_blueprints()
 with tabs[3]: render_tasks()
 with tabs[4]: render_articles()
-with tabs[5]: st.info("Раздел 'Сайты' в разработке.")
+with tabs[5]: render_sites()
 with tabs[6]: render_authors()
 with tabs[7]: render_prompts()
 with tabs[8]: render_logs()

@@ -97,11 +97,38 @@ def process_site_project(self, project_id: str):
         db.commit()
         
     except Exception as exc:
-        project = db.query(SiteProject).filter(SiteProject.id == project_id).first()
         if project:
             project.status = "failed"
             project.error_log = traceback.format_exc()
             db.commit()
+    finally:
+        db.close()
+
+
+@celery_app.task
+def cleanup_stale_tasks():
+    """
+    Periodic task to clean up jobs stuck in 'processing' state.
+    """
+    db = SessionLocal()
+    from app.models.task import Task
+    from datetime import datetime, timedelta
+    
+    try:
+        # If task has been processing for more than 2 hours, assume it died
+        stale_threshold = datetime.utcnow() - timedelta(hours=2)
+        stale_tasks = db.query(Task).filter(Task.status == "processing", Task.updated_at < stale_threshold).all()
+        
+        for t in stale_tasks:
+            t.status = "failed"
+            t.error_log = "Task timed out and was cleaned up by Celery Beat."
+            
+        if stale_tasks:
+            db.commit()
+            print(f"Cleaned up {len(stale_tasks)} stale tasks.")
+            
+    except Exception as e:
+        print(f"Error in cleanup_stale_tasks: {e}")
     finally:
         db.close()
 

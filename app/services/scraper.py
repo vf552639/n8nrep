@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 from typing import Dict, List, Any
 from urllib.parse import urlparse
 import time
+import concurrent.futures
 
 def parse_html(html: str) -> Dict[str, Any]:
     soup = BeautifulSoup(html, 'html.parser')
@@ -38,28 +39,38 @@ def scrape_urls(urls: List[str], max_urls: int = 10, timeout: int = 15) -> Dict[
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
     
-    for url in urls_to_scrape:
+    def scrape_single(url: str):
         try:
             domain = urlparse(url).netloc
             response = requests.get(url, headers=headers, timeout=timeout)
             
             if response.status_code == 200:
                 parsed_data = parse_html(response.text)
-                results.append({
+                return {
                     "url": url,
                     "domain": domain,
                     "headers": parsed_data["headers"],
                     "text": parsed_data["text"],
                     "word_count": parsed_data["word_count"]
-                })
+                }
             else:
                 print(f"Skipping {url}: HTTP {response.status_code}")
-                
+                return None
         except Exception as e:
             print(f"Error scraping {url}: {e}")
-            
-        # Small delay to be polite if multiple urls are from same domain (though unlikely in top 10)
-        time.sleep(0.5)
+            return None
+
+    # Use ThreadPoolExecutor to scrape in parallel
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(urls_to_scrape))) as executor:
+        future_to_url = {executor.submit(scrape_single, url): url for url in urls_to_scrape}
+        for future in concurrent.futures.as_completed(future_to_url):
+            try:
+                data = future.result()
+                if data:
+                    results.append(data)
+            except Exception as exc:
+                url = future_to_url[future]
+                print(f"{url} generated an exception: {exc}")
         
     if len(results) < 3:
         print(f"Warning: Only {len(results)} successful scrapes (minimum recommended: 3)")

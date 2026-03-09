@@ -4,12 +4,17 @@ from typing import Dict, Any, List, Optional
 from openai import OpenAI
 from app.config import settings
 
+_openai_client = None
+
 def get_openai_client() -> OpenAI:
-    """Returns an OpenAI client configured for OpenRouter"""
-    return OpenAI(
-        base_url="https://openrouter.ai/api/v1",
-        api_key=settings.OPENROUTER_API_KEY,
-    )
+    """Returns an OpenAI client configured for OpenRouter (Singleton)"""
+    global _openai_client
+    if _openai_client is None:
+        _openai_client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=settings.OPENROUTER_API_KEY,
+        )
+    return _openai_client
 
 def generate_text(
     system_prompt: str,

@@ -8,9 +8,9 @@ class Prompt(Base):
     __tablename__ = "prompts"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    agent_name = Column(String(100), nullable=False)
+    agent_name = Column(String(100), nullable=False, index=True)
     version = Column(Integer, default=1, nullable=False)
-    is_active = Column(Boolean, default=True, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
     skip_in_pipeline = Column(Boolean, default=False, nullable=False)
     system_prompt = Column(Text, nullable=False)
     user_prompt = Column(Text, nullable=True)
