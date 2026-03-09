@@ -20,6 +20,7 @@ class SettingsUpdate(BaseModel):
     TELEGRAM_CHAT_ID: str = None
     CELERY_CONCURRENCY: str = None
     EXCLUDE_WORDS: str = None
+    SEQUENTIAL_MODE: str = None
 
 @router.get("/")
 def get_settings() -> Dict[str, Any]:

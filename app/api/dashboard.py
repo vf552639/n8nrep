@@ -17,6 +17,8 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     
     total_sites = db.query(Site).count()
     
+    from app.config import settings
+    
     return {
         "tasks": {
             "total": total_tasks,
@@ -25,7 +27,8 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
             "processing": processing_tasks,
             "pending": pending_tasks
         },
-        "sites": total_sites
+        "sites": total_sites,
+        "sequential_mode": settings.SEQUENTIAL_MODE
     }
 
 @router.get("/queue")

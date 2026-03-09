@@ -280,6 +280,44 @@ def render_tasks():
                 except Exception as e:
                     st.error(f"Ошибка загрузки: {e}")
 
+    # === Queue management (Sequential Mode) ===
+    stats = fetch_data("dashboard/stats")
+    sequential_mode = stats.get("sequential_mode", False) if stats else False
+    
+    if sequential_mode:
+        st.markdown("---")
+        st.subheader("🎛️ Управление очередью")
+        
+        pending_count = stats.get("tasks", {}).get("pending", 0) if stats else 0
+        processing_count = stats.get("tasks", {}).get("processing", 0) if stats else 0
+        
+        col_info, col_btn1, col_btn2 = st.columns([2, 1, 1])
+        
+        with col_info:
+            st.info(f"Режим: **Последовательный**  |  В очереди: **{pending_count}**  |  В работе: **{processing_count}**")
+        
+        with col_btn1:
+            if st.button("▶️ Запустить следующую", type="primary", use_container_width=True, disabled=(processing_count > 0)):
+                result = post_data("tasks/next", {})
+                if result:
+                    status = result.get("status")
+                    if status == "started":
+                        st.success(f"Запущена: {result.get('keyword')}")
+                    elif status == "busy":
+                        st.warning(result.get("msg"))
+                    elif status == "empty":
+                        st.info(result.get("msg"))
+                    st.rerun()
+                    
+        with col_btn2:
+            if st.button("⏩ Запустить все", use_container_width=True):
+                result = post_data("tasks/start-all", {})
+                if result:
+                    st.success(f"Запущено задач: {result.get('started', 0)}")
+                    st.rerun()
+        
+        st.markdown("---")
+
     # Pagination controls for Tasks
     col_limit, col_skip, _ = st.columns([1, 1, 4])
     task_limit = col_limit.number_input("Лимит", min_value=10, max_value=500, value=50, step=10, key="task_limit")
@@ -373,6 +411,14 @@ def render_tasks():
             
             # === Actions ===
             st.write("---")
+            
+            # Sequential mode completion/failure notifications
+            if sequential_mode:
+                if selected_task["status"] == "completed":
+                    st.success(f"✅ Задача **{selected_task['main_keyword']}** завершена! Проверьте результат и нажмите «Запустить следующую».")
+                if selected_task["status"] == "failed":
+                    st.error(f"❌ Задача **{selected_task['main_keyword']}** завершилась с ошибкой. Проверьте лог и решите: Retry или Запустить следующую.")
+            
             col_actions, _, _ = st.columns([1, 1, 2])
             with col_actions:
                 if selected_task["status"] == "failed":
@@ -704,6 +750,11 @@ def render_settings():
                 tg_chat = st.text_input("Telegram Chat ID", placeholder=settings.get("TELEGRAM_CHAT_ID", "Без изменений"))
                 concurrency = st.text_input("Celery Concurrency", placeholder=settings.get("CELERY_CONCURRENCY", "Без изменений"))
                 exclude_words = st.text_area("Слова-исключения (глобально)", value=settings.get("EXCLUDE_WORDS", ""), help="Слова через запятую. Применяются ко всем генерируемым текстам автоматически.", height=100)
+                sequential = st.checkbox(
+                    "Последовательный режим (задачи по одной с паузой)",
+                    value=settings.get("SEQUENTIAL_MODE", "true").lower() == "true",
+                    help="Вкл: задачи создаются без автозапуска, запускаются кнопкой. Выкл: задачи запускаются автоматически."
+                )
                 
             st.write("---")
             submit = st.form_submit_button("💾 Сохранить настройки", type="primary", use_container_width=True)
@@ -719,6 +770,7 @@ def render_settings():
                 if tg_chat: payload["TELEGRAM_CHAT_ID"] = tg_chat
                 if concurrency: payload["CELERY_CONCURRENCY"] = concurrency
                 if exclude_words is not None: payload["EXCLUDE_WORDS"] = exclude_words
+                payload["SEQUENTIAL_MODE"] = str(sequential).lower()
                 
                 if payload:
                     try:

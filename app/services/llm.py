@@ -37,6 +37,7 @@ def generate_text(
         {"role": "user", "content": user_prompt}
     ]
     
+    last_error = None
     retries = 0
     while retries < max_retries:
         try:
@@ -59,6 +60,7 @@ def generate_text(
             return response.choices[0].message.content
             
         except Exception as e:
+            last_error = str(e)
             error_msg = str(e)
             print(f"LLM Error (Attempt {retries+1}/{max_retries}): {error_msg}")
             
@@ -73,4 +75,7 @@ def generate_text(
                  
             retries += 1
             
-    raise Exception(f"LLM Generation failed after {max_retries} attempts")
+    raise Exception(
+        f"LLM Generation failed after {max_retries} attempts. "
+        f"Model: {model}. Last error: {last_error}"
+    )

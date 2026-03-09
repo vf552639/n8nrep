@@ -13,6 +13,7 @@ from app.models.task import Task
 from app.models.site import Site
 from app.models.author import Author
 from app.workers.tasks import process_generation_task
+from app.config import settings
 
 router = APIRouter()
 
@@ -148,10 +149,12 @@ def create_task(task_in: TaskCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_task)
     
-    # Dispatch Celery task
-    process_generation_task.delay(str(new_task.id))
-    
-    return {"id": str(new_task.id), "status": "Task created and queued"}
+    # Dispatch Celery task (conditional on mode)
+    if not settings.SEQUENTIAL_MODE:
+        process_generation_task.delay(str(new_task.id))
+        return {"id": str(new_task.id), "status": "Task created and queued"}
+    else:
+        return {"id": str(new_task.id), "status": "Task created (waiting for manual start)"}
 
 @router.post("/bulk")
 async def create_tasks_bulk(file: UploadFile = File(...), db: Session = Depends(get_db)):
@@ -183,13 +186,69 @@ async def create_tasks_bulk(file: UploadFile = File(...), db: Session = Depends(
             db.commit()
             db.refresh(new_task)
             
-            process_generation_task.delay(str(new_task.id))
+            if not settings.SEQUENTIAL_MODE:
+                process_generation_task.delay(str(new_task.id))
             tasks_created += 1
         except Exception as e:
             errors.append(f"Error processing row {row}: {e}")
             db.rollback()
             
     return {"tasks_created": tasks_created, "errors": errors}
+
+@router.post("/next")
+def start_next_task(db: Session = Depends(get_db)):
+    """
+    Берёт первую pending-задачу (по приоритету DESC, created_at ASC)
+    и отправляет в Celery.
+    """
+    running = db.query(Task).filter(Task.status == "processing").first()
+    if running:
+        return {
+            "status": "busy",
+            "msg": "Есть задача в работе — дождитесь завершения",
+            "running_task_id": str(running.id),
+            "running_keyword": running.main_keyword
+        }
+    
+    next_task = db.query(Task).filter(
+        Task.status == "pending",
+        Task.project_id == None
+    ).order_by(
+        Task.priority.desc(),
+        Task.created_at.asc()
+    ).first()
+    
+    if not next_task:
+        return {"status": "empty", "msg": "Нет задач в очереди"}
+    
+    process_generation_task.delay(str(next_task.id))
+    
+    return {
+        "status": "started",
+        "task_id": str(next_task.id),
+        "keyword": next_task.main_keyword,
+        "msg": f"Задача '{next_task.main_keyword}' запущена"
+    }
+
+@router.post("/start-all")
+def start_all_pending(db: Session = Depends(get_db)):
+    """
+    Запускает все pending-задачи (не принадлежащие проектам) в Celery.
+    """
+    pending_tasks = db.query(Task).filter(
+        Task.status == "pending",
+        Task.project_id == None
+    ).order_by(
+        Task.priority.desc(),
+        Task.created_at.asc()
+    ).all()
+    
+    count = 0
+    for task in pending_tasks:
+        process_generation_task.delay(str(task.id))
+        count += 1
+    
+    return {"started": count, "msg": f"Запущено {count} задач"}
 
 @router.post("/{task_id}/retry")
 def retry_task(task_id: str, db: Session = Depends(get_db)):

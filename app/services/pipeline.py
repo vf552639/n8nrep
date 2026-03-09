@@ -120,6 +120,12 @@ def call_agent(db: Session, agent_name: str, context: str, response_format=None,
     
     user_msg = f"{user_template}\n\n[CONTEXT]\n{context}" if user_template else context
     
+    # Log context size for diagnostics
+    total_chars = len(system_text) + len(user_msg)
+    print(f"[call_agent] {agent_name} | model={prompt.model} | "
+          f"system={len(system_text)} chars | user={len(user_msg)} chars | "
+          f"total={total_chars} chars (~{total_chars // 4} tokens est.)")
+    
     kwargs = {
         "system_prompt": system_text,
         "user_prompt": user_msg,
@@ -558,6 +564,15 @@ def run_pipeline(db: Session, task_id: str):
         notify_task_success(str(ctx.task.id), ctx.task.main_keyword, ctx.site_name, word_count)
 
     except Exception as e:
+        # Mark any running step as failed
+        if ctx.task.step_results:
+            updated_steps = dict(ctx.task.step_results)
+            for step_key, step_val in updated_steps.items():
+                if isinstance(step_val, dict) and step_val.get("status") == "running":
+                    step_val["status"] = "failed"
+                    step_val["error"] = str(e)[:2000]
+            ctx.task.step_results = updated_steps
+        
         ctx.task.status = "failed"
         ctx.task.error_log = traceback.format_exc()
         db.commit()
