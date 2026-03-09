@@ -150,13 +150,27 @@ def fetch_serp_data(keyword: str, country_code: str, language_code: str) -> Dict
         
         for item in dfs_data["items"]:
             if item.get("type") == "organic":
-                result["urls"].append(item.get("url"))
+                url = item.get("url")
+                if url:
+                    result["urls"].append(url)
             elif item.get("type") == "people_also_ask":
                 if item.get("items"):
-                    result["paa"].extend([paa.get("title") for paa in item["items"] if paa.get("title")])
+                    for paa in item["items"]:
+                        if isinstance(paa, dict):
+                            title = paa.get("title") or paa.get("question") or paa.get("text")
+                            if title:
+                                result["paa"].append(title)
+                        elif isinstance(paa, str) and paa.strip():
+                            result["paa"].append(paa.strip())
             elif item.get("type") == "related_searches":
                 if item.get("items"):
-                    result["related_searches"].extend([rs.get("title") for rs in item["items"] if rs.get("title")])
+                    for rs in item["items"]:
+                        if isinstance(rs, dict):
+                            title = rs.get("title") or rs.get("query") or rs.get("text")
+                            if title:
+                                result["related_searches"].append(title)
+                        elif isinstance(rs, str) and rs.strip():
+                            result["related_searches"].append(rs.strip())
         
         return result
         
