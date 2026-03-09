@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     # Security
     API_KEY: str = ""
     CORS_ORIGINS: str = "*"
+    TEST_MODE: bool = False
 
     # Redis (for Celery)
     REDIS_URL: str = "redis://localhost:6379/0"

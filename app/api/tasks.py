@@ -208,6 +208,30 @@ def retry_task(task_id: str, db: Session = Depends(get_db)):
     process_generation_task.delay(str(task.id))
     return {"msg": "Task queued for retry"}
 
+@router.post("/{task_id}/approve")
+def approve_task(task_id: str, db: Session = Depends(get_db)):
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+        
+    # Check if we are waiting for approval
+    step_results = dict(task.step_results or {})
+    if not step_results.get("waiting_for_approval"):
+        raise HTTPException(status_code=400, detail="Task is not waiting for approval")
+        
+    # Mark as approved and remove the waiting flag
+    step_results["waiting_for_approval"] = False
+    step_results["test_mode_approved"] = True
+    task.step_results = step_results
+    
+    # Needs to be back in processing or pending to resume cleanly
+    task.status = "pending" 
+    db.commit()
+    
+    # Resume pipeline
+    process_generation_task.delay(str(task.id))
+    return {"msg": "Task approved and queued for continuation"}
+
 @router.delete("/{task_id}")
 def delete_task(task_id: str, db: Session = Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()

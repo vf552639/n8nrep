@@ -500,6 +500,19 @@ def run_pipeline(db: Session, task_id: str):
 
         run_phase(db, ctx.task, STEP_PRIMARY_GEN, phase_primary_gen, ctx)
 
+        # TEST MODE BREAKPOINT
+        if settings.TEST_MODE:
+            step_results = ctx.task.step_results or {}
+            if not step_results.get("test_mode_approved"):
+                add_log(db, ctx.task, "🛑 TEST MODE: Pausing pipeline after Primary Generation. Waiting for manual approval.", step=None)
+                
+                updated = dict(step_results)
+                updated["waiting_for_approval"] = True
+                ctx.task.step_results = updated
+                ctx.task.status = "processing" # Keep it processing or pending
+                db.commit()
+                return # Early exit! Pipeline will be re-triggered by the /approve endpoint
+
         if ctx.use_serp:
             run_phase(db, ctx.task, STEP_COMP_COMPARISON, phase_competitor_comparison, ctx)
             run_phase(db, ctx.task, STEP_READER_OPINION, phase_reader_opinion, ctx)

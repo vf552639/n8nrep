@@ -321,13 +321,20 @@ def render_tasks():
                     current = steps_data.get("current_step", "")
                     
                     if selected_task["status"] == "processing":
-                        st.progress(progress / 100, text=f"{progress}% — {current or 'выполнение...'}")
-                        import time
-                        time.sleep(5)
-                        st.rerun()
-                    
-                    st.markdown("#### 📋 Промежуточные результаты")
-                    steps = steps_data.get("step_results") or {}
+                        if steps.get("waiting_for_approval"):
+                            st.warning("🛑 Задача приостановлена в режиме тестирования (Режим подтверждения)")
+                            draft = steps.get("primary_generation", {}).get("result", "")
+                            with st.expander("Ознакомиться со сгенерированным текстом:", expanded=True):
+                                st.markdown(draft, unsafe_allow_html=True)
+                            if st.button("✅ Одобрить текст (Продолжить пайплайн)", type="primary", use_container_width=True):
+                                post_data(f"tasks/{selected_task_id}/approve", {})
+                                st.success("Одобрено! Задача возвращена в работу.")
+                                st.rerun()
+                        else:
+                            st.progress(progress / 100, text=f"{progress}% — {current or 'выполнение...'}")
+                            import time
+                            time.sleep(5)
+                            st.rerun()
                     
                     step_order = [
                         ("serp_research", "🔍 SERP Research"),
