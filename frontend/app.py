@@ -421,12 +421,11 @@ def render_tasks():
                                 <textarea id="copy_{step_key}_{selected_task_id}" style="position:absolute;left:-9999px;">{escaped}</textarea>
                                 """
                                 st.components.v1.html(copy_html, height=40)
-                            if step.get("timestamp"):
-                                st.caption(f"Время: {step['timestamp']}")
-                            if step.get("model"):
-                                st.caption(f"Модель: {step['model']}")
-                            if step.get("cost"):
-                                st.caption(f"Стоимость: ${step['cost']:.4f}")
+                                
+                            step_model = step.get("model", "—")
+                            step_cost = step.get("cost", 0.0)
+                            step_time = step.get("timestamp", "")
+                            st.caption(f"🤖 **{step_model}**  ·  💰 **${step_cost:.4f}**  ·  🕐 {step_time}")
             
             # === Actions ===
             st.write("---")
@@ -729,8 +728,8 @@ div[data-testid="stHorizontalBlock"] {
                         result_text = res["result"]
                         
                         cost = res.get("cost", 0.0)
-                        if cost > 0:
-                            st.caption(f"💰 Стоимость тестового запуска: **${cost:.6f}**")
+                        model_used = res.get("model_used", "—")
+                        st.caption(f"🤖 Модель: **{model_used}**  ·  💰 Стоимость: **${cost:.6f}**")
                             
                         st.text_area("Ответ LLM", value=result_text, height=300, disabled=True, key=f"test_res_{agent}")
                         

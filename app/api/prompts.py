@@ -97,7 +97,7 @@ def test_prompt(test_in: PromptTest):
     Dry run the prompt from admin UI without saving.
     """
     try:
-        text, cost = generate_text(
+        text, cost, actual_model = generate_text(
             system_prompt=test_in.system_prompt,
             user_prompt=f"{test_in.user_prompt}\n\n{test_in.test_data}" if test_in.user_prompt else test_in.test_data,
             model=test_in.model,
@@ -106,6 +106,6 @@ def test_prompt(test_in: PromptTest):
             presence_penalty=test_in.presence_penalty,
             top_p=test_in.top_p
         )
-        return {"result": text, "cost": cost}
+        return {"result": text, "cost": cost, "model_used": actual_model}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

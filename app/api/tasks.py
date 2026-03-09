@@ -51,8 +51,9 @@ def get_tasks(skip: int = 0, limit: int = 50, status: Optional[str] = None, db: 
         "country": t.country,
         "language": t.language,
         "page_type": t.page_type,
+        "page_type": t.page_type,
         "status": t.status,
-        "total_cost": t.total_cost,
+        "total_cost": t.total_cost or 0.0,
         "target_site_id": str(t.target_site_id),
         "created_at": t.created_at.isoformat(),
         "error_log": t.error_log
