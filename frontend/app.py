@@ -319,6 +319,7 @@ def render_tasks():
                 if steps_data:
                     progress = steps_data.get("progress", 0)
                     current = steps_data.get("current_step", "")
+                    steps = steps_data.get("step_results") or {}
                     
                     if selected_task["status"] == "processing":
                         if steps.get("waiting_for_approval"):

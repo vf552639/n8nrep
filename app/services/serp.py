@@ -10,16 +10,54 @@ def _get_dataforseo_auth_header() -> str:
     credentials = f"{login}:{password}"
     return "Basic " + base64.b64encode(credentials.encode("utf-8")).decode("utf-8")
 
+def _map_location_dataforseo(location: str) -> int:
+    loc = location.lower().strip()
+    mapping = {
+        "us": 2840, "usa": 2840, "united states": 2840,
+        "uk": 2826, "gb": 2826, "united kingdom": 2826,
+        "de": 2276, "germany": 2276,
+        "pl": 2616, "poland": 2616,
+        "fr": 2250, "france": 2250,
+        "it": 2380, "italy": 2380,
+        "es": 2724, "spain": 2724,
+        "ru": 2643, "russia": 2643,
+        "ua": 2804, "ukraine": 2804,
+        "ca": 2124, "canada": 2124,
+        "au": 2036, "australia": 2036,
+        "br": 2076, "brazil": 2076,
+        "in": 2356, "india": 2356,
+        "nl": 2528, "netherlands": 2528,
+    }
+    return mapping.get(loc, 2840) # Default to US
+
+def _map_language_dataforseo(lang: str) -> str:
+    lang = lang.lower().strip()
+    mapping = {
+        "en": "en", "english": "en",
+        "de": "de", "german": "de",
+        "pl": "pl", "polish": "pl",
+        "fr": "fr", "french": "fr",
+        "it": "it", "italian": "it",
+        "es": "es", "spanish": "es",
+        "ru": "ru", "russian": "ru",
+        "uk": "uk", "ukrainian": "uk",
+    }
+    return mapping.get(lang, "en") # Default to english
+
 def call_dataforseo(keyword: str, location_code: str, language_code: str) -> Optional[Dict[str, Any]]:
     url = "https://api.dataforseo.com/v3/serp/google/organic/live/advanced"
     headers = {
         'Authorization': _get_dataforseo_auth_header(),
         'Content-Type': 'application/json'
     }
+    
+    dfs_loc = _map_location_dataforseo(location_code)
+    dfs_lang = _map_language_dataforseo(language_code)
+    
     payload = [{
         "keyword": keyword,
-        "location_code": int(location_code) if location_code.isdigit() else 2840, # default US if not valid
-        "language_code": language_code,
+        "location_code": dfs_loc,
+        "language_code": dfs_lang,
         "depth": 10
     }]
     
@@ -27,20 +65,56 @@ def call_dataforseo(keyword: str, location_code: str, language_code: str) -> Opt
         response = requests.post(url, headers=headers, json=payload, timeout=30)
         response.raise_for_status()
         data = response.json()
-        if data.get("tasks") and len(data["tasks"]) > 0:
-            return data["tasks"][0]["result"][0]
+        if data and isinstance(data, dict) and data.get("tasks") and len(data["tasks"]) > 0:
+            task_result = data["tasks"][0].get("result", [])
+            if task_result and len(task_result) > 0:
+                return task_result[0]
         return None
     except Exception as e:
         print(f"DataForSEO error: {e}")
         return None
+
+def _map_location_serpapi(location: str) -> str:
+    loc = location.lower().strip()
+    mapping = {
+        "us": "United States", "usa": "United States",
+        "uk": "United Kingdom", "gb": "United Kingdom",
+        "de": "Germany",
+        "pl": "Poland",
+        "fr": "France",
+        "it": "Italy",
+        "es": "Spain",
+        "ru": "Russia",
+        "ua": "Ukraine",
+        "ca": "Canada",
+        "au": "Australia",
+        "br": "Brazil",
+        "in": "India",
+        "nl": "Netherlands"
+    }
+    return mapping.get(loc, location.title()) # Default to capitalized string
+
+def _map_language_serpapi(lang: str) -> str:
+    lang = lang.lower().strip()
+    mapping = {
+        "en": "en", "english": "en",
+        "de": "de", "german": "de",
+        "pl": "pl", "polish": "pl",
+        "fr": "fr", "french": "fr",
+        "it": "it", "italian": "it",
+        "es": "es", "spanish": "es",
+        "ru": "ru", "russian": "ru",
+        "uk": "uk", "ukrainian": "uk",
+    }
+    return mapping.get(lang, lang.lower())
 
 def call_serpapi(keyword: str, location: str, language: str) -> Optional[Dict[str, Any]]:
     url = "https://serpapi.com/search"
     params = {
         "engine": "google",
         "q": keyword,
-        "location": location,
-        "hl": language,
+        "gl": _map_location_serpapi(location) if len(location) == 2 else location, # gl mostly expects 2-letter country code
+        "hl": _map_language_serpapi(language),
         "num": 10,
         "api_key": settings.SERPAPI_KEY
     }
@@ -48,6 +122,9 @@ def call_serpapi(keyword: str, location: str, language: str) -> Optional[Dict[st
         response = requests.get(url, params=params, timeout=30)
         response.raise_for_status()
         return response.json()
+    except requests.exceptions.HTTPError as e:
+        print(f"SerpAPI HTTP error: {e} - Response: {e.response.text if e.response else 'Unknown'}")
+        return None
     except Exception as e:
         print(f"SerpAPI error: {e}")
         return None
