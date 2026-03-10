@@ -171,11 +171,22 @@ def setup_vars(ctx: PipelineContext):
     serp_features = serp.get("serp_features") or []
     intent_signals = serp.get("search_intent_signals") or {}
     
-    competitor_titles = [r["title"] for r in organic_results if r and r.get("title")][:MAX_COMPETITOR_TITLES]
-    competitor_descriptions = [r["description"] for r in organic_results if r and r.get("description")][:MAX_COMPETITOR_DESCRIPTIONS]
-    highlighted_keywords = list(set(
-        kw for r in organic_results if r for kw in (r.get("highlighted") or []) if kw
-    ))[:MAX_HIGHLIGHTED_KEYWORDS]
+    competitor_titles = [
+        r.get("title", "") for r in organic_results 
+        if isinstance(r, dict) and r.get("title")
+    ][:MAX_COMPETITOR_TITLES]
+    competitor_descriptions = [
+        r.get("description", "") for r in organic_results 
+        if isinstance(r, dict) and r.get("description")
+    ][:MAX_COMPETITOR_DESCRIPTIONS]
+    highlighted_keywords = []
+    for r in organic_results:
+        if not r or not isinstance(r, dict):
+            continue
+        hl = r.get("highlighted")
+        if isinstance(hl, list):
+            highlighted_keywords.extend([kw for kw in hl if kw and isinstance(kw, str)])
+    highlighted_keywords = list(set(highlighted_keywords))[:MAX_HIGHLIGHTED_KEYWORDS]
     
     paa_with_answers = "\n".join([
         f"Q: {p['question']}\nA: {p['answer']}" 
@@ -255,7 +266,15 @@ def setup_vars(ctx: PipelineContext):
     }
 
 def setup_template_vars(ctx: PipelineContext):
-    
+    # Defaults in case no author is assigned
+    author_style = ""
+    imitation = ""
+    year = ""
+    face = ""
+    target_audience = ""
+    rhythms_style = ""
+    author_name = ""
+
     if ctx.task.author_id:
         author = ctx.db.query(Author).filter(Author.id == ctx.task.author_id).first()
         if author:
