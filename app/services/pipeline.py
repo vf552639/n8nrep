@@ -157,13 +157,13 @@ def setup_vars(ctx: PipelineContext):
     avg_words = scrape_info.get("avg_words", 800)
     headers_info = scrape_info.get("headers", [])
     
-    serp = ctx.task.serp_data or {}
+    serp = ctx.task.serp_data if isinstance(ctx.task.serp_data, dict) else {}
     
     paa = serp.get("paa") or []
-    related = serp.get("related_searches") or []
+    related = [r for r in (serp.get("related_searches") or []) if r is not None]
     
-    organic_results = serp.get("organic_results") or []
-    paa_full = serp.get("paa_full") or []
+    organic_results = [r for r in (serp.get("organic_results") or []) if r is not None and isinstance(r, dict)]
+    paa_full = [p for p in (serp.get("paa_full") or []) if p is not None and isinstance(p, dict)]
     featured_snippet = serp.get("featured_snippet")
     knowledge_graph = serp.get("knowledge_graph")
     ai_overview = serp.get("ai_overview")
