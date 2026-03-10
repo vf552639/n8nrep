@@ -171,10 +171,10 @@ def setup_vars(ctx: PipelineContext):
     serp_features = serp.get("serp_features") or []
     intent_signals = serp.get("search_intent_signals") or {}
     
-    competitor_titles = [r["title"] for r in organic_results if r.get("title")][:MAX_COMPETITOR_TITLES]
-    competitor_descriptions = [r["description"] for r in organic_results if r.get("description")][:MAX_COMPETITOR_DESCRIPTIONS]
+    competitor_titles = [r["title"] for r in organic_results if r and r.get("title")][:MAX_COMPETITOR_TITLES]
+    competitor_descriptions = [r["description"] for r in organic_results if r and r.get("description")][:MAX_COMPETITOR_DESCRIPTIONS]
     highlighted_keywords = list(set(
-        kw for r in organic_results for kw in (r.get("highlighted") or [])
+        kw for r in organic_results if r for kw in (r.get("highlighted") or []) if kw
     ))[:MAX_HIGHLIGHTED_KEYWORDS]
     
     paa_with_answers = "\n".join([
