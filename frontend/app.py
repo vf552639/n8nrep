@@ -1117,6 +1117,72 @@ def render_sites():
                 st.success("Сайт удален!")
                 st.rerun()
 
+        st.markdown("---")
+        st.subheader("HTML-шаблоны (референсы)")
+        site_sel = st.selectbox("Сайт для работы с шаблонами", options=[f"{s['id']} - {s['name']}" for s in sites], key="tpl_site_sel")
+        if site_sel:
+            s_id = site_sel.split(" - ")[0]
+            templates = fetch_data(f"sites/{s_id}/templates") or []
+            
+            if templates:
+                df_tpl = pd.DataFrame(templates)
+                st.dataframe(df_tpl[["id", "template_name", "usage_count", "is_active"]], use_container_width=True)
+                
+                col_p1, col_p2 = st.columns(2)
+                with col_p1:
+                    preview_tpl = st.selectbox("Превью шаблона", options=[""] + [f"{t['id']} - {t['template_name']}" for t in templates], key="preview_tpl_sel")
+                with col_p2:
+                    del_tpl = st.selectbox("Удалить шаблон", options=[""] + [f"{t['id']} - {t['template_name']}" for t in templates], key="del_tpl_sel")
+                
+                if preview_tpl:
+                    t_id = preview_tpl.split(" - ")[0]
+                    tpl_obj = next((t for t in templates if str(t['id']) == t_id), None)
+                    if tpl_obj and tpl_obj.get("html_content"):
+                        st.markdown("**Превью (первые 2000 символов):**")
+                        st.code(tpl_obj["html_content"][:2000], language="html")
+                        
+                if del_tpl:
+                    if st.button("Удалить выбранный шаблон", type="primary", key="del_tpl_btn"):
+                        t_id = del_tpl.split(" - ")[0]
+                        if delete_data(f"sites/{s_id}/templates/{t_id}"):
+                            st.success("Шаблон удален!")
+                            st.rerun()
+            else:
+                st.info("У этого сайта пока нет шаблонов.")
+
+            with st.expander("Добавить шаблон"):
+                tpl_name = st.text_input("Название шаблона (например «Competitor Dark Theme v1»)", key="tpl_name")
+                st.info("Загрузите полный HTML-код реальной страницы (своей или конкурента). Система использует его как референс структуры для LLM-агента html_structure. CSS/JS могут быть inline.")
+                
+                upload_method = st.radio("Способ загрузки", ["Файл (.html)", "Текст (вставка HTML-кода)"], horizontal=True)
+                
+                html_content = ""
+                if upload_method == "Файл (.html)":
+                    uploaded_file = st.file_uploader("Загрузить HTML файл", type=["html", "htm"], key="tpl_file")
+                    if uploaded_file is not None:
+                        try:
+                            html_content = uploaded_file.read().decode('utf-8')
+                        except Exception as e:
+                            st.error(f"Ошибка чтения файла: {e}")
+                else:
+                    text_html = st.text_area("Вставьте HTML-код", height=400, key="tpl_text")
+                    html_content = text_html
+                    
+                is_active = st.checkbox("Активен (is_active)", value=True, key="tpl_active")
+                
+                if st.button("Сохранить", key="save_tpl_btn"):
+                    if tpl_name and html_content:
+                        res = post_data(f"sites/{s_id}/templates", {
+                            "template_name": tpl_name,
+                            "html_content": html_content,
+                            "is_active": is_active
+                        })
+                        if res:
+                            st.success("Шаблон добавлен!")
+                            st.rerun()
+                    else:
+                        st.error("Пожалуйста, укажите название и загрузите/вставьте HTML-код.")
+
 # ----- MAIN UI ROUTING -----
 tabs = st.tabs(["📊 Дашборд", "📁 Проекты", "🏗️ Блупринты", "✅ Задачи", "📝 Статьи", "🌐 Сайты", "👥 Авторы", "🤖 Промпты", "📜 Логи", "⚙️ Настройки"])
 

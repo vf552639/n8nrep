@@ -35,7 +35,6 @@ class ContentDeduplicator:
     def extract_key_phrases(self, text: str, top_n: int = 20) -> list:
         # Simple tokenization
         words = re.findall(r'\b[a-zA-Zа-яА-ЯёЁ]{3,}\b', text.lower())
-        filtered_words = [w for w in words if w not surviving STOP_WORDS]
         filtered_words = [w for w in words if w not in STOP_WORDS]
         
         # 2-grams and 3-grams
