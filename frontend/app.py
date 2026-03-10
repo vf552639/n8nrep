@@ -211,6 +211,93 @@ def render_dashboard():
                 st.metric("Celery Workers", "🟢 Online" if online else "🔴 Offline")
 
 # ----- REUSABLE: STEP MONITOR -----
+def render_serp_viewer(task_id: str, key_prefix: str = ""):
+    """Показывает SERP-данные в виде таблиц с возможностью скачать CSV."""
+    serp_data = fetch_data(f"tasks/{task_id}/serp-data")
+    if not serp_data:
+        st.warning("SERP-данные недоступны")
+        return
+    
+    # Meta-info metrics
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Источник", (serp_data.get("source") or "—").upper())
+    col2.metric("Organic", len(serp_data.get("organic_results") or []))
+    col3.metric("PAA", len(serp_data.get("paa_full") or []))
+    col4.metric("Всего результатов", serp_data.get("total_results", 0))
+    
+    # SERP Features badges
+    features = serp_data.get("serp_features") or []
+    if features:
+        st.write("**SERP Features:** " + " · ".join(f"`{f}`" for f in features))
+    
+    # Intent Signals
+    signals = serp_data.get("search_intent_signals") or {}
+    if signals:
+        signal_parts = []
+        for k, v in signals.items():
+            if isinstance(v, bool):
+                signal_parts.append(f"{'✅' if v else '❌'} {k}")
+            else:
+                signal_parts.append(f"{k}: {v}")
+        st.write("**Intent Signals:** " + " · ".join(signal_parts))
+    
+    # Table: Organic Results
+    organic = serp_data.get("organic_results") or []
+    if organic:
+        st.markdown("#### 🔍 Organic Results")
+        df_organic = pd.DataFrame(organic)
+        display_cols = [c for c in ["rank_group", "title", "domain", "description", "is_featured_snippet"] if c in df_organic.columns]
+        st.dataframe(df_organic[display_cols], use_container_width=True, hide_index=True)
+    
+    # Table: PAA
+    paa = serp_data.get("paa_full") or []
+    if paa:
+        st.markdown("#### ❓ People Also Ask")
+        st.dataframe(pd.DataFrame(paa), use_container_width=True, hide_index=True)
+    
+    # Featured Snippet
+    fs = serp_data.get("featured_snippet")
+    if fs:
+        st.markdown("#### ⭐ Featured Snippet")
+        st.write(f"**Type:** {fs.get('type')} | **Domain:** {fs.get('domain')}")
+        st.write(f"**Title:** {fs.get('title')}")
+        st.write(f"**Text:** {fs.get('description')}")
+    
+    # Answer Box
+    ab = serp_data.get("answer_box")
+    if ab:
+        st.markdown("#### 📦 Answer Box")
+        st.write(f"**Type:** {ab.get('type')} | **Text:** {ab.get('text', '')[:500]}")
+    
+    # AI Overview
+    ai_ov = serp_data.get("ai_overview")
+    if ai_ov:
+        st.markdown("#### 🤖 AI Overview")
+        st.write(ai_ov.get("text", "")[:1000])
+        refs = ai_ov.get("references") or []
+        if refs:
+            st.write(f"**References:** {len(refs)} sources")
+    
+    # Knowledge Graph
+    kg = serp_data.get("knowledge_graph")
+    if kg:
+        st.markdown("#### 📊 Knowledge Graph")
+        st.write(f"**{kg.get('title', '')}** ({kg.get('subtitle', '')})")
+        st.write(kg.get("description", ""))
+        facts = kg.get("facts") or []
+        if facts:
+            st.dataframe(pd.DataFrame(facts), use_container_width=True, hide_index=True)
+    
+    # Download CSV ZIP button
+    st.markdown("---")
+    st.markdown(
+        f'<a href="{API_URL}/tasks/{task_id}/serp-export" target="_blank">'
+        f'<button style="background:#059669;color:white;border:none;padding:8px 20px;'
+        f'border-radius:6px;cursor:pointer;font-size:13px;">'
+        f'📥 Скачать SERP данные (ZIP с CSV)</button></a>',
+        unsafe_allow_html=True
+    )
+
 def render_task_step_monitor(task_id: str, task_status: str, task_keyword: str, key_prefix: str = ""):
     """
     Универсальный блок мониторинга шагов pipeline для задачи.
@@ -280,7 +367,10 @@ def render_task_step_monitor(task_id: str, task_status: str, task_keyword: str, 
         icon = "✅" if s_status == "completed" else "🔄"
         
         with st.expander(f"{icon} {step_label}", expanded=(s_status == "running")):
-            if step.get("result"):
+            # Special render for SERP step: show structured tables
+            if step_key == "serp_research" and s_status == "completed":
+                render_serp_viewer(task_id, key_prefix=key_prefix)
+            elif step.get("result"):
                 result_text = step["result"][:50000]
                 st.text_area("Результат", value=result_text[:10000], height=200, disabled=True, key=f"{key_prefix}_res_{step_key}_{task_id}")
                 
@@ -400,10 +490,10 @@ def render_tasks():
                     st.rerun()
                     
         with col_btn2:
-            if st.button("⏩ Запустить все", use_container_width=True):
+            if st.button("⏩ Запустить все (по очереди)", use_container_width=True):
                 result = post_data("tasks/start-all", {})
                 if result:
-                    st.success(f"Запущено задач: {result.get('started', 0)}")
+                    st.success(f"Запущена цепочка: {result.get('started', 0)} задач (последовательно)")
                     st.rerun()
         
         st.markdown("---")
@@ -686,6 +776,7 @@ div[data-testid="stHorizontalBlock"] {
                     ("answer_box", "Answer Box текст (если есть)"),
                     ("serp_features", "Список SERP-элементов на странице (JSON)"),
                     ("search_intent_signals", "Сигналы поискового интента (JSON)"),
+                    ("related_searches", "Related Searches от Google (JSON-список запросов)"),
                 ]
                 
                 col1, col2 = st.columns([1, 2])

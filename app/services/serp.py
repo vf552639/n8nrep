@@ -170,7 +170,7 @@ def _parse_organic(item: dict, result: dict):
         "rank_group": item.get("rank_group", 0),
         "rank_absolute": item.get("rank_absolute", 0),
         "is_featured_snippet": item.get("is_featured_snippet", False),
-        "highlighted": item.get("highlighted", []),
+        "highlighted": item.get("highlighted") or [],
         "pre_snippet": item.get("pre_snippet"),
         "extended_snippet": item.get("extended_snippet"),
     })
@@ -329,7 +329,7 @@ def _parse_serpapi_response(serp_data: dict) -> dict:
                 "rank_group": item.get("position", 0),
                 "rank_absolute": item.get("position", 0),
                 "is_featured_snippet": False,
-                "highlighted": item.get("snippet_highlighted_words", []),
+                "highlighted": item.get("snippet_highlighted_words") or [],
                 "pre_snippet": None,
                 "extended_snippet": None,
             })

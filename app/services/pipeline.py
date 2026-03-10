@@ -159,27 +159,27 @@ def setup_vars(ctx: PipelineContext):
     
     serp = ctx.task.serp_data or {}
     
-    paa = serp.get("paa", [])
-    related = serp.get("related_searches", [])
+    paa = serp.get("paa") or []
+    related = serp.get("related_searches") or []
     
-    organic_results = serp.get("organic_results", [])
-    paa_full = serp.get("paa_full", [])
+    organic_results = serp.get("organic_results") or []
+    paa_full = serp.get("paa_full") or []
     featured_snippet = serp.get("featured_snippet")
     knowledge_graph = serp.get("knowledge_graph")
     ai_overview = serp.get("ai_overview")
     answer_box = serp.get("answer_box")
-    serp_features = serp.get("serp_features", [])
-    intent_signals = serp.get("search_intent_signals", {})
+    serp_features = serp.get("serp_features") or []
+    intent_signals = serp.get("search_intent_signals") or {}
     
     competitor_titles = [r["title"] for r in organic_results if r.get("title")][:MAX_COMPETITOR_TITLES]
     competitor_descriptions = [r["description"] for r in organic_results if r.get("description")][:MAX_COMPETITOR_DESCRIPTIONS]
     highlighted_keywords = list(set(
-        kw for r in organic_results for kw in r.get("highlighted", [])
+        kw for r in organic_results for kw in (r.get("highlighted") or [])
     ))[:MAX_HIGHLIGHTED_KEYWORDS]
     
     paa_with_answers = "\n".join([
         f"Q: {p['question']}\nA: {p['answer']}" 
-        for p in paa_full if p.get("answer")
+        for p in (paa_full or []) if p.get("answer")
     ][:MAX_PAA_WITH_ANSWERS]) if paa_full else ""
     
     add_kw_text = f"\nAdditional Keywords: {ctx.task.additional_keywords}" if ctx.task.additional_keywords else ""
@@ -251,6 +251,7 @@ def setup_vars(ctx: PipelineContext):
         "answer_box": answer_box.get("text", "")[:MAX_ANSWER_BOX_CHARS] if answer_box else "",
         "serp_features": json.dumps(serp_features),
         "search_intent_signals": json.dumps(intent_signals),
+        "related_searches": json.dumps(related, ensure_ascii=False),
     }
 
 def setup_template_vars(ctx: PipelineContext):
@@ -320,6 +321,7 @@ def setup_template_vars(ctx: PipelineContext):
         "answer_box": ctx.analysis_vars.get("answer_box", ""),
         "serp_features": ctx.analysis_vars.get("serp_features", ""),
         "search_intent_signals": ctx.analysis_vars.get("search_intent_signals", ""),
+        "related_searches": ctx.analysis_vars.get("related_searches", ""),
         "structure_fact_checking": ""
     }
 
@@ -346,7 +348,21 @@ def phase_serp(ctx: PipelineContext):
         ctx.task.serp_data = serp_data
         ctx.db.commit()
         add_log(ctx.db, ctx.task, f"SERP Research completed.", step=STEP_SERP)
-        save_step_result(ctx.db, ctx.task, STEP_SERP, result=json.dumps(serp_data.get("urls", []), ensure_ascii=False), status="completed")
+        # Save summary for step_result (full data in task.serp_data)
+        serp_summary = {
+            "source": serp_data.get("source", "unknown"),
+            "urls_count": len(serp_data.get("urls") or []),
+            "organic_count": len(serp_data.get("organic_results") or []),
+            "paa_count": len(serp_data.get("paa_full") or []),
+            "related_count": len(serp_data.get("related_searches") or []),
+            "has_featured_snippet": serp_data.get("featured_snippet") is not None,
+            "has_knowledge_graph": serp_data.get("knowledge_graph") is not None,
+            "has_ai_overview": serp_data.get("ai_overview") is not None,
+            "has_answer_box": serp_data.get("answer_box") is not None,
+            "serp_features": serp_data.get("serp_features") or [],
+            "urls": serp_data.get("urls") or [],
+        }
+        save_step_result(ctx.db, ctx.task, STEP_SERP, result=json.dumps(serp_summary, ensure_ascii=False), status="completed")
 
 def phase_scraping(ctx: PipelineContext):
     if not ctx.task.competitors_text:

@@ -237,8 +237,10 @@ def start_next_task(db: Session = Depends(get_db)):
 @router.post("/start-all")
 def start_all_pending(db: Session = Depends(get_db)):
     """
-    Запускает все pending-задачи (не принадлежащие проектам) в Celery.
+    Запускает все pending-задачи (не принадлежащие проектам) в Celery последовательно (chain).
     """
+    from celery import chain
+    
     pending_tasks = db.query(Task).filter(
         Task.status == "pending",
         Task.project_id == None
@@ -247,12 +249,167 @@ def start_all_pending(db: Session = Depends(get_db)):
         Task.created_at.asc()
     ).all()
     
-    count = 0
-    for task in pending_tasks:
-        process_generation_task.delay(str(task.id))
-        count += 1
+    if not pending_tasks:
+        return {"started": 0, "msg": "Нет задач в очереди"}
     
-    return {"started": count, "msg": f"Запущено {count} задач"}
+    # Celery chain — каждая задача ждёт завершения предыдущей
+    task_chain = chain(
+        *[process_generation_task.si(str(t.id)) for t in pending_tasks]
+    )
+    task_chain.apply_async()
+    
+    return {
+        "started": len(pending_tasks), 
+        "msg": f"Запущена цепочка из {len(pending_tasks)} задач (последовательно)"
+    }
+
+@router.get("/{task_id}/serp-data")
+def get_task_serp_data(task_id: str, db: Session = Depends(get_db)):
+    """Возвращает структурированные SERP-данные задачи для отображения в UI."""
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    serp = task.serp_data or {}
+    
+    return {
+        "source": serp.get("source", "unknown"),
+        "total_results": serp.get("total_results", 0),
+        "serp_features": serp.get("serp_features") or [],
+        "search_intent_signals": serp.get("search_intent_signals") or {},
+        "organic_results": serp.get("organic_results") or [],
+        "paa_full": serp.get("paa_full") or [],
+        "related_searches_full": serp.get("related_searches_full") or serp.get("related_searches") or [],
+        "featured_snippet": serp.get("featured_snippet"),
+        "knowledge_graph": serp.get("knowledge_graph"),
+        "ai_overview": serp.get("ai_overview"),
+        "answer_box": serp.get("answer_box"),
+    }
+
+@router.get("/{task_id}/serp-export")
+def export_serp_csv(task_id: str, db: Session = Depends(get_db)):
+    """Экспортирует SERP-данные задачи как ZIP с несколькими CSV-файлами."""
+    import csv as csv_module
+    import io
+    import zipfile
+    from fastapi.responses import StreamingResponse
+    
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    serp = task.serp_data or {}
+    zip_buffer = io.BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        # 1. organic_results.csv
+        organic = serp.get("organic_results") or []
+        if organic:
+            csv_buf = io.StringIO()
+            fieldnames = ["rank_group", "rank_absolute", "title", "url", "domain",
+                          "description", "is_featured_snippet", "highlighted"]
+            writer = csv_module.DictWriter(csv_buf, fieldnames=fieldnames)
+            writer.writeheader()
+            for r in organic:
+                row = {k: r.get(k, "") for k in fieldnames}
+                row["highlighted"] = "; ".join(r.get("highlighted") or [])
+                writer.writerow(row)
+            zf.writestr("organic_results.csv", csv_buf.getvalue())
+        
+        # 2. paa.csv
+        paa = serp.get("paa_full") or []
+        if paa:
+            csv_buf = io.StringIO()
+            fieldnames = ["question", "answer", "url", "domain"]
+            writer = csv_module.DictWriter(csv_buf, fieldnames=fieldnames)
+            writer.writeheader()
+            for p in paa:
+                writer.writerow({k: p.get(k, "") for k in fieldnames})
+            zf.writestr("paa.csv", csv_buf.getvalue())
+        
+        # 3. related_searches.csv
+        related = serp.get("related_searches_full") or serp.get("related_searches") or []
+        if related:
+            csv_buf = io.StringIO()
+            if related and isinstance(related[0], dict):
+                writer = csv_module.DictWriter(csv_buf, fieldnames=["query", "highlighted"])
+                writer.writeheader()
+                for rs in related:
+                    row = {"query": rs.get("query", ""), "highlighted": "; ".join(rs.get("highlighted") or [])}
+                    writer.writerow(row)
+            else:
+                writer = csv_module.writer(csv_buf)
+                writer.writerow(["query"])
+                for rs in related:
+                    writer.writerow([rs])
+            zf.writestr("related_searches.csv", csv_buf.getvalue())
+        
+        # 4. snippets.csv
+        snippets_rows = []
+        fs = serp.get("featured_snippet")
+        if fs:
+            snippets_rows.append({
+                "type": "featured_snippet", "title": fs.get("title", ""),
+                "text": fs.get("description", ""), "url": fs.get("url", ""),
+                "domain": fs.get("domain", ""), "snippet_type": fs.get("type", ""),
+            })
+        ab = serp.get("answer_box")
+        if ab:
+            snippets_rows.append({
+                "type": "answer_box", "title": "",
+                "text": ab.get("text", ""), "url": ab.get("url", ""),
+                "domain": "", "snippet_type": ab.get("type", ""),
+            })
+        ai_ov = serp.get("ai_overview")
+        if ai_ov:
+            snippets_rows.append({
+                "type": "ai_overview", "title": "",
+                "text": ai_ov.get("text", "")[:5000], "url": "",
+                "domain": "", "snippet_type": "",
+            })
+        if snippets_rows:
+            csv_buf = io.StringIO()
+            fieldnames = ["type", "title", "text", "url", "domain", "snippet_type"]
+            writer = csv_module.DictWriter(csv_buf, fieldnames=fieldnames)
+            writer.writeheader()
+            for row in snippets_rows:
+                writer.writerow(row)
+            zf.writestr("snippets.csv", csv_buf.getvalue())
+        
+        # 5. knowledge_graph.csv
+        kg = serp.get("knowledge_graph")
+        if kg:
+            csv_buf = io.StringIO()
+            writer = csv_module.writer(csv_buf)
+            writer.writerow(["field", "value"])
+            writer.writerow(["title", kg.get("title", "")])
+            writer.writerow(["subtitle", kg.get("subtitle", "")])
+            writer.writerow(["description", kg.get("description", "")])
+            for fact in kg.get("facts") or []:
+                writer.writerow([fact.get("label", ""), fact.get("value", "")])
+            zf.writestr("knowledge_graph.csv", csv_buf.getvalue())
+        
+        # 6. serp_meta.csv
+        csv_buf = io.StringIO()
+        writer = csv_module.writer(csv_buf)
+        writer.writerow(["key", "value"])
+        writer.writerow(["source", serp.get("source", "")])
+        writer.writerow(["total_results", serp.get("total_results", 0)])
+        writer.writerow(["serp_features", "; ".join(serp.get("serp_features") or [])])
+        signals = serp.get("search_intent_signals") or {}
+        for k, v in signals.items():
+            writer.writerow([k, v])
+        zf.writestr("serp_meta.csv", csv_buf.getvalue())
+    
+    zip_buffer.seek(0)
+    safe_keyword = "".join(c for c in (task.main_keyword or "serp") if c.isalnum() or c in " -_")
+    
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        iter([zip_buffer.getvalue()]),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=serp_{safe_keyword}.zip"}
+    )
 
 @router.post("/{task_id}/retry")
 def retry_task(task_id: str, db: Session = Depends(get_db)):
