@@ -210,6 +210,96 @@ def render_dashboard():
                 online = q_stats.get("celery_workers_online")
                 st.metric("Celery Workers", "🟢 Online" if online else "🔴 Offline")
 
+# ----- REUSABLE: STEP MONITOR -----
+def render_task_step_monitor(task_id: str, task_status: str, task_keyword: str, key_prefix: str = ""):
+    """
+    Универсальный блок мониторинга шагов pipeline для задачи.
+    Используется и в render_tasks(), и в render_projects().
+    key_prefix нужен для уникальности st.key когда один и тот же 
+    компонент рендерится в разных табах.
+    """
+    if task_status not in ("processing", "completed", "failed"):
+        st.info(f"Задача '{task_keyword}' ещё не начата (статус: {task_status})")
+        return
+        
+    steps_data = fetch_data(f"tasks/{task_id}/steps")
+    if not steps_data:
+        st.warning("Не удалось загрузить шаги задачи")
+        return
+    
+    progress = steps_data.get("progress", 0)
+    current = steps_data.get("current_step", "")
+    steps = steps_data.get("step_results") or {}
+    
+    total_cost = steps_data.get("total_cost", 0.0)
+    if total_cost > 0:
+        st.metric("Общая стоимость генерации", f"${total_cost:.4f}")
+    
+    if task_status == "processing":
+        if steps.get("waiting_for_approval"):
+            st.warning("🛑 Задача приостановлена в режиме тестирования (Режим подтверждения)")
+            draft = steps.get("primary_generation", {}).get("result", "")
+            with st.expander("Ознакомиться со сгенерированным текстом:", expanded=True):
+                st.markdown(draft, unsafe_allow_html=True)
+            if st.button("✅ Одобрить текст (Продолжить пайплайн)", type="primary", use_container_width=True, key=f"{key_prefix}_approve_{task_id}"):
+                post_data(f"tasks/{task_id}/approve", {})
+                st.success("Одобрено! Задача возвращена в работу.")
+                st.rerun()
+        else:
+            st.progress(progress / 100, text=f"{progress}% — {current or 'выполнение...'}")
+            import time
+            time.sleep(5)
+            st.rerun()
+    
+    step_order = [
+        ("serp_research", "🔍 SERP Research"),
+        ("competitor_scraping", "🕷️ Парсинг конкурентов"),
+        ("ai_structure_analysis", "🧠 AI анализ структуры"),
+        ("chunk_cluster_analysis", "📊 Анализ кластера"),
+        ("competitor_structure_analysis", "🏗️ Анализ конкурентов"),
+        ("final_structure_analysis", "📐 Финальная структура"),
+        ("structure_fact_checking", "🔍 Фактический анализ структуры"),
+        ("primary_generation", "✍️ Первичная генерация"),
+        ("competitor_comparison", "⚖️ Сравнение с конкурентами"),
+        ("reader_opinion", "👤 Мнение читателя"),
+        ("interlinking_citations", "🔗 Перелинковка (Interlink)"),
+        ("improver", "💎 Улучшайзер"),
+        ("final_editing", "✅ Финальная редактура"),
+        ("content_fact_checking", "🔍 Факт-чекинг контента"),
+        ("html_structure", "🏷️ Структура HTML"),
+        ("meta_generation", "🏷️ Мета-теги"),
+    ]
+    
+    for step_key, step_label in step_order:
+        step = steps.get(step_key)
+        if not step:
+            st.write(f"⬜ **{step_label}** — ожидание")
+            continue
+        
+        s_status = step.get("status", "pending")
+        icon = "✅" if s_status == "completed" else "🔄"
+        
+        with st.expander(f"{icon} {step_label}", expanded=(s_status == "running")):
+            if step.get("result"):
+                result_text = step["result"][:50000]
+                st.text_area("Результат", value=result_text[:10000], height=200, disabled=True, key=f"{key_prefix}_res_{step_key}_{task_id}")
+                
+                import html as html_lib
+                escaped = html_lib.escape(result_text).replace("`", "\\`").replace("$", "\\$")
+                copy_html = f"""
+                <button onclick="navigator.clipboard.writeText(document.getElementById('{key_prefix}_copy_{step_key}_{task_id}').value).then(()=>this.innerText='✅ Скопировано!').catch(()=>this.innerText='❌ Ошибка')" 
+                style="background:#4F46E5;color:white;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px;margin-bottom:10px;">
+                📋 Копировать результат
+                </button>
+                <textarea id="{key_prefix}_copy_{step_key}_{task_id}" style="position:absolute;left:-9999px;">{escaped}</textarea>
+                """
+                st.components.v1.html(copy_html, height=40)
+                
+            step_model = step.get("model", "—")
+            step_cost = step.get("cost", 0.0)
+            step_time = step.get("timestamp", "")
+            st.caption(f"🤖 **{step_model}**  ·  💰 **${step_cost:.4f}**  ·  🕐 {step_time}")
+
 # ----- TAB: TASKS -----
 def render_tasks():
     st.header("Задачи на генерацию")
@@ -352,82 +442,7 @@ def render_tasks():
         selected_task = next((t for t in tasks if t["id"] == selected_task_id), None)
         
         if selected_task:
-            # === Progress Bar & Intermediate Results ===
-            if selected_task["status"] in ("processing", "completed", "failed"):
-                steps_data = fetch_data(f"tasks/{selected_task_id}/steps")
-                if steps_data:
-                    progress = steps_data.get("progress", 0)
-                    current = steps_data.get("current_step", "")
-                    steps = steps_data.get("step_results") or {}
-                    
-                    total_cost = steps_data.get("total_cost", 0.0)
-                    if total_cost > 0:
-                        st.metric("Общая стоимость генерации", f"${total_cost:.4f}")
-                    
-                    if selected_task["status"] == "processing":
-                        if steps.get("waiting_for_approval"):
-                            st.warning("🛑 Задача приостановлена в режиме тестирования (Режим подтверждения)")
-                            draft = steps.get("primary_generation", {}).get("result", "")
-                            with st.expander("Ознакомиться со сгенерированным текстом:", expanded=True):
-                                st.markdown(draft, unsafe_allow_html=True)
-                            if st.button("✅ Одобрить текст (Продолжить пайплайн)", type="primary", use_container_width=True):
-                                post_data(f"tasks/{selected_task_id}/approve", {})
-                                st.success("Одобрено! Задача возвращена в работу.")
-                                st.rerun()
-                        else:
-                            st.progress(progress / 100, text=f"{progress}% — {current or 'выполнение...'}")
-                            import time
-                            time.sleep(5)
-                            st.rerun()
-                    
-                    step_order = [
-                        ("serp_research", "🔍 SERP Research"),
-                        ("competitor_scraping", "🕷️ Парсинг конкурентов"),
-                        ("ai_structure_analysis", "🧠 AI анализ структуры"),
-                        ("chunk_cluster_analysis", "📊 Анализ кластера"),
-                        ("competitor_structure_analysis", "🏗️ Анализ конкурентов"),
-                        ("final_structure_analysis", "📐 Финальная структура"),
-                        ("structure_fact_checking", "🔍 Фактический анализ структуры"),
-                        ("primary_generation", "✍️ Первичная генерация"),
-                        ("competitor_comparison", "⚖️ Сравнение с конкурентами"),
-                        ("reader_opinion", "👤 Мнение читателя"),
-                        ("interlinking_citations", "🔗 Перелинковка (Interlink)"),
-                        ("improver", "💎 Улучшайзер"),
-                        ("final_editing", "✅ Финальная редактура"),
-                        ("content_fact_checking", "🔍 Факт-чекинг контента"),
-                        ("html_structure", "🏷️ Структура HTML"),
-                        ("meta_generation", "🏷️ Мета-теги"),
-                    ]
-                    
-                    for step_key, step_label in step_order:
-                        step = steps.get(step_key)
-                        if not step:
-                            st.write(f"⬜ **{step_label}** — ожидание")
-                            continue
-                        
-                        s_status = step.get("status", "pending")
-                        icon = "✅" if s_status == "completed" else "🔄"
-                        
-                        with st.expander(f"{icon} {step_label}", expanded=(s_status == "running")):
-                            if step.get("result"):
-                                result_text = step["result"][:50000]
-                                st.text_area("Результат", value=result_text[:10000], height=200, disabled=True, key=f"res_{step_key}_{selected_task_id}")
-                                
-                                import html as html_lib
-                                escaped = html_lib.escape(result_text).replace("`", "\\`").replace("$", "\\$")
-                                copy_html = f"""
-                                <button onclick="navigator.clipboard.writeText(document.getElementById('copy_{step_key}_{selected_task_id}').value).then(()=>this.innerText='✅ Скопировано!').catch(()=>this.innerText='❌ Ошибка')" 
-                                style="background:#4F46E5;color:white;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px;margin-bottom:10px;">
-                                📋 Копировать результат
-                                </button>
-                                <textarea id="copy_{step_key}_{selected_task_id}" style="position:absolute;left:-9999px;">{escaped}</textarea>
-                                """
-                                st.components.v1.html(copy_html, height=40)
-                                
-                            step_model = step.get("model", "—")
-                            step_cost = step.get("cost", 0.0)
-                            step_time = step.get("timestamp", "")
-                            st.caption(f"🤖 **{step_model}**  ·  💰 **${step_cost:.4f}**  ·  🕐 {step_time}")
+            render_task_step_monitor(selected_task_id, selected_task["status"], selected_task["main_keyword"], key_prefix="tasks")
             
             # === Actions ===
             st.write("---")
@@ -1071,13 +1086,108 @@ def render_projects():
             st.progress(completed / total_pages if total_pages > 0 else 0, text=f"Прогресс: {completed} / {total_pages} страниц")
             
             st.write(f"**Статус проекта:** {details['status']}")
+            
+            # Bug 3: Real status check for pending projects
+            if details['status'] == 'pending':
+                health = fetch_data("health/worker")
+                if health and health.get("status") == "ok":
+                    from datetime import datetime
+                    try:
+                        created = datetime.fromisoformat(details['created_at'])
+                        age_minutes = (datetime.utcnow() - created).total_seconds() / 60
+                    except Exception:
+                        age_minutes = 0
+                    
+                    if age_minutes > 5:
+                        st.warning(f"⚠️ Проект создан {int(age_minutes)} мин. назад, но до сих пор в статусе pending. "
+                                   f"Возможно, worker занят другой задачей. Проверьте логи.")
+                    else:
+                        st.info("⏳ Проект принят в обработку. Worker активен.")
+                else:
+                    st.error("🔴 Worker не отвечает! Задача не будет обработана. "
+                             "Перезапустите worker: docker-compose restart worker")
+            
+            # Feature 4: Stopping indicator
+            if details.get('stopping_requested') and details['status'] == 'generating':
+                st.warning("🔄 Остановка запрошена. Текущая задача завершается... "
+                           "Проект будет остановлен после её завершения.")
+            
+            # Feature 4: Stop button
+            if details['status'] in ('pending', 'generating'):
+                col_stop, col_spacer = st.columns([1, 3])
+                with col_stop:
+                    if st.button("⏹️ Остановить проект", type="secondary", use_container_width=True, 
+                                  key=f"stop_{selected_pr_id}"):
+                        result = post_data(f"projects/{selected_pr_id}/stop", {})
+                        if result:
+                            st.warning("🛑 Запрос на остановку отправлен. Проект остановится после завершения текущей задачи.")
+                            import time
+                            time.sleep(2)
+                            st.rerun()
+            
+            # Feature 4: Resume button
+            if details['status'] == 'stopped':
+                st.warning("⏹️ Проект был остановлен пользователем.")
+                col_resume, col_spacer = st.columns([1, 3])
+                with col_resume:
+                    if st.button("▶️ Возобновить проект", type="primary", use_container_width=True, 
+                                  key=f"resume_{selected_pr_id}"):
+                        result = post_data(f"projects/{selected_pr_id}/resume", {})
+                        if result:
+                            st.success("✅ Проект возобновлён!")
+                            import time
+                            time.sleep(2)
+                            st.rerun()
+            
             if details['status'] == 'completed' and details.get('build_zip_url'):
                 st.markdown(f'<a href="{API_URL}/projects/{selected_pr_id}/download" target="_blank"><button style="background-color:#4F46E5;color:white;padding:10px 24px;border:none;border-radius:8px;font-weight:600;cursor:pointer;">Скачать готовый сайт (.zip)</button></a>', unsafe_allow_html=True)
                 
             if tasks:
                 st.markdown("### Задачи проекта")
-                df_t = pd.DataFrame(tasks)
-                st.dataframe(df_t[["main_keyword", "page_type", "status"]], use_container_width=True)
+                
+                # Visual progress rows instead of plain dataframe
+                for t in tasks:
+                    col1, col2, col3, col4 = st.columns([3, 2, 1, 2])
+                    col1.write(t["main_keyword"])
+                    col2.write(t["page_type"])
+                    
+                    status_icon = {"pending": "⬜", "processing": "🔄", "completed": "✅", "failed": "❌"}.get(t["status"], "❓")
+                    col3.write(status_icon)
+                    
+                    progress = t.get("progress", 0)
+                    col4.progress(progress / 100, text=f"{progress}%")
+                
+                # Auto-select active task (processing > last pending > first)
+                processing_tasks = [t for t in tasks if t["status"] == "processing"]
+                pending_tasks = [t for t in tasks if t["status"] == "pending"]
+                
+                if processing_tasks:
+                    default_task_id = processing_tasks[0]["id"]
+                elif pending_tasks:
+                    default_task_id = pending_tasks[-1]["id"]
+                else:
+                    default_task_id = tasks[0]["id"]
+                
+                task_ids = [t["id"] for t in tasks]
+                default_idx = task_ids.index(default_task_id) if default_task_id in task_ids else 0
+                
+                st.markdown("### Мониторинг задачи проекта")
+                selected_project_task_id = st.selectbox(
+                    "Выберите задачу для мониторинга",
+                    task_ids,
+                    index=default_idx,
+                    format_func=lambda x: next((f"{t['main_keyword']} ({t['status']})" for t in tasks if t["id"] == x), x),
+                    key="proj_task_sel"
+                )
+                
+                selected_project_task = next((t for t in tasks if t["id"] == selected_project_task_id), None)
+                if selected_project_task:
+                    render_task_step_monitor(
+                        selected_project_task_id,
+                        selected_project_task["status"],
+                        selected_project_task["main_keyword"],
+                        key_prefix="proj"
+                    )
 
 # ----- TAB: SITES -----
 def render_sites():

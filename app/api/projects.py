@@ -9,11 +9,13 @@ import uuid
 import os
 
 from app.database import get_db
+from app.api.tasks import calculate_progress
 from app.models.project import SiteProject
 from app.models.blueprint import SiteBlueprint
 from app.models.site import Site
 from app.models.author import Author
 from app.models.task import Task
+from app.workers.celery_app import celery_app
 
 # Imported to defer circular dep issues, will verify app.workers.tasks is available
 from app.workers.tasks import process_site_project
@@ -118,8 +120,29 @@ def create_project(project_in: SiteProjectCreate, db: Session = Depends(get_db))
     db.commit()
     db.refresh(new_project)
     
+    # Check worker availability before dispatching
+    try:
+        inspect = celery_app.control.inspect(timeout=3)
+        ping = inspect.ping()
+        if not ping:
+            raise HTTPException(
+                status_code=503,
+                detail="Worker недоступен. Проект создан, но задача не отправлена. "
+                       "Проверьте docker-compose logs worker."
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail="Не удалось проверить доступность worker. "
+                   "Проверьте Redis и Celery worker."
+        )
+    
     # Start celery project workflow
-    process_site_project.delay(str(new_project.id))
+    result = process_site_project.delay(str(new_project.id))
+    new_project.celery_task_id = result.id
+    db.commit()
     
     return {"id": str(new_project.id), "status": "Project created and queued"}
 
@@ -141,15 +164,62 @@ def get_project_details(id: str, db: Session = Depends(get_db)):
         "status": project.status,
         "current_page_index": project.current_page_index,
         "build_zip_url": project.build_zip_url,
+        "stopping_requested": project.stopping_requested,
         "created_at": project.created_at.isoformat(),
         "tasks": [{
             "id": str(t.id),
             "blueprint_page_id": str(t.blueprint_page_id) if t.blueprint_page_id else None,
             "status": t.status,
             "main_keyword": t.main_keyword,
-            "page_type": t.page_type
+            "page_type": t.page_type,
+            "progress": calculate_progress(t.step_results),
+            "current_step": next(
+                (k for k, v in (t.step_results or {}).items() 
+                 if isinstance(v, dict) and v.get("status") == "running"), 
+                None
+            )
         } for t in tasks]
     }
+
+@router.post("/{id}/stop")
+def stop_project(id: str, db: Session = Depends(get_db)):
+    project = db.query(SiteProject).filter(SiteProject.id == id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    if project.status not in ("pending", "generating"):
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot stop project in status '{project.status}'. "
+                   f"Only 'pending' or 'generating' can be stopped."
+        )
+    
+    project.stopping_requested = True
+    db.commit()
+    
+    return {
+        "msg": "Stop requested. Project will stop after current task completes.",
+        "project_id": str(project.id),
+        "status": project.status
+    }
+
+@router.post("/{id}/resume")
+def resume_project(id: str, db: Session = Depends(get_db)):
+    project = db.query(SiteProject).filter(SiteProject.id == id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    if project.status != "stopped":
+        raise HTTPException(status_code=400, detail="Can only resume stopped projects")
+    
+    project.status = "generating"
+    project.stopping_requested = False
+    db.commit()
+    
+    # Resume from where we left off
+    process_site_project.delay(str(project.id))
+    
+    return {"msg": "Project resumed", "project_id": str(project.id)}
 
 @router.get("/{id}/download")
 def download_project_zip(id: str, db: Session = Depends(get_db)):
