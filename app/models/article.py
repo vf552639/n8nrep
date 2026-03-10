@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime
 from sqlalchemy import Column, String, Integer, Text, ForeignKey, DateTime
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import Boolean, Float
 from app.database import Base
 
 class GeneratedArticle(Base):
@@ -14,4 +15,11 @@ class GeneratedArticle(Base):
     html_content = Column(Text, nullable=True)
     full_page_html = Column(Text, nullable=True)
     word_count = Column(Integer, nullable=True)
+    
+    # Fact-checking fields
+    fact_check_status = Column(String(20), default="") # "pass", "warn", "fail", ""
+    fact_check_issues = Column(JSONB, default=[])
+    fact_check_score = Column(Float, default=0.0)
+    needs_review = Column(Boolean, default=False)
+    
     created_at = Column(DateTime, default=datetime.utcnow)

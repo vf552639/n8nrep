@@ -5,6 +5,7 @@ from app.models.author import Author
 from app.models.prompt import Prompt
 from app.models.blueprint import SiteBlueprint, BlueprintPage
 from app.models.project import SiteProject
+from app.models.project_content_anchor import ProjectContentAnchor
 
 __all__ = [
     "Task",
@@ -15,5 +16,6 @@ __all__ = [
     "Prompt",
     "SiteBlueprint",
     "BlueprintPage",
-    "SiteProject"
+    "SiteProject",
+    "ProjectContentAnchor"
 ]

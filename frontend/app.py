@@ -387,12 +387,14 @@ def render_tasks():
                         ("chunk_cluster_analysis", "📊 Анализ кластера"),
                         ("competitor_structure_analysis", "🏗️ Анализ конкурентов"),
                         ("final_structure_analysis", "📐 Финальная структура"),
+                        ("structure_fact_checking", "🔍 Фактический анализ структуры"),
                         ("primary_generation", "✍️ Первичная генерация"),
                         ("competitor_comparison", "⚖️ Сравнение с конкурентами"),
                         ("reader_opinion", "👤 Мнение читателя"),
                         ("interlinking_citations", "🔗 Перелинковка (Interlink)"),
                         ("improver", "💎 Улучшайзер"),
                         ("final_editing", "✅ Финальная редактура"),
+                        ("content_fact_checking", "🔍 Факт-чекинг контента"),
                         ("html_structure", "🏷️ Структура HTML"),
                         ("meta_generation", "🏷️ Мета-теги"),
                     ]
@@ -461,8 +463,27 @@ def render_articles():
     
     articles = fetch_data(f"articles/?limit={art_limit}&skip={art_skip}")
     if articles:
+        # Map fact_check limits and emojis
+        fc_icons = {"pass": "🟢 Pass", "warn": "🟡 Warn", "fail": "🔴 Fail", "": "⚪ N/A", None: "⚪ N/A"}
+        for a in articles:
+            a["fc_display"] = fc_icons.get(a.get("fact_check_status"))
+            a["needs_review_display"] = "⚠️ Да" if a.get("needs_review") else "Нет"
+            
         df = pd.DataFrame(articles)
-        st.dataframe(df[["id", "title", "word_count", "created_at"]], use_container_width=True)
+        
+        st.dataframe(
+            df[["id", "title", "fc_display", "needs_review_display", "word_count", "created_at"]],
+            column_config={
+                "id": st.column_config.TextColumn("ID", width="small"),
+                "title": st.column_config.TextColumn("Заголовок", width="large"),
+                "fc_display": st.column_config.TextColumn("Факт-чек", width="small"),
+                "needs_review_display": st.column_config.TextColumn("Ручная проверка", width="small"),
+                "word_count": st.column_config.NumberColumn("Слов", width="small"),
+                "created_at": st.column_config.TextColumn("Создано", width="medium"),
+            },
+            use_container_width=True,
+            hide_index=True
+        )
         
         st.subheader("Просмотр статьи")
         selected_id = st.selectbox("Выберите статью для предпросмотра", [a["id"] for a in articles])
@@ -473,6 +494,35 @@ def render_articles():
                 col1.text_area("Meta Title", value=art.get("title", ""), disabled=True)
                 col2.text_area("Meta Description", value=art.get("description", ""), disabled=True)
                 
+                if art.get("fact_check_status"):
+                    st.markdown("### Факт-чек")
+                    status_colors = {"pass": "🟢 Успешно (Pass)", "warn": "🟡 Предупреждения (Warn)", "fail": "🔴 Ошибки (Fail)"}
+                    st.write(f"**Статус проверки:** {status_colors.get(art['fact_check_status'], '⚪ Нет данных')}")
+                    
+                    if art.get("needs_review"):
+                        st.error("⚠️ Статья требует ручной проверки (needs_review = True)")
+
+                    issues = art.get("fact_check_issues") or []
+                    if issues:
+                        for idx, issue in enumerate(issues):
+                            severity = issue.get("severity", "info")
+                            emoji = "🔴" if severity == "critical" else "🟡" if severity == "warning" else "🔵"
+                            is_resolved = issue.get("resolved", False)
+                            
+                            with st.expander(f"{'✅ [ИСПРАВЛЕНО] ' if is_resolved else emoji + ' '} [{severity.upper()}] {issue.get('claim', 'Утверждение')[:100]}..."):
+                                st.write(f"**Утверждение:** {issue.get('claim')}")
+                                st.write(f"**Проблема:** {issue.get('problem')}")
+                                st.write(f"**Предложение:** {issue.get('suggestion')}")
+                                st.write(f"**Где найдено:** {issue.get('location')}")
+                                st.write(f"**Уверенность AI:** {issue.get('confidence')}")
+                                
+                                if not is_resolved:
+                                    if st.button("Пометить как исправлено", key=f"resolve_{art['id']}_{idx}"):
+                                        res = post_data(f"articles/{art['id']}/issues/{idx}/resolve", {})
+                                        if res:
+                                            st.success("✅ Отмечено!")
+                                            st.rerun()
+
                 with st.expander("Исходный код HTML"):
                     st.code(art.get("html_content", ""), language="html")
                     
@@ -543,18 +593,20 @@ def render_authors():
 def render_prompts():
     st.header("Управление Промптами (LLM Агенты)")
     
-    # 12 agents: key → display name
+    # 14 agents: key → display name
     agents_map = {
         "ai_structure_analysis": "AI анализ структуры",
         "chunk_cluster_analysis": "Анализ кластера (Чанки)",
         "competitor_structure_analysis": "Анализ конкурентов",
         "final_structure_analysis": "Финальный анализ структуры",
+        "structure_fact_checking": "Фактический анализ структуры",
         "primary_generation": "Первичная генерация",
         "competitor_comparison": "Сравнение с конкурентами",
         "reader_opinion": "Мнение читателя",
         "interlinking_citations": "Перелинковка и цитаты",
         "improver": "Улучшайзер",
         "final_editing": "Финальная редактура",
+        "content_fact_checking": "Факт-чекинг контента",
         "html_structure": "Структура HTML",
         "meta_generation": "Генерация мета-тегов",
     }
@@ -642,6 +694,7 @@ div[data-testid="stHorizontalBlock"] {
                     ("result_chunk_cluster_analysis", "Анализ кластера (Чанки)"),
                     ("result_competitor_structure_analysis", "Анализ конкурентов"),
                     ("result_final_structure_analysis", "Финальный анализ структуры (JSON)"),
+                    ("structure_fact_checking", "Фактический анализ структуры (Отчет)"),
                     ("result_primary_generation", "Первичная генерация (HTML)"),
                     ("result_competitor_comparison", "Сравнение с конкурентами"),
                     ("result_reader_opinion", "Мнение читателя"),

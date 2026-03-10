@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     CELERY_CONCURRENCY: int = 2
     CELERY_TASK_TIME_LIMIT: int = 900
 
+    # Fact Checking
+    FACT_CHECK_ENABLED: bool = True
+    FACT_CHECK_MODE: str = "soft" # "soft" or "strict"
+    FACT_CHECK_FAIL_THRESHOLD: int = 1
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

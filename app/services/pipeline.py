@@ -16,6 +16,7 @@ from app.services.scraper import scrape_urls
 from app.services.llm import generate_text
 from app.services.template_engine import generate_full_page, get_template_for_reference
 from app.services.notifier import notify_task_success, notify_task_failed
+from app.services.deduplication import ContentDeduplicator
 from app.config import settings
 
 from app.services.json_parser import clean_and_parse_json
@@ -253,8 +254,6 @@ def setup_vars(ctx: PipelineContext):
     }
 
 def setup_template_vars(ctx: PipelineContext):
-    author_style, imitation, year, face, target_audience, rhythms_style = "", "", "", "", "", ""
-    author_name = ""
     
     if ctx.task.author_id:
         author = ctx.db.query(Author).filter(Author.id == ctx.task.author_id).first()
@@ -276,8 +275,13 @@ def setup_template_vars(ctx: PipelineContext):
         f"Rhythms & Style: {rhythms_style}\n"
         f"Exclude Words: {settings.EXCLUDE_WORDS}"
     )
-    
+    already_covered_topics = ""
+    if ctx.task.project_id:
+        deduplicator = ContentDeduplicator(ctx.db)
+        already_covered_topics = deduplicator.get_already_covered(ctx.task.project_id, ctx.task.id)
+
     ctx.template_vars = {
+        "already_covered_topics": already_covered_topics,
         "keyword": ctx.task.main_keyword,
         "additional_keywords": ctx.task.additional_keywords or "",
         "country": ctx.task.country,
@@ -316,6 +320,7 @@ def setup_template_vars(ctx: PipelineContext):
         "answer_box": ctx.analysis_vars.get("answer_box", ""),
         "serp_features": ctx.analysis_vars.get("serp_features", ""),
         "search_intent_signals": ctx.analysis_vars.get("search_intent_signals", ""),
+        "structure_fact_checking": ""
     }
 
     # Fetch HTML template reference for LLM injection
@@ -454,6 +459,17 @@ def phase_final_structure(ctx: PipelineContext):
     add_log(ctx.db, ctx.task, f"Final Structure Analysis completed", step=STEP_FINAL_ANALYSIS)
     save_step_result(ctx.db, ctx.task, STEP_FINAL_ANALYSIS, result=outline_json_str, model=actual_model, status="completed", cost=step_cost)
 
+def phase_structure_fact_check(ctx: PipelineContext):
+    setup_template_vars(ctx)
+    add_log(ctx.db, ctx.task, "Starting Structure Fact-Checking...", step=STEP_STRUCTURE_FACT_CHECK)
+    save_step_result(ctx.db, ctx.task, STEP_STRUCTURE_FACT_CHECK, result=None, status="running")
+    
+    fact_check_report, step_cost, actual_model = call_agent(ctx.db, "structure_fact_checking", "", variables=ctx.template_vars)
+    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
+    
+    add_log(ctx.db, ctx.task, f"Structure Fact-Checking completed ({len(fact_check_report)} chars)", step=STEP_STRUCTURE_FACT_CHECK)
+    save_step_result(ctx.db, ctx.task, STEP_STRUCTURE_FACT_CHECK, result=fact_check_report, model=actual_model, status="completed", cost=step_cost)
+
 def phase_primary_gen(ctx: PipelineContext):
     setup_template_vars(ctx)
     outline_json = ctx.task.outline.get("final_outline", {})
@@ -585,6 +601,39 @@ def phase_html_structure(ctx: PipelineContext):
     add_log(ctx.db, ctx.task, f"HTML Structure completed ({len(structured_html)} chars)", step=STEP_HTML_STRUCT)
     save_step_result(ctx.db, ctx.task, STEP_HTML_STRUCT, result=structured_html, model=actual_model, status="completed", cost=step_cost)
 
+def phase_content_fact_check(ctx: PipelineContext):
+    if not settings.FACT_CHECK_ENABLED:
+        return
+        
+    setup_template_vars(ctx)
+    final_html = ctx.task.step_results.get(STEP_FINAL_EDIT, {}).get("result", "")
+    
+    ctx.template_vars["final_article"] = final_html
+    ctx.template_vars["scraped_competitors_text"] = ctx.task.competitors_text[:15000] if ctx.task.competitors_text else ""
+    
+    fact_check_context = (
+        f"Final Article HTML:\n{final_html}\n\n"
+        f"Keyword: {ctx.task.main_keyword}\n"
+        f"Language: {ctx.task.language}\n"
+        f"Country: {ctx.task.country}"
+    )
+    
+    add_log(ctx.db, ctx.task, "Starting Fact-Checking...", step=STEP_FACT_CHECK)
+    save_step_result(ctx.db, ctx.task, STEP_FACT_CHECK, result=None, status="running")
+    
+    try:
+        fact_check_json_str, step_cost, actual_model = call_agent(
+            ctx.db, "fact_checking", fact_check_context,
+            response_format={"type": "json_object"}, variables=ctx.template_vars
+        )
+        ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
+        
+        add_log(ctx.db, ctx.task, f"Fact-Checking completed", step=STEP_FACT_CHECK)
+        save_step_result(ctx.db, ctx.task, STEP_FACT_CHECK, result=fact_check_json_str, model=actual_model, status="completed", cost=step_cost)
+    except Exception as e:
+        add_log(ctx.db, ctx.task, f"Fact-checking agent failed or not found: {str(e)}", level="warn", step=STEP_FACT_CHECK)
+        save_step_result(ctx.db, ctx.task, STEP_FACT_CHECK, result='{"verification_status": "warn", "issues": [], "summary": "Failed to run fact_checking agent."}', status="completed")
+
 def phase_meta_generation(ctx: PipelineContext):
     setup_template_vars(ctx)
     structured_html = ctx.task.step_results.get(STEP_HTML_STRUCT, {}).get("result", "")
@@ -619,6 +668,7 @@ def run_pipeline(db: Session, task_id: str):
             run_phase(db, ctx.task, STEP_CHUNK_ANALYSIS, phase_chunk_analysis, ctx)
             run_phase(db, ctx.task, STEP_COMP_STRUCTURE, phase_competitor_structure, ctx)
             run_phase(db, ctx.task, STEP_FINAL_ANALYSIS, phase_final_structure, ctx)
+            run_phase(db, ctx.task, STEP_STRUCTURE_FACT_CHECK, phase_structure_fact_check, ctx)
         else:
             if not ctx.task.outline:
                 ctx.task.serp_data = {}
@@ -649,6 +699,10 @@ def run_pipeline(db: Session, task_id: str):
             run_phase(db, ctx.task, STEP_IMPROVER, phase_improver, ctx)
 
         run_phase(db, ctx.task, STEP_FINAL_EDIT, phase_final_editing, ctx)
+        
+        if settings.FACT_CHECK_ENABLED:
+            run_phase(db, ctx.task, STEP_CONTENT_FACT_CHECK, phase_content_fact_check, ctx)
+            
         run_phase(db, ctx.task, STEP_HTML_STRUCT, phase_html_structure, ctx)
         run_phase(db, ctx.task, STEP_META_GEN, phase_meta_generation, ctx)
 
@@ -667,6 +721,30 @@ def run_pipeline(db: Session, task_id: str):
         word_count = len(BeautifulSoup(structured_html, "html.parser").get_text(strip=True).split())
         full_page = generate_full_page(db, str(ctx.task.target_site_id), structured_html, title, description)
 
+        # Process fact_check results
+        fact_check_status_val = ""
+        fact_check_issues_val = []
+        needs_review_val = False
+        
+        if settings.FACT_CHECK_ENABLED:
+            fc_res_str = ctx.task.step_results.get(STEP_FACT_CHECK, {}).get("result", "{}")
+            if fc_res_str:
+                fc_data = clean_and_parse_json(fc_res_str)
+                if fc_data:
+                    fact_check_status_val = fc_data.get("verification_status", "")
+                    fact_check_issues_val = fc_data.get("issues", [])
+                    
+                    critical_count = sum(1 for issue in fact_check_issues_val if issue.get("severity") == "critical")
+                    
+                    if fact_check_status_val == "fail" or critical_count >= settings.FACT_CHECK_FAIL_THRESHOLD:
+                        needs_review_val = True
+                        add_log(db, ctx.task, f"Fact-check marked for review ({critical_count} critical issues).", level="warn", step=STEP_FACT_CHECK)
+                        
+                        if getattr(settings, "FACT_CHECK_MODE", "soft") == "strict":
+                            raise Exception("Fact-check failed in strict mode. Task aborted.")
+                    elif fact_check_status_val == "warn":
+                        add_log(db, ctx.task, f"Fact-check returned warnings.", level="warn", step=STEP_FACT_CHECK)
+
         # Verify if an article exists already for this task
         existing = db.query(GeneratedArticle).filter(GeneratedArticle.task_id == ctx.task.id).first()
         if not existing:
@@ -676,12 +754,24 @@ def run_pipeline(db: Session, task_id: str):
                 description=description,
                 html_content=structured_html,
                 full_page_html=full_page,
-                word_count=word_count
+                word_count=word_count,
+                fact_check_status=fact_check_status_val,
+                fact_check_issues=fact_check_issues_val,
+                needs_review=needs_review_val
             )
             db.add(article)
 
         ctx.task.status = "completed"
         db.commit()
+        
+        if ctx.task.project_id:
+            deduplicator = ContentDeduplicator(db)
+            anchors = deduplicator.extract_anchors(
+                article_html=structured_html,
+                task_id=str(ctx.task.id),
+                keyword=ctx.task.main_keyword
+            )
+            deduplicator.save_anchors(project_id=str(ctx.task.project_id), task_id=str(ctx.task.id), anchors=anchors)
         
         add_log(db, ctx.task, "✅ Pipeline finished successfully", step=None)
         notify_task_success(str(ctx.task.id), ctx.task.main_keyword, ctx.site_name, word_count)

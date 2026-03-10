@@ -21,6 +21,8 @@ def get_articles(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
         "task_id": str(a.task_id),
         "title": a.title,
         "word_count": a.word_count,
+        "fact_check_status": a.fact_check_status,
+        "needs_review": a.needs_review,
         "created_at": a.created_at.isoformat()
     } for a in articles]
 
@@ -37,8 +39,29 @@ def get_article(article_id: str, db: Session = Depends(get_db)):
         "description": article.description,
         "html_content": article.html_content,
         "word_count": article.word_count,
+        "fact_check_status": article.fact_check_status,
+        "fact_check_issues": article.fact_check_issues,
+        "needs_review": article.needs_review,
         "created_at": article.created_at.isoformat()
     }
+
+@router.post("/{article_id}/issues/{issue_index}/resolve")
+def resolve_issue(article_id: str, issue_index: int, db: Session = Depends(get_db)):
+    article = db.query(GeneratedArticle).filter(GeneratedArticle.id == article_id).first()
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+        
+    issues = list(article.fact_check_issues or [])
+    if issue_index < 0 or issue_index >= len(issues):
+        raise HTTPException(status_code=400, detail="Invalid issue index")
+        
+    issues[issue_index]["resolved"] = True
+    
+    # Check if all critical issues are resolved to potentially unset needs_review
+    # But for now simply update the JSON
+    article.fact_check_issues = issues
+    db.commit()
+    return {"status": "ok"} 
 
 @router.get("/{article_id}/preview", response_class=HTMLResponse)
 def preview_article(article_id: str, db: Session = Depends(get_db)):
