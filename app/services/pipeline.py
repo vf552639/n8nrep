@@ -190,6 +190,24 @@ def call_agent(ctx: PipelineContext, agent_name: str, context: str, response_for
         for k, v in variables.items():
             val_str = str(v)
             variables_snapshot[k] = val_str[:200] + "..." if len(val_str) > 200 else val_str
+            
+        # --- INJECT EXCLUDE WORDS INTO PROMPT ---
+        exclude_str = variables.get("exclude_words", "")
+        if exclude_str.strip():
+            words_list = [w.strip() for w in exclude_str.split(",") if w.strip()]
+            if words_list:
+                exclude_instruction = (
+                    "\n\n[BANNED WORDS — CRITICAL RULE]\n"
+                    "You MUST NOT use ANY of the following words in your output, "
+                    "in any form (including variations, plurals, different cases). "
+                    "These words are strictly forbidden and their presence will cause "
+                    "the output to be rejected:\n"
+                    f"{', '.join(words_list)}\n"
+                    "Use synonyms or rephrase completely. "
+                    "This rule has the HIGHEST priority and overrides all other instructions."
+                )
+                system_text += exclude_instruction
+        # --- END INJECT ---
     
     user_msg = f"{user_template}\n\n[CONTEXT]\n{context}" if user_template else context
     
