@@ -152,118 +152,179 @@ MAX_AI_OVERVIEW_CHARS = 2000
 MAX_ANSWER_BOX_CHARS = 500
 MAX_KG_FACTS = 15
 
+def _safe_list(val) -> list:
+    """Guarantees a list return even if val is None, a string, a number, etc."""
+    if val is None:
+        return []
+    if isinstance(val, list):
+        return [item for item in val if item is not None]
+    return []
+
 def setup_vars(ctx: PipelineContext):
-    scrape_info = ctx.outline_data.get("scrape_info", {})
-    avg_words = scrape_info.get("avg_words", 800)
-    headers_info = scrape_info.get("headers", [])
-    
-    serp = ctx.task.serp_data if isinstance(ctx.task.serp_data, dict) else {}
-    
-    paa = serp.get("paa") or []
-    related = [r for r in (serp.get("related_searches") or []) if r is not None]
-    
-    organic_results = [r for r in (serp.get("organic_results") or []) if r is not None and isinstance(r, dict)]
-    paa_full = [p for p in (serp.get("paa_full") or []) if p is not None and isinstance(p, dict)]
-    featured_snippet = serp.get("featured_snippet")
-    knowledge_graph = serp.get("knowledge_graph")
-    ai_overview = serp.get("ai_overview")
-    answer_box = serp.get("answer_box")
-    serp_features = serp.get("serp_features") or []
-    intent_signals = serp.get("search_intent_signals") or {}
-    
-    competitor_titles = [
-        r.get("title", "") for r in organic_results 
-        if isinstance(r, dict) and r.get("title")
-    ][:MAX_COMPETITOR_TITLES]
-    competitor_descriptions = [
-        r.get("description", "") for r in organic_results 
-        if isinstance(r, dict) and r.get("description")
-    ][:MAX_COMPETITOR_DESCRIPTIONS]
-    highlighted_keywords = []
-    for r in organic_results:
-        if not r or not isinstance(r, dict):
-            continue
-        hl = r.get("highlighted")
-        if isinstance(hl, list):
-            highlighted_keywords.extend([kw for kw in hl if kw and isinstance(kw, str)])
-    highlighted_keywords = list(set(highlighted_keywords))[:MAX_HIGHLIGHTED_KEYWORDS]
-    
-    paa_with_answers = "\n".join([
-        f"Q: {p['question']}\nA: {p['answer']}" 
-        for p in (paa_full or []) if p.get("answer")
-    ][:MAX_PAA_WITH_ANSWERS]) if paa_full else ""
-    
-    add_kw_text = f"\nAdditional Keywords: {ctx.task.additional_keywords}" if ctx.task.additional_keywords else ""
+    try:
+        scrape_info = ctx.outline_data.get("scrape_info", {}) if isinstance(ctx.outline_data, dict) else {}
+        avg_words = scrape_info.get("avg_words", 800)
+        headers_info = scrape_info.get("headers", [])
+        
+        # === CRITICAL: Force safe dict ===
+        raw_serp = ctx.task.serp_data
+        if not isinstance(raw_serp, dict):
+            print(f"WARNING: serp_data is {type(raw_serp).__name__}, forcing empty dict. task_id={ctx.task_id}")
+            serp = {}
+        else:
+            serp = raw_serp
 
-    ctx.base_context = (
-        f"Keyword: {ctx.task.main_keyword}{add_kw_text}\n"
-        f"Country: {ctx.task.country}\n"
-        f"Language: {ctx.task.language}\n"
-        f"SERP Features Present: {json.dumps(serp_features)}\n"
-        f"Search Intent Signals: {json.dumps(intent_signals)}\n"
-        f"Competitor Titles: {json.dumps(competitor_titles, ensure_ascii=False)}\n"
-        f"Competitor Descriptions: {json.dumps(competitor_descriptions, ensure_ascii=False)}\n"
-        f"Google Highlighted Keywords: {json.dumps(highlighted_keywords, ensure_ascii=False)}\n"
-        f"People Also Ask (with answers):\n{paa_with_answers}\n"
-        f"Related Searches: {json.dumps(related, ensure_ascii=False)}\n"
-        f"Competitors Headers: {json.dumps(headers_info, ensure_ascii=False)}\n"
-        f"Target word count: {avg_words}"
-    )
+        def _safe_list(val):
+            """Guarantee a list return, even if val is any unexpected type."""
+            if isinstance(val, list):
+                return [item for item in val if item is not None]
+            if val is None:
+                return []
+            # val is a string, int, dict, or something else unexpected
+            print(f"WARNING: _safe_list got {type(val).__name__}: {str(val)[:100]}")
+            return []
 
-    if featured_snippet:
-        ctx.base_context += (
-            f"\n\nFeatured Snippet (Google's preferred answer):\n"
-            f"Type: {featured_snippet.get('type')}\n"
-            f"Title: {featured_snippet.get('title')}\n"
-            f"Text: {featured_snippet.get('description')}\n"
-            f"Source: {featured_snippet.get('domain')}"
-        )
+        paa = _safe_list(serp.get("paa"))
+        related = _safe_list(serp.get("related_searches"))
+        organic_results = [r for r in _safe_list(serp.get("organic_results")) if isinstance(r, dict)]
+        paa_full = [p for p in _safe_list(serp.get("paa_full")) if isinstance(p, dict)]
+        featured_snippet = serp.get("featured_snippet") if isinstance(serp.get("featured_snippet"), dict) else None
+        knowledge_graph = serp.get("knowledge_graph") if isinstance(serp.get("knowledge_graph"), dict) else None
+        ai_overview = serp.get("ai_overview") if isinstance(serp.get("ai_overview"), dict) else None
+        answer_box = serp.get("answer_box") if isinstance(serp.get("answer_box"), dict) else None
+        serp_features = _safe_list(serp.get("serp_features"))
+        intent_signals = serp.get("search_intent_signals") if isinstance(serp.get("search_intent_signals"), dict) else {}
+
+        competitor_titles = []
+        for r in organic_results:
+            t = r.get("title")
+            if isinstance(t, str) and t.strip():
+                competitor_titles.append(t)
+            if len(competitor_titles) >= MAX_COMPETITOR_TITLES:
+                break
+
+        competitor_descriptions = []
+        for r in organic_results:
+            d = r.get("description")
+            if isinstance(d, str) and d.strip():
+                competitor_descriptions.append(d)
+            if len(competitor_descriptions) >= MAX_COMPETITOR_DESCRIPTIONS:
+                break
+
+        highlighted_keywords = []
+        for r in organic_results:
+            if not r or not isinstance(r, dict):
+                continue
+            hl = r.get("highlighted")
+            if isinstance(hl, list):
+                for kw in hl:
+                    if isinstance(kw, str) and kw.strip() and kw not in highlighted_keywords:
+                        highlighted_keywords.append(kw)
+        highlighted_keywords = list(set(highlighted_keywords))[:MAX_HIGHLIGHTED_KEYWORDS]
         
-    if knowledge_graph:
-        facts = knowledge_graph.get('facts', [])[:MAX_KG_FACTS]
-        ctx.base_context += (
-            f"\n\nKnowledge Graph:\n"
-            f"Entity: {knowledge_graph.get('title')}"
-            f" ({knowledge_graph.get('subtitle', '')})\n"
-            f"Description: {knowledge_graph.get('description', '')}\n"
-            f"Facts: {json.dumps(facts, ensure_ascii=False)}"
-        )
+        paa_with_answers = "\n".join([
+            f"Q: {p['question']}\nA: {p['answer']}" 
+            for p in paa_full if isinstance(p, dict) and p.get("answer")
+        ][:MAX_PAA_WITH_ANSWERS]) if paa_full else ""
         
-    if ai_overview:
-        ctx.base_context += (
-            f"\n\nGoogle AI Overview:\n"
-            f"{ai_overview.get('text', '')[:MAX_AI_OVERVIEW_CHARS]}"
-        )
-        
-    if answer_box:
-        ctx.base_context += (
-            f"\n\nAnswer Box:\n"
-            f"{answer_box.get('text', '')[:MAX_ANSWER_BOX_CHARS]}"
+        add_kw_text = f"\nAdditional Keywords: {ctx.task.additional_keywords}" if ctx.task.additional_keywords else ""
+
+        ctx.base_context = (
+            f"Keyword: {ctx.task.main_keyword}{add_kw_text}\n"
+            f"Country: {ctx.task.country}\n"
+            f"Language: {ctx.task.language}\n"
+            f"SERP Features Present: {json.dumps(serp_features)}\n"
+            f"Search Intent Signals: {json.dumps(intent_signals)}\n"
+            f"Competitor Titles: {json.dumps(competitor_titles, ensure_ascii=False)}\n"
+            f"Competitor Descriptions: {json.dumps(competitor_descriptions, ensure_ascii=False)}\n"
+            f"Google Highlighted Keywords: {json.dumps(highlighted_keywords, ensure_ascii=False)}\n"
+            f"People Also Ask (with answers):\n{paa_with_answers}\n"
+            f"Related Searches: {json.dumps(related, ensure_ascii=False)}\n"
+            f"Competitors Headers: {json.dumps(headers_info, ensure_ascii=False)}\n"
+            f"Target word count: {avg_words}"
         )
 
-    ctx.analysis_vars = {
-        "keyword": ctx.task.main_keyword,
-        "additional_keywords": ctx.task.additional_keywords or "",
-        "country": ctx.task.country,
-        "language": ctx.task.language,
-        "exclude_words": settings.EXCLUDE_WORDS,
-        "site_name": ctx.site_name,
-        "page_type": ctx.task.page_type,
-        "competitors_headers": json.dumps(headers_info, ensure_ascii=False),
-        "merged_markdown": ctx.task.competitors_text or "",
-        "avg_word_count": str(avg_words),
-        "competitor_titles": json.dumps(competitor_titles, ensure_ascii=False),
-        "competitor_descriptions": json.dumps(competitor_descriptions, ensure_ascii=False),
-        "highlighted_keywords": json.dumps(highlighted_keywords, ensure_ascii=False),
-        "paa_with_answers": paa_with_answers,
-        "featured_snippet": json.dumps(featured_snippet, ensure_ascii=False) if featured_snippet else "",
-        "knowledge_graph": json.dumps(knowledge_graph, ensure_ascii=False) if knowledge_graph else "",
-        "ai_overview": ai_overview.get("text", "")[:MAX_AI_OVERVIEW_CHARS] if ai_overview else "",
-        "answer_box": answer_box.get("text", "")[:MAX_ANSWER_BOX_CHARS] if answer_box else "",
-        "serp_features": json.dumps(serp_features),
-        "search_intent_signals": json.dumps(intent_signals),
-        "related_searches": json.dumps(related, ensure_ascii=False),
-    }
+        if featured_snippet:
+            ctx.base_context += (
+                f"\n\nFeatured Snippet (Google's preferred answer):\n"
+                f"Type: {featured_snippet.get('type')}\n"
+                f"Title: {featured_snippet.get('title')}\n"
+                f"Text: {featured_snippet.get('description')}\n"
+                f"Source: {featured_snippet.get('domain')}"
+            )
+            
+        if knowledge_graph:
+            facts = knowledge_graph.get('facts', [])[:MAX_KG_FACTS]
+            ctx.base_context += (
+                f"\n\nKnowledge Graph:\n"
+                f"Entity: {knowledge_graph.get('title')}"
+                f" ({knowledge_graph.get('subtitle', '')})\n"
+                f"Description: {knowledge_graph.get('description', '')}\n"
+                f"Facts: {json.dumps(facts, ensure_ascii=False)}"
+            )
+            
+        if ai_overview:
+            ctx.base_context += (
+                f"\n\nGoogle AI Overview:\n"
+                f"{ai_overview.get('text', '')[:MAX_AI_OVERVIEW_CHARS]}"
+            )
+            
+        if answer_box:
+            ctx.base_context += (
+                f"\n\nAnswer Box:\n"
+                f"{answer_box.get('text', '')[:MAX_ANSWER_BOX_CHARS]}"
+            )
+
+        ctx.analysis_vars = {
+            "keyword": ctx.task.main_keyword,
+            "additional_keywords": ctx.task.additional_keywords or "",
+            "country": ctx.task.country,
+            "language": ctx.task.language,
+            "exclude_words": settings.EXCLUDE_WORDS,
+            "site_name": ctx.site_name,
+            "page_type": ctx.task.page_type,
+            "competitors_headers": json.dumps(headers_info, ensure_ascii=False),
+            "merged_markdown": ctx.task.competitors_text or "",
+            "avg_word_count": str(avg_words),
+            "competitor_titles": json.dumps(competitor_titles, ensure_ascii=False),
+            "competitor_descriptions": json.dumps(competitor_descriptions, ensure_ascii=False),
+            "highlighted_keywords": json.dumps(highlighted_keywords, ensure_ascii=False),
+            "paa_with_answers": paa_with_answers,
+            "featured_snippet": json.dumps(featured_snippet, ensure_ascii=False) if featured_snippet else "",
+            "knowledge_graph": json.dumps(knowledge_graph, ensure_ascii=False) if knowledge_graph else "",
+            "ai_overview": ai_overview.get("text", "")[:MAX_AI_OVERVIEW_CHARS] if ai_overview else "",
+            "answer_box": answer_box.get("text", "")[:MAX_ANSWER_BOX_CHARS] if answer_box else "",
+            "serp_features": json.dumps(serp_features),
+            "search_intent_signals": json.dumps(intent_signals),
+            "related_searches": json.dumps(related, ensure_ascii=False),
+        }
+    except Exception as e:
+        print(f"CRITICAL: setup_vars failed: {e}. Using empty defaults. task_id={ctx.task_id}")
+        import traceback
+        print(traceback.format_exc())
+        ctx.analysis_vars = {
+            "keyword": ctx.task.main_keyword,
+            "additional_keywords": ctx.task.additional_keywords or "",
+            "country": ctx.task.country,
+            "language": ctx.task.language,
+            "exclude_words": settings.EXCLUDE_WORDS,
+            "site_name": ctx.site_name,
+            "page_type": ctx.task.page_type,
+            "competitors_headers": "[]",
+            "merged_markdown": ctx.task.competitors_text or "",
+            "avg_word_count": "800",
+            "competitor_titles": "[]",
+            "competitor_descriptions": "[]",
+            "highlighted_keywords": "[]",
+            "paa_with_answers": "",
+            "featured_snippet": "",
+            "knowledge_graph": "",
+            "ai_overview": "",
+            "answer_box": "",
+            "serp_features": "[]",
+            "search_intent_signals": "{}",
+            "related_searches": "[]",
+        }
 
 def setup_template_vars(ctx: PipelineContext):
     # Defaults in case no author is assigned
@@ -368,18 +429,21 @@ def phase_serp(ctx: PipelineContext):
         ctx.db.commit()
         add_log(ctx.db, ctx.task, f"SERP Research completed.", step=STEP_SERP)
         # Save summary for step_result (full data in task.serp_data)
+        def _safe_len(val) -> int:
+            return len(val) if isinstance(val, list) else 0
+
         serp_summary = {
-            "source": serp_data.get("source", "unknown"),
-            "urls_count": len(serp_data.get("urls") or []),
-            "organic_count": len(serp_data.get("organic_results") or []),
-            "paa_count": len(serp_data.get("paa_full") or []),
-            "related_count": len(serp_data.get("related_searches") or []),
-            "has_featured_snippet": serp_data.get("featured_snippet") is not None,
-            "has_knowledge_graph": serp_data.get("knowledge_graph") is not None,
-            "has_ai_overview": serp_data.get("ai_overview") is not None,
-            "has_answer_box": serp_data.get("answer_box") is not None,
-            "serp_features": serp_data.get("serp_features") or [],
-            "urls": serp_data.get("urls") or [],
+            "source": serp_data.get("source", "unknown") if isinstance(serp_data, dict) else "unknown",
+            "urls_count": _safe_len(serp_data.get("urls")) if isinstance(serp_data, dict) else 0,
+            "organic_count": _safe_len(serp_data.get("organic_results")) if isinstance(serp_data, dict) else 0,
+            "paa_count": _safe_len(serp_data.get("paa_full")) if isinstance(serp_data, dict) else 0,
+            "related_count": _safe_len(serp_data.get("related_searches")) if isinstance(serp_data, dict) else 0,
+            "has_featured_snippet": serp_data.get("featured_snippet") is not None if isinstance(serp_data, dict) else False,
+            "has_knowledge_graph": serp_data.get("knowledge_graph") is not None if isinstance(serp_data, dict) else False,
+            "has_ai_overview": serp_data.get("ai_overview") is not None if isinstance(serp_data, dict) else False,
+            "has_answer_box": serp_data.get("answer_box") is not None if isinstance(serp_data, dict) else False,
+            "serp_features": _safe_list(serp_data.get("serp_features")) if isinstance(serp_data, dict) else [],
+            "urls": _safe_list(serp_data.get("urls")) if isinstance(serp_data, dict) else [],
         }
         save_step_result(ctx.db, ctx.task, STEP_SERP, result=json.dumps(serp_summary, ensure_ascii=False), status="completed")
 
@@ -407,6 +471,7 @@ def phase_scraping(ctx: PipelineContext):
         save_step_result(ctx.db, ctx.task, STEP_SCRAPING, result=f"Scraped URLs. Avg words: {scrape_data['average_word_count']}", status="completed")
 
 def phase_ai_structure(ctx: PipelineContext):
+    ctx.db.refresh(ctx.task)  # Force reload from DB
     setup_vars(ctx)
     add_log(ctx.db, ctx.task, "Starting AI Structure Analysis...", step=STEP_AI_ANALYSIS)
     save_step_result(ctx.db, ctx.task, STEP_AI_ANALYSIS, result=None, status="running")
@@ -435,6 +500,7 @@ def phase_ai_structure(ctx: PipelineContext):
     save_step_result(ctx.db, ctx.task, STEP_AI_ANALYSIS, result=ai_structure, model=actual_model, status="completed", cost=step_cost)
 
 def phase_chunk_analysis(ctx: PipelineContext):
+    ctx.db.refresh(ctx.task)  # Force reload from DB
     setup_vars(ctx)
     add_log(ctx.db, ctx.task, "Starting Chunk Cluster Analysis...", step=STEP_CHUNK_ANALYSIS)
     save_step_result(ctx.db, ctx.task, STEP_CHUNK_ANALYSIS, result=None, status="running")
@@ -451,6 +517,7 @@ def phase_chunk_analysis(ctx: PipelineContext):
     save_step_result(ctx.db, ctx.task, STEP_CHUNK_ANALYSIS, result=chunk_analysis, model=actual_model, status="completed", cost=step_cost)
 
 def phase_competitor_structure(ctx: PipelineContext):
+    ctx.db.refresh(ctx.task)  # Force reload from DB
     setup_vars(ctx)
     add_log(ctx.db, ctx.task, "Starting Competitor Structure Analysis...", step=STEP_COMP_STRUCTURE)
     save_step_result(ctx.db, ctx.task, STEP_COMP_STRUCTURE, result=None, status="running")
@@ -471,6 +538,7 @@ def phase_competitor_structure(ctx: PipelineContext):
     save_step_result(ctx.db, ctx.task, STEP_COMP_STRUCTURE, result=competitor_structure, model=actual_model, status="completed", cost=step_cost)
 
 def phase_final_structure(ctx: PipelineContext):
+    ctx.db.refresh(ctx.task)  # Force reload from DB
     setup_vars(ctx)
     add_log(ctx.db, ctx.task, "Starting Final Structure Analysis (JSON)...", step=STEP_FINAL_ANALYSIS)
     save_step_result(ctx.db, ctx.task, STEP_FINAL_ANALYSIS, result=None, status="running")
