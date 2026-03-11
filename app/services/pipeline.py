@@ -540,8 +540,20 @@ def phase_scraping(ctx: PipelineContext):
         }
         ctx.db.commit()
         ctx.outline_data = ctx.task.outline
+        
+        scrape_summary = {
+            "total_from_serp": len(urls),
+            "total_attempted": scrape_data["total_attempted"],
+            "successful": scrape_data["successful_scrapes"],
+            "failed": scrape_data["total_attempted"] - scrape_data["successful_scrapes"],
+            "avg_word_count": scrape_data["average_word_count"],
+            "scraped_domains": [r["domain"] for r in scrape_data["raw_results"]],
+            "scraped_urls": [r["url"] for r in scrape_data["raw_results"]],
+            "failed_results": scrape_data.get("failed_results", []),
+        }
+
         add_log(ctx.db, ctx.task, f"Scraped competitors. Avg word count: {scrape_data['average_word_count']}", step=STEP_SCRAPING)
-        save_step_result(ctx.db, ctx.task, STEP_SCRAPING, result=f"Scraped URLs. Avg words: {scrape_data['average_word_count']}", status="completed")
+        save_step_result(ctx.db, ctx.task, STEP_SCRAPING, result=json.dumps(scrape_summary, ensure_ascii=False), status="completed")
 
 def phase_ai_structure(ctx: PipelineContext):
     ctx.db.refresh(ctx.task)  # Force reload from DB

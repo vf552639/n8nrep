@@ -246,8 +246,25 @@ def render_serp_viewer(task_id: str, key_prefix: str = ""):
     if organic:
         st.markdown("#### 🔍 Organic Results")
         df_organic = pd.DataFrame(organic)
-        display_cols = [c for c in ["rank_group", "title", "domain", "description", "is_featured_snippet"] if c in df_organic.columns]
-        st.dataframe(df_organic[display_cols], use_container_width=True, hide_index=True)
+        all_cols = [
+            "rank_group", "title", "domain", "url", "description", 
+            "breadcrumb", "is_featured_snippet", "rank_absolute", 
+            "highlighted", "pre_snippet", "extended_snippet"
+        ]
+        display_cols = [c for c in all_cols if c in df_organic.columns]
+        
+        st.dataframe(
+            df_organic[display_cols],
+            use_container_width=True,
+            hide_index=True,
+            height=400,
+            column_config={
+                "url": st.column_config.LinkColumn("URL"),
+                "title": st.column_config.TextColumn("Title", width="medium"),
+                "description": st.column_config.TextColumn("Description", width="large"),
+                "highlighted": st.column_config.ListColumn("Highlighted"),
+            }
+        )
     
     # Table: PAA
     paa = serp_data.get("paa_full") or []
@@ -305,7 +322,7 @@ def render_task_step_monitor(task_id: str, task_status: str, task_keyword: str, 
     key_prefix нужен для уникальности st.key когда один и тот же 
     компонент рендерится в разных табах.
     """
-    if task_status not in ("processing", "completed", "failed"):
+    if task_status not in ("processing", "completed", "failed", "stale"):
         st.info(f"Задача '{task_keyword}' ещё не начата (статус: {task_status})")
         return
         
@@ -336,34 +353,27 @@ def render_task_step_monitor(task_id: str, task_status: str, task_keyword: str, 
             clamped = max(0.0, min(progress / 100, 1.0))
             st.progress(clamped, text=f"{min(progress, 100)}% — {current or 'выполнение...'}")
             
-            # Detect stuck processing
-            state_key = f"stuck_count_{task_id}"
-            prog_key = f"last_prog_{task_id}"
-            
-            if prog_key not in st.session_state or st.session_state.get(prog_key) != progress:
-                st.session_state[prog_key] = progress
-                st.session_state[state_key] = 0
-            else:
-                st.session_state[state_key] += 1
-                
-            if progress == 100:
-                st.warning("Все шаги завершены, но задача не перешла в status='completed'. Возможно ошибка на этапе сохранения.")
-                col_btn_1, col_btn_2 = st.columns(2)
-                if col_btn_1.button("✅ Принудительно завершить (Force Complete)", key=f"{key_prefix}_f_comp_{task_id}"):
+            st.markdown("---")
+            st.caption("Управление зависшей задачей:")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                if st.button("🔄 Обновить статус", key=f"{key_prefix}_refresh_{task_id}"):
+                    st.rerun()
+            with col2:
+                if st.button("✅ Force Complete", key=f"{key_prefix}_f_comp_{task_id}"):
                     post_data(f"tasks/{task_id}/force-status", {"action": "complete"})
                     st.rerun()
-                if col_btn_2.button("❌ Пометить как Ошибку (Force Fail)", key=f"{key_prefix}_f_fail_{task_id}"):
+            with col3:
+                if st.button("❌ Force Fail", key=f"{key_prefix}_f_fail_{task_id}"):
                     post_data(f"tasks/{task_id}/force-status", {"action": "fail"})
                     st.rerun()
-            elif st.session_state[state_key] > 120:
-                st.error("⚠️ Задача возможно зависла. Прогресс не обновляется более 10 минут.")
-                if st.button("Принудительно перевести в Ошибку (Force Fail)", key=f"{key_prefix}_f_fail_stuck_{task_id}"):
-                    post_data(f"tasks/{task_id}/force-status", {"action": "fail"})
-                    st.session_state[state_key] = 0
-                    st.rerun()
-            else:
+            
+            if progress >= 100:
+                st.warning("Все шаги завершены, но задача не перешла в completed.")
+            
+            if progress < 100:
                 import time
-                time.sleep(5)
+                time.sleep(10)
                 st.rerun()
     
     step_order = [
@@ -398,6 +408,52 @@ def render_task_step_monitor(task_id: str, task_status: str, task_keyword: str, 
             # Special render for SERP step: show structured tables
             if step_key == "serp_research" and s_status == "completed":
                 render_serp_viewer(task_id, key_prefix=key_prefix)
+            elif step_key == "competitor_scraping" and s_status == "completed" and step.get("result"):
+                raw_res = step["result"]
+                try:
+                    scrape_data = json.loads(raw_res)
+                    # Show metrics
+                    col1, col2, col3, col4 = st.columns(4)
+                    col1.metric("Из SERP", scrape_data.get("total_from_serp", 0))
+                    
+                    # Highlight success rate
+                    success = scrape_data.get("successful", 0)
+                    total_att = scrape_data.get("total_attempted", 0)
+                    col2.metric("Спарсено", f"{success} / {total_att}", 
+                                delta="All OK" if success == total_att else None, 
+                                delta_color="normal" if success == total_att else "off")
+                    
+                    failed = scrape_data.get("failed", 0)
+                    col3.metric("Ошибки", failed, delta=f"-{failed}" if failed > 0 else None, delta_color="inverse")
+                    
+                    col4.metric("Avg слов", scrape_data.get("avg_word_count", 0))
+                    
+                    # Failed Results Table
+                    failed_results = scrape_data.get("failed_results", [])
+                    if failed_results:
+                        st.error(f"⚠️ Ошибок при парсинге: {len(failed_results)}")
+                        df_failed = pd.DataFrame(failed_results)
+                        st.dataframe(
+                            df_failed, 
+                            column_config={
+                                "url": st.column_config.LinkColumn("Уязвимый URL"),
+                                "domain": "Домен",
+                                "error": st.column_config.TextColumn("Ошибка", width="large")
+                            },
+                            hide_index=True,
+                            use_container_width=True
+                        )
+                        
+                    # Successfully parsed domains
+                    parsed_domains = scrape_data.get("scraped_domains", [])
+                    if parsed_domains:
+                        with st.expander("Успешно спарсенные домены:", expanded=False):
+                            st.write(", ".join([f"`{d}`" for d in parsed_domains]))
+                            
+                except json.JSONDecodeError:
+                    # Fallback for old tasks that only stored a raw string
+                    st.text_area("Результат", value=raw_res[:10000], height=200, disabled=True, key=f"{key_prefix}_res_scraping_old_{task_id}")
+
             elif step.get("result"):
                 result_text = step["result"][:50000]
                 
@@ -573,7 +629,7 @@ def render_tasks():
     tasks = fetch_data(f"tasks/?limit={task_limit}&skip={task_skip}")
     if tasks:
         # Add status emojis
-        status_icons = {"pending": "⚪", "processing": "🔵", "completed": "🟢", "failed": "🔴"}
+        status_icons = {"pending": "⚪", "processing": "🔵", "completed": "🟢", "failed": "🔴", "stale": "🟠"}
         for t in tasks:
             t["status_display"] = f"{status_icons.get(t['status'], '')} {t['status']}"
         
@@ -608,12 +664,12 @@ def render_tasks():
             if sequential_mode:
                 if selected_task["status"] == "completed":
                     st.success(f"✅ Задача **{selected_task['main_keyword']}** завершена! Проверьте результат и нажмите «Запустить следующую».")
-                if selected_task["status"] == "failed":
-                    st.error(f"❌ Задача **{selected_task['main_keyword']}** завершилась с ошибкой. Проверьте лог и решите: Retry или Запустить следующую.")
+                if selected_task["status"] in ("failed", "stale"):
+                    st.error(f"❌ Задача **{selected_task['main_keyword']}** завершилась с ошибкой (или зависла). Проверьте лог и решите: Retry или Запустить следующую.")
             
             col_actions, _, _ = st.columns([1, 1, 2])
             with col_actions:
-                if selected_task["status"] == "failed":
+                if selected_task["status"] in ("failed", "stale"):
                     st.error(selected_task.get("error_log", "Unknown error"))
                     if st.button("Перезапустить (Retry)"):
                         post_data(f"tasks/{selected_task_id}/retry", {})

@@ -33,6 +33,7 @@ def scrape_urls(urls: List[str], max_urls: int = 10, timeout: int = 15) -> Dict[
     Scrapes a list of urls and returns combined results for the LLM analysis.
     """
     results = []
+    failed_results = []
     urls_to_scrape = urls[:max_urls]
     
     headers = {
@@ -40,42 +41,65 @@ def scrape_urls(urls: List[str], max_urls: int = 10, timeout: int = 15) -> Dict[
     }
     
     def scrape_single(url: str):
+        domain = urlparse(url).netloc
         try:
-            domain = urlparse(url).netloc
             response = requests.get(url, headers=headers, timeout=timeout)
             
             if response.status_code == 200:
                 parsed_data = parse_html(response.text)
-                return {
+                return (True, {
                     "url": url,
                     "domain": domain,
                     "headers": parsed_data["headers"],
                     "text": parsed_data["text"],
                     "word_count": parsed_data["word_count"]
-                }
+                })
             else:
-                print(f"Skipping {url}: HTTP {response.status_code}")
-                return None
+                return (False, {
+                    "url": url,
+                    "domain": domain,
+                    "error": f"HTTP {response.status_code}"
+                })
+        except requests.exceptions.Timeout:
+            return (False, {
+                "url": url,
+                "domain": domain,
+                "error": f"Timeout after {timeout}s"
+            })
+        except requests.exceptions.ConnectionError:
+            return (False, {
+                "url": url,
+                "domain": domain,
+                "error": "Connection error"
+            })
         except Exception as e:
-            print(f"Error scraping {url}: {e}")
-            return None
+            return (False, {
+                "url": url,
+                "domain": domain,
+                "error": str(e)
+            })
 
     # Use ThreadPoolExecutor to scrape in parallel
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(urls_to_scrape))) as executor:
         future_to_url = {executor.submit(scrape_single, url): url for url in urls_to_scrape}
         for future in concurrent.futures.as_completed(future_to_url):
             try:
-                data = future.result()
-                if data:
+                success, data = future.result()
+                if success:
                     results.append(data)
+                else:
+                    failed_results.append(data)
+                    print(f"Failed scraping {data['url']}: {data['error']}")
             except Exception as exc:
                 url = future_to_url[future]
-                print(f"{url} generated an exception: {exc}")
+                domain = urlparse(url).netloc
+                failed_results.append({"url": url, "domain": domain, "error": f"Execution exception: {exc}"})
+                print(f"{url} generated an execution exception: {exc}")
         
     if len(results) < 3:
         print(f"Warning: Only {len(results)} successful scrapes (minimum recommended: 3)")
         if len(results) == 0:
-            raise Exception("All competitors failed to scrape (0 successful).")
+            raise Exception(f"All competitors failed to scrape (0 successful out of {len(urls_to_scrape)}). Check failed_results: {failed_results}")
         
     # Aggregate data
     all_h1_h6 = []
@@ -98,5 +122,6 @@ def scrape_urls(urls: List[str], max_urls: int = 10, timeout: int = 15) -> Dict[
         "average_word_count": avg_words,
         "merged_text": merged_text,
         "headers_structure": all_h1_h6,
-        "raw_results": results
+        "raw_results": results,
+        "failed_results": failed_results
     }
