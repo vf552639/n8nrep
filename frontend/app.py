@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 import os
+import json
 
 API_URL = os.environ.get("API_URL", "http://web:8000/api")
 API_KEY = os.environ.get("API_KEY", "")
