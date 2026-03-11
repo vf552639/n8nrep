@@ -11,7 +11,6 @@ class AuthorCreate(BaseModel):
     author: str
     country: str
     language: str
-    style_prompt: str
     bio: str = None
     co_short: str = None
     city: str = None
@@ -30,7 +29,6 @@ def get_authors(db: Session = Depends(get_db)):
         "author": a.author,
         "country": a.country,
         "language": a.language,
-        "style_prompt": a.style_prompt,
         "co_short": a.co_short,
         "city": a.city,
         "bio": a.bio,

@@ -772,22 +772,22 @@ def render_authors():
         with st.form("new_author_form"):
             col1, col2 = st.columns(2, gap="medium")
             a_name = col1.text_input("Имя Автора*")
-            a_country = col2.text_input("Страна (Код, e.g. US)*")
-            a_lang = col1.text_input("Язык (Код, e.g. en)*")
-            a_city = col2.text_input("Город")
-            a_co_short = col1.text_input("Сокращение страны (co_short)")
+            a_country = col2.text_input("Страна*", help="Полное название, e.g. Australia")
+            a_lang = col1.text_input("Язык*", help="Полное название, e.g. English")
+            a_co_short = col2.text_input("Код страны (co_short)", help="e.g. AU, DE, US")
+            a_city = col1.text_input("Город")
+            a_bio = st.text_area("Биография / описание", help="Краткое описание автора и его экспертизы", height=100)
             
             st.markdown("### Промпт параметры (Настройки стилистики)")
             
-            a_text_block = st.text_area("Текстовый блок (Author Style/Text Block)", help="Основной текст/описание стиля автора", height=100)
-            a_imitation = st.text_input("Imitation (Mimicry)", help="Кого или что пародировать/подражать")
+            a_imitation = st.text_input("Imitation (Mimicry)", help="Кого или что подражать")
             
             col3, col4 = st.columns(2, gap="medium")
             a_year = col3.text_input("Year", help="Год или эпоха стиля (e.g. 2024, 1990s)")
-            a_face = col4.text_input("Face", help="Лицо/подача (e.g. Friendly, Informative, Expert)")
+            a_face = col4.text_input("Face", help="Лицо/подача (e.g. Friendly, Expert)")
             
-            a_target_audience = st.text_input("Target Audience", help="Целевая аудитория (e.g. Beginners, Crypto Enthusiasts)")
-            a_rhythms_style = st.text_input("Rhythms & Style", help="Ритм и стиль повествования (e.g. Short punchy sentences, academic)")
+            a_target_audience = st.text_input("Target Audience", help="Целевая аудитория")
+            a_rhythms_style = st.text_input("Rhythms & Style", help="Ритм и стиль повествования")
             
             submit = st.form_submit_button("Добавить Автора")
             if submit and a_name and a_country and a_lang:
@@ -795,9 +795,9 @@ def render_authors():
                     "author": a_name,
                     "country": a_country,
                     "language": a_lang,
-                    "style_prompt": a_text_block,
-                    "city": a_city,
+                    "bio": a_bio,
                     "co_short": a_co_short,
+                    "city": a_city,
                     "imitation": a_imitation,
                     "year": a_year,
                     "face": a_face,
@@ -813,7 +813,7 @@ def render_authors():
     authors = fetch_data("authors/")
     if authors:
         df = pd.DataFrame(authors)
-        st.dataframe(df[["id", "author", "country", "language", "city"]], use_container_width=True)
+        st.dataframe(df[["id", "author", "country", "co_short", "language", "city", "bio"]], use_container_width=True)
         
         st.subheader("Удалить автора")
         del_sel = st.selectbox("Выберите автора для удаления", options=[f"{a['id']} - {a['author']}" for a in authors])
@@ -885,7 +885,7 @@ div[data-testid="stHorizontalBlock"] {
                     ("merged_markdown", "Объединённый текст конкурентов (внимание: большой объём!)"),
                     ("avg_word_count", "Среднее кол-во слов у конкурентов"),
                     ("author", "Имя автора"),
-                    ("author_style", "Текстовый блок / стиль автора"),
+                    ("author_style", "Биография / описание автора (из поля bio)"),
                     ("imitation", "Подражание (Mimicry)"),
                     ("target_audience", "Целевая аудитория"),
                     ("face", "Лицо повествования (POV)"),

@@ -438,7 +438,7 @@ def setup_template_vars(ctx: PipelineContext):
     if ctx.task.author_id:
         author = ctx.db.query(Author).filter(Author.id == ctx.task.author_id).first()
         if author:
-            author_style = author.style_prompt or ""
+            author_style = author.bio or ""
             imitation = author.imitation or ""
             year = author.year or ""
             face = author.face or ""

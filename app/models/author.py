@@ -10,7 +10,6 @@ class Author(Base):
     author = Column(Text, nullable=True)        # имя автора (поле называется "author", не "name")
     country = Column(Text, nullable=True)
     language = Column(Text, nullable=True)
-    style_prompt = Column(Text, nullable=True)
     bio = Column(Text, nullable=True)
     co_short = Column(Text, nullable=True)
     city = Column(Text, nullable=True)
