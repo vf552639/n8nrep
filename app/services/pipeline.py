@@ -599,6 +599,8 @@ def phase_ai_structure(ctx: PipelineContext):
     ctx.analysis_vars["result_ai_structure_analysis"] = ai_structure
     ctx.outline_data["ai_structure"] = ai_structure
     
+    add_log(ctx.db, ctx.task, f"ai_structure raw (first 500): {ai_structure[:500]}", level="debug", step=STEP_AI_ANALYSIS)
+    
     ai_struct_data = clean_and_parse_json(ai_structure)
     if ai_struct_data:
         ctx.analysis_vars["intent"] = ai_struct_data.get("intent", "")
@@ -606,13 +608,18 @@ def phase_ai_structure(ctx: PipelineContext):
         ctx.analysis_vars["Attention"] = ai_struct_data.get("Attention", "")
         ctx.analysis_vars["structura"] = ai_struct_data.get("structura", "")
         ctx.outline_data["ai_structure_parsed"] = ai_struct_data
+        
+        if not ai_struct_data.get("intent"):
+            add_log(ctx.db, ctx.task, f"Warning: 'intent' is empty after parsing ai_structure", level="warn", step=STEP_AI_ANALYSIS)
     else:
         add_log(ctx.db, ctx.task, f"Warning: Failed to parse ai_structure_analysis JSON", level="warn", step=STEP_AI_ANALYSIS)
 
     ctx.task.outline = ctx.outline_data
     ctx.db.commit()
+    
+    final_status = "completed_with_warnings" if not ai_struct_data or not ai_struct_data.get("intent") else "completed"
     add_log(ctx.db, ctx.task, f"AI Structure Analysis completed ({len(ai_structure)} chars)", step=STEP_AI_ANALYSIS)
-    save_step_result(ctx.db, ctx.task, STEP_AI_ANALYSIS, result=ai_structure, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
+    save_step_result(ctx.db, ctx.task, STEP_AI_ANALYSIS, result=ai_structure, model=actual_model, status=final_status, cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
 
 def phase_chunk_analysis(ctx: PipelineContext):
     ctx.db.refresh(ctx.task)  # Force reload from DB

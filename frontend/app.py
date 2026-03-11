@@ -948,6 +948,9 @@ div[data-testid="stHorizontalBlock"] {
                     with c1: st.code(f"{{{{{v}}}}}", language=None)
                     with c2: st.markdown(f"<div style='padding-top:14px'>{d}</div>", unsafe_allow_html=True)
             
+            if agent in ["ai_structure_analysis", "final_structure_analysis"]:
+                st.info("💡 **Внимание:** Этот агент парсит ответ как JSON. Обязательно добавьте в конец System Message явную структуру ожидаемого JSON и попросите модель отдавать только чистый JSON без markdown-обёртки.")
+                
             skip = st.toggle(
                 "Пропускать этот этап в pipeline",
                 value=full_prompt.get("skip_in_pipeline", False),
