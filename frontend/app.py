@@ -333,7 +333,8 @@ def render_task_step_monitor(task_id: str, task_status: str, task_keyword: str, 
                 st.success("Одобрено! Задача возвращена в работу.")
                 st.rerun()
         else:
-            st.progress(progress / 100, text=f"{progress}% — {current or 'выполнение...'}")
+            clamped = max(0.0, min(progress / 100, 1.0))
+            st.progress(clamped, text=f"{min(progress, 100)}% — {current or 'выполнение...'}")
             import time
             time.sleep(5)
             st.rerun()
