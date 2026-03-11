@@ -792,8 +792,8 @@ def phase_content_fact_check(ctx: PipelineContext):
         f"Country: {ctx.task.country}"
     )
     
-    add_log(ctx.db, ctx.task, "Starting Fact-Checking...", step=STEP_FACT_CHECK)
-    save_step_result(ctx.db, ctx.task, STEP_FACT_CHECK, result=None, status="running")
+    add_log(ctx.db, ctx.task, "Starting Fact-Checking...", step=STEP_CONTENT_FACT_CHECK)
+    save_step_result(ctx.db, ctx.task, STEP_CONTENT_FACT_CHECK, result=None, status="running")
     
     try:
         fact_check_json_str, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
@@ -802,11 +802,11 @@ def phase_content_fact_check(ctx: PipelineContext):
         )
         ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
         
-        add_log(ctx.db, ctx.task, f"Fact-Checking completed", step=STEP_FACT_CHECK)
-        save_step_result(ctx.db, ctx.task, STEP_FACT_CHECK, result=fact_check_json_str, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
+        add_log(ctx.db, ctx.task, f"Fact-Checking completed", step=STEP_CONTENT_FACT_CHECK)
+        save_step_result(ctx.db, ctx.task, STEP_CONTENT_FACT_CHECK, result=fact_check_json_str, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
     except Exception as e:
-        add_log(ctx.db, ctx.task, f"Fact-checking agent failed or not found: {str(e)}", level="warn", step=STEP_FACT_CHECK)
-        save_step_result(ctx.db, ctx.task, STEP_FACT_CHECK, result='{"verification_status": "warn", "issues": [], "summary": "Failed to run fact_checking agent."}', status="completed")
+        add_log(ctx.db, ctx.task, f"Fact-checking agent failed or not found: {str(e)}", level="warn", step=STEP_CONTENT_FACT_CHECK)
+        save_step_result(ctx.db, ctx.task, STEP_CONTENT_FACT_CHECK, result='{"verification_status": "warn", "issues": [], "summary": "Failed to run fact_checking agent."}', status="completed")
 
 def phase_meta_generation(ctx: PipelineContext):
     setup_template_vars(ctx)
@@ -901,7 +901,7 @@ def run_pipeline(db: Session, task_id: str):
         needs_review_val = False
         
         if settings.FACT_CHECK_ENABLED:
-            fc_res_str = ctx.task.step_results.get(STEP_FACT_CHECK, {}).get("result", "{}")
+            fc_res_str = ctx.task.step_results.get(STEP_CONTENT_FACT_CHECK, {}).get("result", "{}")
             if fc_res_str:
                 fc_data = clean_and_parse_json(fc_res_str)
                 if fc_data:
@@ -912,12 +912,12 @@ def run_pipeline(db: Session, task_id: str):
                     
                     if fact_check_status_val == "fail" or critical_count >= settings.FACT_CHECK_FAIL_THRESHOLD:
                         needs_review_val = True
-                        add_log(db, ctx.task, f"Fact-check marked for review ({critical_count} critical issues).", level="warn", step=STEP_FACT_CHECK)
+                        add_log(db, ctx.task, f"Fact-check marked for review ({critical_count} critical issues).", level="warn", step=STEP_CONTENT_FACT_CHECK)
                         
                         if getattr(settings, "FACT_CHECK_MODE", "soft") == "strict":
                             raise Exception("Fact-check failed in strict mode. Task aborted.")
                     elif fact_check_status_val == "warn":
-                        add_log(db, ctx.task, f"Fact-check returned warnings.", level="warn", step=STEP_FACT_CHECK)
+                        add_log(db, ctx.task, f"Fact-check returned warnings.", level="warn", step=STEP_CONTENT_FACT_CHECK)
 
         # Verify if an article exists already for this task
         existing = db.query(GeneratedArticle).filter(GeneratedArticle.task_id == ctx.task.id).first()
