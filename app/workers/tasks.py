@@ -157,13 +157,20 @@ def cleanup_stale_tasks():
     from datetime import datetime, timedelta
     
     try:
-        # If task has been processing for more than 2 hours, assume it died
-        stale_threshold = datetime.utcnow() - timedelta(hours=2)
-        stale_tasks = db.query(Task).filter(Task.status == "processing", Task.updated_at < stale_threshold).all()
+        from sqlalchemy import or_, and_
+        # If task has been processing without heartbeat for more than 30 mins
+        stale_threshold = datetime.utcnow() - timedelta(minutes=30)
+        stale_tasks = db.query(Task).filter(
+            Task.status == "processing",
+            or_(
+                Task.last_heartbeat < stale_threshold,
+                and_(Task.last_heartbeat.is_(None), Task.updated_at < stale_threshold)
+            )
+        ).all()
         
         for t in stale_tasks:
-            t.status = "failed"
-            t.error_log = "Task timed out and was cleaned up by Celery Beat."
+            t.status = "stale"
+            t.error_log = "Task timed out and was cleaned up by Celery Beat (Stale state)."
             
         if stale_tasks:
             db.commit()

@@ -489,6 +489,8 @@ def run_phase(db: Session, task: Task, step_key: str, phase_func, *args, **kwarg
             return
             
     print(f"Running phase: {step_key}")
+    task.last_heartbeat = datetime.datetime.utcnow()
+    db.commit()
     phase_func(*args, **kwargs)
 
 def phase_serp(ctx: PipelineContext):
@@ -881,76 +883,88 @@ def run_pipeline(db: Session, task_id: str):
         run_phase(db, ctx.task, STEP_META_GEN, phase_meta_generation, ctx)
 
         # Assemble and SAVE
-        structured_html = ctx.task.step_results.get(STEP_HTML_STRUCT, {}).get("result", "")
-        meta_json_str = ctx.task.step_results.get(STEP_META_GEN, {}).get("result", "{}")
-        meta_data = clean_and_parse_json(meta_json_str)
-        
-        title = meta_data.get("title", f"{ctx.task.main_keyword} Guide")
-        description = meta_data.get("description", "")
-        if not title:
-            title = ctx.task.main_keyword.title()
-        if not description:
-            description = f"Read our comprehensive guide about {ctx.task.main_keyword}."
+        try:
+            add_log(db, ctx.task, "Starting article assembly and saving...", step=None)
+            structured_html = ctx.task.step_results.get(STEP_HTML_STRUCT, {}).get("result", "")
+            meta_json_str = ctx.task.step_results.get(STEP_META_GEN, {}).get("result", "{}")
+            meta_data = clean_and_parse_json(meta_json_str)
+            
+            title = meta_data.get("title", f"{ctx.task.main_keyword} Guide")
+            description = meta_data.get("description", "")
+            if not title:
+                title = ctx.task.main_keyword.title()
+            if not description:
+                description = f"Read our comprehensive guide about {ctx.task.main_keyword}."
 
-        word_count = len(BeautifulSoup(structured_html, "html.parser").get_text(strip=True).split())
-        full_page = generate_full_page(db, str(ctx.task.target_site_id), structured_html, title, description)
+            word_count = len(BeautifulSoup(structured_html, "html.parser").get_text(strip=True).split())
+            full_page = generate_full_page(db, str(ctx.task.target_site_id), structured_html, title, description)
 
-        # Process fact_check results
-        fact_check_status_val = ""
-        fact_check_issues_val = []
-        needs_review_val = False
-        
-        if settings.FACT_CHECK_ENABLED:
-            fc_res_str = ctx.task.step_results.get(STEP_CONTENT_FACT_CHECK, {}).get("result", "{}")
-            if fc_res_str:
-                fc_data = clean_and_parse_json(fc_res_str)
-                if fc_data:
-                    fact_check_status_val = fc_data.get("verification_status", "")
-                    fact_check_issues_val = fc_data.get("issues", [])
-                    
-                    critical_count = sum(1 for issue in fact_check_issues_val if issue.get("severity") == "critical")
-                    
-                    if fact_check_status_val == "fail" or critical_count >= settings.FACT_CHECK_FAIL_THRESHOLD:
-                        needs_review_val = True
-                        add_log(db, ctx.task, f"Fact-check marked for review ({critical_count} critical issues).", level="warn", step=STEP_CONTENT_FACT_CHECK)
+            # Process fact_check results
+            fact_check_status_val = ""
+            fact_check_issues_val = []
+            needs_review_val = False
+            
+            if settings.FACT_CHECK_ENABLED:
+                fc_res_str = ctx.task.step_results.get(STEP_CONTENT_FACT_CHECK, {}).get("result", "{}")
+                if fc_res_str:
+                    fc_data = clean_and_parse_json(fc_res_str)
+                    if fc_data:
+                        fact_check_status_val = fc_data.get("verification_status", "")
+                        fact_check_issues_val = fc_data.get("issues", [])
                         
-                        if getattr(settings, "FACT_CHECK_MODE", "soft") == "strict":
-                            raise Exception("Fact-check failed in strict mode. Task aborted.")
-                    elif fact_check_status_val == "warn":
-                        add_log(db, ctx.task, f"Fact-check returned warnings.", level="warn", step=STEP_CONTENT_FACT_CHECK)
+                        critical_count = sum(1 for issue in fact_check_issues_val if issue.get("severity") == "critical")
+                        
+                        if fact_check_status_val == "fail" or critical_count >= settings.FACT_CHECK_FAIL_THRESHOLD:
+                            needs_review_val = True
+                            add_log(db, ctx.task, f"Fact-check marked for review ({critical_count} critical issues).", level="warn", step=STEP_CONTENT_FACT_CHECK)
+                            
+                            if getattr(settings, "FACT_CHECK_MODE", "soft") == "strict":
+                                raise Exception("Fact-check failed in strict mode. Task aborted.")
+                        elif fact_check_status_val == "warn":
+                            add_log(db, ctx.task, f"Fact-check returned warnings.", level="warn", step=STEP_CONTENT_FACT_CHECK)
 
-        # Verify if an article exists already for this task
-        existing = db.query(GeneratedArticle).filter(GeneratedArticle.task_id == ctx.task.id).first()
-        if not existing:
-            article = GeneratedArticle(
-                task_id=ctx.task.id,
-                title=title,
-                description=description,
-                html_content=structured_html,
-                full_page_html=full_page,
-                word_count=word_count,
-                fact_check_status=fact_check_status_val,
-                fact_check_issues=fact_check_issues_val,
-                needs_review=needs_review_val
-            )
-            db.add(article)
+            # Verify if an article exists already for this task
+            existing = db.query(GeneratedArticle).filter(GeneratedArticle.task_id == ctx.task.id).first()
+            if not existing:
+                article = GeneratedArticle(
+                    task_id=ctx.task.id,
+                    title=title,
+                    description=description,
+                    html_content=structured_html,
+                    full_page_html=full_page,
+                    word_count=word_count,
+                    fact_check_status=fact_check_status_val,
+                    fact_check_issues=fact_check_issues_val,
+                    needs_review=needs_review_val
+                )
+                db.add(article)
 
-        ctx.task.status = "completed"
-        db.commit()
-        
-        if ctx.task.project_id:
-            deduplicator = ContentDeduplicator(db)
-            anchors = deduplicator.extract_anchors(
-                article_html=structured_html,
-                task_id=str(ctx.task.id),
-                keyword=ctx.task.main_keyword
-            )
-            deduplicator.save_anchors(project_id=str(ctx.task.project_id), task_id=str(ctx.task.id), anchors=anchors)
-        
-        add_log(db, ctx.task, "✅ Pipeline finished successfully", step=None)
-        notify_task_success(str(ctx.task.id), ctx.task.main_keyword, ctx.site_name, word_count)
+            if ctx.task.project_id:
+                deduplicator = ContentDeduplicator(db)
+                anchors = deduplicator.extract_anchors(
+                    article_html=structured_html,
+                    task_id=str(ctx.task.id),
+                    keyword=ctx.task.main_keyword
+                )
+                deduplicator.save_anchors(project_id=str(ctx.task.project_id), task_id=str(ctx.task.id), anchors=anchors)
+            
+            # The last operation should be setting status and committing
+            ctx.task.status = "completed"
+            db.commit()
+            
+            add_log(db, ctx.task, "✅ Pipeline finished successfully", step=None)
+            notify_task_success(str(ctx.task.id), ctx.task.main_keyword, ctx.site_name, word_count)
+            
+        except Exception as save_err:
+            db.rollback()
+            add_log(db, ctx.task, f"❌ Error saving article: {str(save_err)}", level="error", step=None)
+            ctx.task.status = "failed"
+            ctx.task.error_log = traceback.format_exc()
+            db.commit()
+            notify_task_failed(str(ctx.task.id), ctx.task.main_keyword, str(save_err), ctx.site_name)
 
     except Exception as e:
+        db.rollback() # VERY IMPORTANT: reset session to allow updating error status
         # Mark any running step as failed
         if ctx.task.step_results:
             updated_steps = dict(ctx.task.step_results)

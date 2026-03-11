@@ -335,9 +335,36 @@ def render_task_step_monitor(task_id: str, task_status: str, task_keyword: str, 
         else:
             clamped = max(0.0, min(progress / 100, 1.0))
             st.progress(clamped, text=f"{min(progress, 100)}% — {current or 'выполнение...'}")
-            import time
-            time.sleep(5)
-            st.rerun()
+            
+            # Detect stuck processing
+            state_key = f"stuck_count_{task_id}"
+            prog_key = f"last_prog_{task_id}"
+            
+            if prog_key not in st.session_state or st.session_state.get(prog_key) != progress:
+                st.session_state[prog_key] = progress
+                st.session_state[state_key] = 0
+            else:
+                st.session_state[state_key] += 1
+                
+            if progress == 100:
+                st.warning("Все шаги завершены, но задача не перешла в status='completed'. Возможно ошибка на этапе сохранения.")
+                col_btn_1, col_btn_2 = st.columns(2)
+                if col_btn_1.button("✅ Принудительно завершить (Force Complete)", key=f"{key_prefix}_f_comp_{task_id}"):
+                    post_data(f"tasks/{task_id}/force-status", {"action": "complete"})
+                    st.rerun()
+                if col_btn_2.button("❌ Пометить как Ошибку (Force Fail)", key=f"{key_prefix}_f_fail_{task_id}"):
+                    post_data(f"tasks/{task_id}/force-status", {"action": "fail"})
+                    st.rerun()
+            elif st.session_state[state_key] > 120:
+                st.error("⚠️ Задача возможно зависла. Прогресс не обновляется более 10 минут.")
+                if st.button("Принудительно перевести в Ошибку (Force Fail)", key=f"{key_prefix}_f_fail_stuck_{task_id}"):
+                    post_data(f"tasks/{task_id}/force-status", {"action": "fail"})
+                    st.session_state[state_key] = 0
+                    st.rerun()
+            else:
+                import time
+                time.sleep(5)
+                st.rerun()
     
     step_order = [
         ("serp_research", "🔍 SERP Research"),

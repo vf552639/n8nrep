@@ -4,7 +4,7 @@ from sqlalchemy import Column, String, Integer, Text, Boolean, ForeignKey, DateT
 from sqlalchemy.dialects.postgresql import UUID, JSONB, ENUM
 from app.database import Base
 
-task_status_enum = ENUM('pending', 'processing', 'completed', 'failed', name='task_status')
+task_status_enum = ENUM('pending', 'processing', 'completed', 'failed', 'stale', name='task_status')
 
 class Task(Base):
     __tablename__ = "tasks"
@@ -29,6 +29,7 @@ class Task(Base):
     logs = Column(JSONB, nullable=True, default=[])
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_heartbeat = Column(DateTime, nullable=True)
     
     project_id = Column(UUID(as_uuid=True), ForeignKey('site_projects.id'), nullable=True, index=True)
     blueprint_page_id = Column(UUID(as_uuid=True), ForeignKey('blueprint_pages.id'), nullable=True)

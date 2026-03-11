@@ -461,3 +461,29 @@ def delete_task(task_id: str, db: Session = Depends(get_db)):
     db.delete(task)
     db.commit()
     return {"msg": "Task deleted"}
+
+class ForceStatusRequest(BaseModel):
+    action: str  # "complete" or "fail"
+
+@router.post("/{task_id}/force-status")
+def force_task_status(task_id: str, payload: ForceStatusRequest, db: Session = Depends(get_db)):
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+        
+    if task.status != "processing":
+        raise HTTPException(status_code=400, detail="Only 'processing' tasks can be forced")
+        
+    if payload.action == "fail":
+        task.status = "failed"
+        task.error_log = "Force-failed by user"
+        db.commit()
+        return {"msg": "Task forcefully marked as failed"}
+    elif payload.action == "complete":
+        if not task.step_results:
+            raise HTTPException(status_code=400, detail="Task has no step results, cannot force complete")
+        task.status = "completed"
+        db.commit()
+        return {"msg": "Task forcefully marked as completed"}
+    else:
+        raise HTTPException(status_code=400, detail="Invalid action. Use 'complete' or 'fail'")
