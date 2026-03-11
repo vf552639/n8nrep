@@ -2,7 +2,20 @@ import requests
 import json
 import base64
 from typing import Dict, Any, Optional
+from urllib.parse import urlparse
 from app.config import settings
+
+def _is_excluded_domain(url: str) -> bool:
+    """Проверяет, принадлежит ли URL к исключённому домену."""
+    try:
+        domain = urlparse(url).netloc.lower()
+        if domain.startswith("www."):
+            domain = domain[4:]
+            
+        excluded_list = [d.strip().lower() for d in settings.EXCLUDED_DOMAINS.split(",") if d.strip()]
+        return any(domain == exc or domain.endswith("." + exc) for exc in excluded_list)
+    except:
+        return False
 
 def _get_dataforseo_auth_header() -> str:
     login = settings.DATAFORSEO_LOGIN
@@ -160,6 +173,9 @@ def _parse_organic(item: dict, result: dict):
     url = item.get("url")
     if not url:
         return
+    if _is_excluded_domain(url):
+        return
+        
     result["urls"].append(url)
     result["organic_results"].append({
         "url": url,
@@ -319,6 +335,9 @@ def _parse_serpapi_response(serp_data: dict) -> dict:
         serp_features_set.add("organic")
         url = item.get("link")
         if url:
+            if _is_excluded_domain(url):
+                continue
+                
             result["urls"].append(url)
             result["organic_results"].append({
                 "url": url,

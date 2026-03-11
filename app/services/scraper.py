@@ -29,6 +29,7 @@ def parse_html(html: str) -> Dict[str, Any]:
     }
 from app.config import settings
 from app.services.notifier import notify_serper_key_issue
+from app.services.serp import _is_excluded_domain
 
 _serper_key_failed = False
 
@@ -77,7 +78,7 @@ def scrape_urls(urls: List[str], max_urls: int = 10, timeout: int = 15) -> Dict[
     
     results = []
     failed_results = []
-    urls_to_scrape = urls[:max_urls]
+    urls_to_scrape = [url for url in urls if not _is_excluded_domain(url)][:max_urls]
     
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
