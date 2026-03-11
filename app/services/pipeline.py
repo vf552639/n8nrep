@@ -369,6 +369,24 @@ def setup_vars(ctx: PipelineContext):
             "search_intent_signals": json.dumps(intent_signals),
             "related_searches": json.dumps(related, ensure_ascii=False),
         }
+
+        # Restore results from previous pipeline phases (setup_vars recreates analysis_vars from scratch)
+        if isinstance(ctx.outline_data, dict):
+            if ctx.outline_data.get("ai_structure"):
+                ctx.analysis_vars["result_ai_structure_analysis"] = str(ctx.outline_data["ai_structure"])[:300]
+            if ctx.outline_data.get("chunk_analysis"):
+                ctx.analysis_vars["result_chunk_cluster_analysis"] = str(ctx.outline_data["chunk_analysis"])[:300]
+            if ctx.outline_data.get("competitor_structure"):
+                ctx.analysis_vars["result_competitor_structure_analysis"] = str(ctx.outline_data["competitor_structure"])[:300]
+            if ctx.outline_data.get("final_structure"):
+                ctx.analysis_vars["result_final_structure_analysis"] = str(ctx.outline_data["final_structure"])[:300]
+            # Parsed sub-variables from ai_structure
+            parsed = ctx.outline_data.get("ai_structure_parsed", {})
+            if isinstance(parsed, dict):
+                for key in ("intent", "Taxonomy", "Attention", "structura"):
+                    if parsed.get(key):
+                        ctx.analysis_vars[key] = str(parsed[key])[:300]
+
     except Exception as e:
         print(f"CRITICAL: setup_vars failed: {e}. Using empty defaults. task_id={ctx.task_id}")
         import traceback
@@ -396,6 +414,16 @@ def setup_vars(ctx: PipelineContext):
             "search_intent_signals": "{}",
             "related_searches": "[]",
         }
+        # Restore results even in fallback
+        if isinstance(ctx.outline_data, dict):
+            if ctx.outline_data.get("ai_structure"):
+                ctx.analysis_vars["result_ai_structure_analysis"] = str(ctx.outline_data["ai_structure"])[:300]
+            if ctx.outline_data.get("chunk_analysis"):
+                ctx.analysis_vars["result_chunk_cluster_analysis"] = str(ctx.outline_data["chunk_analysis"])[:300]
+            if ctx.outline_data.get("competitor_structure"):
+                ctx.analysis_vars["result_competitor_structure_analysis"] = str(ctx.outline_data["competitor_structure"])[:300]
+            if ctx.outline_data.get("final_structure"):
+                ctx.analysis_vars["result_final_structure_analysis"] = str(ctx.outline_data["final_structure"])[:300]
 
 def setup_template_vars(ctx: PipelineContext):
     # Defaults in case no author is assigned
