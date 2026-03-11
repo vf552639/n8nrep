@@ -550,6 +550,8 @@ def phase_scraping(ctx: PipelineContext):
             "scraped_domains": [r["domain"] for r in scrape_data["raw_results"]],
             "scraped_urls": [r["url"] for r in scrape_data["raw_results"]],
             "failed_results": scrape_data.get("failed_results", []),
+            "serper_count": scrape_data.get("serper_count", 0),
+            "direct_count": scrape_data.get("direct_count", 0),
         }
 
         add_log(ctx.db, ctx.task, f"Scraped competitors. Avg word count: {scrape_data['average_word_count']}", step=STEP_SCRAPING)

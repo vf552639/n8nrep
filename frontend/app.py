@@ -414,7 +414,7 @@ def render_task_step_monitor(task_id: str, task_status: str, task_keyword: str, 
                 try:
                     scrape_data = json.loads(raw_res)
                     # Show metrics
-                    col1, col2, col3, col4 = st.columns(4)
+                    col1, col2, col3, col4, col5 = st.columns(5)
                     col1.metric("Из SERP", scrape_data.get("total_from_serp", 0))
                     
                     # Highlight success rate
@@ -428,6 +428,11 @@ def render_task_step_monitor(task_id: str, task_status: str, task_keyword: str, 
                     col3.metric("Ошибки", failed, delta=f"-{failed}" if failed > 0 else None, delta_color="inverse")
                     
                     col4.metric("Avg слов", scrape_data.get("avg_word_count", 0))
+                    
+                    serper_count = scrape_data.get("serper_count", 0)
+                    col5.metric("Serper", serper_count)
+                    if serper_count == 0 and success > 0:
+                        st.caption("Serper не использовался (fallback)")
                     
                     # Failed Results Table
                     failed_results = scrape_data.get("failed_results", [])

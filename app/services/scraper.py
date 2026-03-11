@@ -27,11 +27,54 @@ def parse_html(html: str) -> Dict[str, Any]:
         "text": text,
         "word_count": word_count
     }
+from app.config import settings
+from app.services.notifier import notify_serper_key_issue
+
+_serper_key_failed = False
+
+def scrape_via_serper(url: str, timeout: int = 30) -> str:
+    global _serper_key_failed
+    try:
+        response = requests.post(
+            "https://scrape.serper.dev/",
+            headers={
+                "X-API-KEY": settings.SERPER_API_KEY,
+                "Content-Type": "application/json"
+            },
+            json={"url": url, "includeHtml": True},
+            timeout=timeout
+        )
+        
+        if response.status_code in [401, 403]:
+            if not _serper_key_failed:
+                _serper_key_failed = True
+                notify_serper_key_issue(f"HTTP {response.status_code} - Unauthorized or Forbidden.")
+            return None
+            
+        try:
+            data = response.json()
+        except:
+            return None
+            
+        if "message" in data:
+            msg = str(data["message"]).lower()
+            if any(err in msg for err in ["invalid api key", "quota exceeded", "rate limit"]):
+                if not _serper_key_failed:
+                    _serper_key_failed = True
+                    notify_serper_key_issue(data["message"])
+                return None
+                
+        return data.get("html")
+    except Exception as e:
+        return None
 
 def scrape_urls(urls: List[str], max_urls: int = 10, timeout: int = 15) -> Dict[str, Any]:
     """
     Scrapes a list of urls and returns combined results for the LLM analysis.
     """
+    global _serper_key_failed
+    _serper_key_failed = False
+    
     results = []
     failed_results = []
     urls_to_scrape = urls[:max_urls]
@@ -42,6 +85,25 @@ def scrape_urls(urls: List[str], max_urls: int = 10, timeout: int = 15) -> Dict[
     
     def scrape_single(url: str):
         domain = urlparse(url).netloc
+        
+        # Step 1: Serper.dev
+        if getattr(settings, "SERPER_API_KEY", None) and not _serper_key_failed:
+            html = scrape_via_serper(url)
+            if html:
+                try:
+                    parsed_data = parse_html(html)
+                    return (True, {
+                        "url": url,
+                        "domain": domain,
+                        "headers": parsed_data["headers"],
+                        "text": parsed_data["text"],
+                        "word_count": parsed_data["word_count"],
+                        "method": "serper"
+                    })
+                except Exception as e:
+                    pass # Fall back to direct
+        
+        # Step 2: Direct Request (Fallback)
         try:
             response = requests.get(url, headers=headers, timeout=timeout)
             
@@ -52,7 +114,8 @@ def scrape_urls(urls: List[str], max_urls: int = 10, timeout: int = 15) -> Dict[
                     "domain": domain,
                     "headers": parsed_data["headers"],
                     "text": parsed_data["text"],
-                    "word_count": parsed_data["word_count"]
+                    "word_count": parsed_data["word_count"],
+                    "method": "direct"
                 })
             else:
                 return (False, {
@@ -123,5 +186,7 @@ def scrape_urls(urls: List[str], max_urls: int = 10, timeout: int = 15) -> Dict[
         "merged_text": merged_text,
         "headers_structure": all_h1_h6,
         "raw_results": results,
-        "failed_results": failed_results
+        "failed_results": failed_results,
+        "serper_count": len([r for r in results if r.get("method") == "serper"]),
+        "direct_count": len([r for r in results if r.get("method") == "direct"])
     }

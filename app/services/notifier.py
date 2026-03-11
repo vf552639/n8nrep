@@ -47,3 +47,12 @@ def notify_task_success(task_id: str, keyword: str, site_name: str, word_count: 
         f"Результат доступен в админ-панели (ID: {task_id})."
     )
     send_telegram_notification(text)
+
+def notify_serper_key_issue(error_detail: str) -> None:
+    text = (
+        f"⚠️ <b>Serper.dev API — проблема с ключом!</b>\n\n"
+        f"<b>Ошибка:</b> {error_detail}\n\n"
+        f"Парсинг конкурентов переключён на прямой метод (fallback).\n"
+        f"Проверьте ключ в настройках или баланс на serper.dev."
+    )
+    send_telegram_notification(text)
