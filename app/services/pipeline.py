@@ -191,8 +191,8 @@ def call_agent(ctx: PipelineContext, agent_name: str, context: str, response_for
     
     user_msg = f"{user_template}\n\n[CONTEXT]\n{context}" if user_template else context
     
-    resolved_prompts["system_prompt"] = system_text[:3000]
-    resolved_prompts["user_prompt"] = user_msg[:3000]
+    resolved_prompts["system_prompt"] = system_text[:6000]
+    resolved_prompts["user_prompt"] = user_msg[:6000]
     
     # Log context size for diagnostics
     total_chars = len(system_text) + len(user_msg)
