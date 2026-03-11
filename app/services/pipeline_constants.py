@@ -35,3 +35,20 @@ ALL_STEPS = [
     STEP_HTML_STRUCT,
     STEP_META_GEN
 ]
+
+CRITICAL_VARS = {
+    "ai_structure_analysis": ["keyword", "language", "country"],
+    "chunk_cluster_analysis": ["keyword", "language", "country"],
+    "competitor_structure_analysis": ["keyword", "language", "country"],
+    "final_structure_analysis": ["keyword", "language", "country"],
+    "primary_generation": ["keyword", "additional_keywords", "avg_word_count", "language", "exclude_words"],
+    "competitor_comparison": ["keyword"],
+    "reader_opinion": ["keyword"],
+    "interlinking_citations": ["keyword", "site_name"],
+    "improver": ["keyword", "exclude_words"],
+    "final_editing": ["keyword", "exclude_words"],
+    "html_structure": ["keyword", "language"],
+    "meta_generation": ["keyword", "language"],
+    "structure_fact_checking": ["keyword", "result_final_structure_analysis"],
+    "fact_checking": ["keyword", "language"],
+}

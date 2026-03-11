@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     API_KEY: str = ""
     CORS_ORIGINS: str = "*"
     TEST_MODE: bool = False
+    STRICT_VARIABLE_CHECK: bool = False
     SEQUENTIAL_MODE: bool = True
 
     # Redis (for Celery)
