@@ -372,18 +372,57 @@ def render_task_step_monitor(task_id: str, task_status: str, task_keyword: str, 
                 render_serp_viewer(task_id, key_prefix=key_prefix)
             elif step.get("result"):
                 result_text = step["result"][:50000]
-                st.text_area("Результат", value=result_text[:10000], height=200, disabled=True, key=f"{key_prefix}_res_{step_key}_{task_id}")
                 
-                import html as html_lib
-                escaped = html_lib.escape(result_text).replace("`", "\\`").replace("$", "\\$")
-                copy_html = f"""
-                <button onclick="navigator.clipboard.writeText(document.getElementById('{key_prefix}_copy_{step_key}_{task_id}').value).then(()=>this.innerText='✅ Скопировано!').catch(()=>this.innerText='❌ Ошибка')" 
-                style="background:#4F46E5;color:white;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px;margin-bottom:10px;">
-                📋 Копировать результат
-                </button>
-                <textarea id="{key_prefix}_copy_{step_key}_{task_id}" style="position:absolute;left:-9999px;">{escaped}</textarea>
-                """
-                st.components.v1.html(copy_html, height=40)
+                # Setup tabs for Result, Resolved Prompts, and Debug Variables
+                tab_res, tab_prompts, tab_vars = st.tabs(["📄 Результат", "💬 Промпты", "🐞 Debug Переменных"])
+                
+                with tab_res:
+                    st.text_area("Результат", value=result_text[:10000], height=200, disabled=True, key=f"{key_prefix}_res_{step_key}_{task_id}")
+                    
+                    import html as html_lib
+                    escaped = html_lib.escape(result_text).replace("`", "\\`").replace("$", "\\$")
+                    copy_html = f"""
+                    <button onclick="navigator.clipboard.writeText(document.getElementById('{key_prefix}_copy_{step_key}_{task_id}').value).then(()=>this.innerText='✅ Скопировано!').catch(()=>this.innerText='❌ Ошибка')" 
+                    style="background:#4F46E5;color:white;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px;margin-bottom:10px;">
+                    📋 Копировать результат
+                    </button>
+                    <textarea id="{key_prefix}_copy_{step_key}_{task_id}" style="position:absolute;left:-9999px;">{escaped}</textarea>
+                    """
+                    st.components.v1.html(copy_html, height=40)
+                    
+                with tab_prompts:
+                    resolved_prompts = step.get("resolved_prompts")
+                    if resolved_prompts:
+                        st.markdown("**System Prompt:**")
+                        st.code(resolved_prompts.get("system_prompt", ""), language="markdown")
+                        st.markdown("**User Prompt:**")
+                        st.code(resolved_prompts.get("user_prompt", ""), language="markdown")
+                    else:
+                        st.info("Промпты не сохранены для этого шага.")
+                        
+                with tab_vars:
+                    variables_snapshot = step.get("variables_snapshot")
+                    if variables_snapshot:
+                        # Convert dict to displayable HTML table
+                        var_html = "<table style='width:100%; border-collapse: collapse; font-size: 14px; font-family: monospace;'>"
+                        var_html += "<tr><th style='border: 1px solid #ddd; padding: 8px; background-color: #f2f2f2; text-align: left;'>Variable</th><th style='border: 1px solid #ddd; padding: 8px; background-color: #f2f2f2; text-align: left;'>Value (truncated)</th></tr>"
+                        # Sort keys for easier reading
+                        for k, v in sorted(variables_snapshot.items()):
+                            # Determine color
+                            row_color = ""
+                            if v is None or v == "" or v == "[]" or v == "{}" or v == "None":
+                                row_color = "background-color: #fef08a;" # Yellow for empty
+                            else:
+                                row_color = "background-color: #bbf7d0;" # Green for resolved/present
+                                
+                            v_escaped = html_lib.escape(str(v))
+                            var_html += f"<tr style='{row_color}'><td style='border: 1px solid #ddd; padding: 8px; font-weight: bold;'>{k}</td><td style='border: 1px solid #ddd; padding: 8px; white-space: pre-wrap; word-break: break-word;'>{v_escaped}</td></tr>"
+                            
+                        var_html += "</table>"
+                        st.markdown(var_html, unsafe_allow_html=True)
+                        st.caption("🔴 Красный: отсутствует (см. логи Pipeline) | 🟡 Жёлтый: пусто | 🟢 Зелёный: заполнено")
+                    else:
+                        st.info("Снапшот переменных не сохранен для этого шага.")
                 
             step_model = step.get("model", "—")
             step_cost = step.get("cost", 0.0)

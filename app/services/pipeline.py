@@ -64,7 +64,7 @@ def get_prompt_obj(db: Session, agent_name: str) -> Prompt:
         raise Exception(f"No active prompt found for agent: {agent_name}")
     return prompt_obj
 
-def save_step_result(db: Session, task: Task, step_name: str, result: str, model: str = None, status: str = "completed", cost: float = 0.0):
+def save_step_result(db: Session, task: Task, step_name: str, result: str, model: str = None, status: str = "completed", cost: float = 0.0, variables_snapshot: dict = None, resolved_prompts: dict = None):
     if task.step_results is None:
         task.step_results = {}
     
@@ -77,6 +77,10 @@ def save_step_result(db: Session, task: Task, step_name: str, result: str, model
         step_data["model"] = model
     if cost > 0:
         step_data["cost"] = cost
+    if variables_snapshot:
+        step_data["variables_snapshot"] = variables_snapshot
+    if resolved_prompts:
+        step_data["resolved_prompts"] = resolved_prompts
     
     updated = dict(task.step_results)
     updated[step_name] = step_data
@@ -97,32 +101,98 @@ def add_log(db: Session, task: Task, msg: str, level: str = "info", step: str = 
     task.logs = current_logs
     db.commit()
 
-def apply_template_vars(text: str, variables: dict) -> str:
-    """Replace {{variable_name}} placeholders in text with actual values."""
+from typing import Tuple
+
+def apply_template_vars(text: str, variables: dict) -> Tuple[str, dict]:
+    """Replace {{variable_name}} placeholders in text with actual values and return a resolution report."""
     if not text:
-        return text
+        return text, {"resolved": [], "unresolved": [], "empty": []}
+        
+    resolved = []
+    unresolved = []
+    empty = []
+    
     def replacer(match):
         key = match.group(1).strip()
-        return str(variables.get(key, match.group(0)))  # keep original if not found
-    return re.sub(r'\{\{(.+?)\}\}', replacer, text)
+        if key in variables:
+            val = variables[key]
+            # Check if empty (None, "", [], {})
+            if val is None or val == "" or val == [] or val == {}:
+                if key not in empty:
+                    empty.append(key)
+            else:
+                str_val = str(val)
+                resolved.append(f'{key}="{str_val[:100]}..."' if len(str_val) > 100 else f'{key}="{str_val}"')
+            return str(val)
+        else:
+            if key not in unresolved:
+                unresolved.append(key)
+            return match.group(0)  # keep original if not found
+            
+    replaced_text = re.sub(r'\{\{(.+?)\}\}', replacer, text)
+    report = {
+        "resolved": list(set(resolved)),
+        "unresolved": unresolved,
+        "empty": empty
+    }
+    return replaced_text, report
 
-from typing import Tuple
-def call_agent(db: Session, agent_name: str, context: str, response_format=None, variables: dict = None) -> Tuple[str, float, str]:
+def call_agent(ctx: PipelineContext, agent_name: str, context: str, response_format=None, variables: dict = None) -> Tuple[str, float, str, dict, dict]:
     """Helper: load prompt config for agent_name, apply template vars, merge context, call LLM."""
-    prompt = get_prompt_obj(db, agent_name)
+    prompt = get_prompt_obj(ctx.db, agent_name)
     
     if getattr(prompt, "skip_in_pipeline", False):
         print(f"Agent {agent_name} skipped (toggle off)")
-        return "", 0.0, prompt.model
+        return "", 0.0, prompt.model, {}, {}
     
     system_text = prompt.system_prompt
     user_template = prompt.user_prompt or ""
     
+    resolved_prompts = {}
+    variables_snapshot = {}
+    
     if variables:
-        system_text = apply_template_vars(system_text, variables)
-        user_template = apply_template_vars(user_template, variables)
+        system_text, sys_report = apply_template_vars(system_text, variables)
+        user_template, user_report = apply_template_vars(user_template, variables)
+        
+        # Merge reports
+        all_resolved = list(set(sys_report["resolved"] + user_report["resolved"]))
+        all_unresolved = list(set(sys_report["unresolved"] + user_report["unresolved"]))
+        all_empty = list(set(sys_report["empty"] + user_report["empty"]))
+        
+        log_msg = f"[VARS] agent={agent_name}"
+        log_msg += f" | resolved: {', '.join(all_resolved) if all_resolved else '(none)'}"
+        log_msg += f" | empty: {', '.join(all_empty) if all_empty else '(none)'}"
+        log_msg += f" | unresolved: {', '.join(all_unresolved) if all_unresolved else '(none)'}"
+        
+        level = "info"
+        if all_unresolved:
+            level = "warn"
+            
+        add_log(ctx.db, ctx.task, log_msg, level=level, step=agent_name)
+        
+        # Check Critical Vars
+        critical = CRITICAL_VARS.get(agent_name, [])
+        missing_critical = []
+        for cv in critical:
+            if cv in all_unresolved or cv in all_empty:
+                missing_critical.append(cv)
+                
+        if missing_critical:
+            err_msg = f"CRITICAL VARIABLES MISSING OR EMPTY for {agent_name}: {', '.join(missing_critical)}"
+            add_log(ctx.db, ctx.task, err_msg, level="error", step=agent_name)
+            if getattr(settings, "STRICT_VARIABLE_CHECK", False):
+                raise ValueError(err_msg)
+                
+        # Create truncated snapshot
+        for k, v in variables.items():
+            val_str = str(v)
+            variables_snapshot[k] = val_str[:200] + "..." if len(val_str) > 200 else val_str
     
     user_msg = f"{user_template}\n\n[CONTEXT]\n{context}" if user_template else context
+    
+    resolved_prompts["system_prompt"] = system_text[:3000]
+    resolved_prompts["user_prompt"] = user_msg[:3000]
     
     # Log context size for diagnostics
     total_chars = len(system_text) + len(user_msg)
@@ -142,7 +212,8 @@ def call_agent(db: Session, agent_name: str, context: str, response_format=None,
     if response_format:
         kwargs["response_format"] = response_format
     
-    return generate_text(**kwargs)
+    res, cost, model = generate_text(**kwargs)
+    return res, cost, model, resolved_prompts, variables_snapshot
 
 MAX_COMPETITOR_TITLES = 10
 MAX_COMPETITOR_DESCRIPTIONS = 10
@@ -475,8 +546,8 @@ def phase_ai_structure(ctx: PipelineContext):
     setup_vars(ctx)
     add_log(ctx.db, ctx.task, "Starting AI Structure Analysis...", step=STEP_AI_ANALYSIS)
     save_step_result(ctx.db, ctx.task, STEP_AI_ANALYSIS, result=None, status="running")
-    ai_structure, step_cost, actual_model = call_agent(
-        ctx.db, "ai_structure_analysis", ctx.base_context, 
+    ai_structure, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
+        ctx, "ai_structure_analysis", ctx.base_context, 
         response_format={"type": "json_object"}, variables=ctx.analysis_vars
     )
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
@@ -497,7 +568,7 @@ def phase_ai_structure(ctx: PipelineContext):
     ctx.task.outline = ctx.outline_data
     ctx.db.commit()
     add_log(ctx.db, ctx.task, f"AI Structure Analysis completed ({len(ai_structure)} chars)", step=STEP_AI_ANALYSIS)
-    save_step_result(ctx.db, ctx.task, STEP_AI_ANALYSIS, result=ai_structure, model=actual_model, status="completed", cost=step_cost)
+    save_step_result(ctx.db, ctx.task, STEP_AI_ANALYSIS, result=ai_structure, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
 
 def phase_chunk_analysis(ctx: PipelineContext):
     ctx.db.refresh(ctx.task)  # Force reload from DB
@@ -506,7 +577,7 @@ def phase_chunk_analysis(ctx: PipelineContext):
     save_step_result(ctx.db, ctx.task, STEP_CHUNK_ANALYSIS, result=None, status="running")
     ai_structure = ctx.outline_data.get("ai_structure", "")
     chunk_context = f"{ctx.base_context}\n\nAI Structure Analysis:\n{ai_structure}"
-    chunk_analysis, step_cost, actual_model = call_agent(ctx.db, "chunk_cluster_analysis", chunk_context, variables=ctx.analysis_vars)
+    chunk_analysis, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, "chunk_cluster_analysis", chunk_context, variables=ctx.analysis_vars)
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
     ctx.analysis_vars["result_chunk_cluster_analysis"] = chunk_analysis
@@ -514,7 +585,7 @@ def phase_chunk_analysis(ctx: PipelineContext):
     ctx.task.outline = ctx.outline_data
     ctx.db.commit()
     add_log(ctx.db, ctx.task, f"Chunk Cluster Analysis completed ({len(chunk_analysis)} chars)", step=STEP_CHUNK_ANALYSIS)
-    save_step_result(ctx.db, ctx.task, STEP_CHUNK_ANALYSIS, result=chunk_analysis, model=actual_model, status="completed", cost=step_cost)
+    save_step_result(ctx.db, ctx.task, STEP_CHUNK_ANALYSIS, result=chunk_analysis, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
 
 def phase_competitor_structure(ctx: PipelineContext):
     ctx.db.refresh(ctx.task)  # Force reload from DB
@@ -527,7 +598,7 @@ def phase_competitor_structure(ctx: PipelineContext):
         f"Competitors Text:\n{ctx.task.competitors_text[:20000]}\n\n"
         f"Chunk Analysis:\n{chunk_analysis}"
     )
-    competitor_structure, step_cost, actual_model = call_agent(ctx.db, "competitor_structure_analysis", competitor_context, variables=ctx.analysis_vars)
+    competitor_structure, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, "competitor_structure_analysis", competitor_context, variables=ctx.analysis_vars)
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
     ctx.analysis_vars["result_competitor_structure_analysis"] = competitor_structure
@@ -535,7 +606,7 @@ def phase_competitor_structure(ctx: PipelineContext):
     ctx.task.outline = ctx.outline_data
     ctx.db.commit()
     add_log(ctx.db, ctx.task, f"Competitor Structure Analysis completed ({len(competitor_structure)} chars)", step=STEP_COMP_STRUCTURE)
-    save_step_result(ctx.db, ctx.task, STEP_COMP_STRUCTURE, result=competitor_structure, model=actual_model, status="completed", cost=step_cost)
+    save_step_result(ctx.db, ctx.task, STEP_COMP_STRUCTURE, result=competitor_structure, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
 
 def phase_final_structure(ctx: PipelineContext):
     ctx.db.refresh(ctx.task)  # Force reload from DB
@@ -549,8 +620,8 @@ def phase_final_structure(ctx: PipelineContext):
         f"Chunk Analysis:\n{ctx.outline_data.get('chunk_analysis', '')}\n\n"
         f"Competitor Structure Analysis:\n{ctx.outline_data.get('competitor_structure', '')}"
     )
-    outline_json_str, step_cost, actual_model = call_agent(
-        ctx.db, "final_structure_analysis", final_analysis_context,
+    outline_json_str, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
+        ctx, "final_structure_analysis", final_analysis_context,
         response_format={"type": "json_object"}, variables=ctx.analysis_vars
     )
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
@@ -560,18 +631,18 @@ def phase_final_structure(ctx: PipelineContext):
     ctx.task.outline = ctx.outline_data
     ctx.db.commit()
     add_log(ctx.db, ctx.task, f"Final Structure Analysis completed", step=STEP_FINAL_ANALYSIS)
-    save_step_result(ctx.db, ctx.task, STEP_FINAL_ANALYSIS, result=outline_json_str, model=actual_model, status="completed", cost=step_cost)
+    save_step_result(ctx.db, ctx.task, STEP_FINAL_ANALYSIS, result=outline_json_str, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
 
 def phase_structure_fact_check(ctx: PipelineContext):
     setup_template_vars(ctx)
     add_log(ctx.db, ctx.task, "Starting Structure Fact-Checking...", step=STEP_STRUCTURE_FACT_CHECK)
     save_step_result(ctx.db, ctx.task, STEP_STRUCTURE_FACT_CHECK, result=None, status="running")
     
-    fact_check_report, step_cost, actual_model = call_agent(ctx.db, "structure_fact_checking", "", variables=ctx.template_vars)
+    fact_check_report, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, "structure_fact_checking", "", variables=ctx.template_vars)
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
     add_log(ctx.db, ctx.task, f"Structure Fact-Checking completed ({len(fact_check_report)} chars)", step=STEP_STRUCTURE_FACT_CHECK)
-    save_step_result(ctx.db, ctx.task, STEP_STRUCTURE_FACT_CHECK, result=fact_check_report, model=actual_model, status="completed", cost=step_cost)
+    save_step_result(ctx.db, ctx.task, STEP_STRUCTURE_FACT_CHECK, result=fact_check_report, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
 
 def phase_primary_gen(ctx: PipelineContext):
     setup_template_vars(ctx)
@@ -584,11 +655,11 @@ def phase_primary_gen(ctx: PipelineContext):
     )
     add_log(ctx.db, ctx.task, "Starting Primary Generation...", step=STEP_PRIMARY_GEN)
     save_step_result(ctx.db, ctx.task, STEP_PRIMARY_GEN, result=None, status="running")
-    draft_html, step_cost, actual_model = call_agent(ctx.db, "primary_generation", gen_context, variables=ctx.template_vars)
+    draft_html, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, "primary_generation", gen_context, variables=ctx.template_vars)
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
     add_log(ctx.db, ctx.task, f"Primary Generation completed ({len(draft_html)} chars)", step=STEP_PRIMARY_GEN)
-    save_step_result(ctx.db, ctx.task, STEP_PRIMARY_GEN, result=draft_html, model=actual_model, status="completed", cost=step_cost)
+    save_step_result(ctx.db, ctx.task, STEP_PRIMARY_GEN, result=draft_html, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
 
 def phase_competitor_comparison(ctx: PipelineContext):
     setup_template_vars(ctx)
@@ -599,11 +670,11 @@ def phase_competitor_comparison(ctx: PipelineContext):
     )
     add_log(ctx.db, ctx.task, "Starting Competitor Comparison...", step=STEP_COMP_COMPARISON)
     save_step_result(ctx.db, ctx.task, STEP_COMP_COMPARISON, result=None, status="running")
-    comparison_review, step_cost, actual_model = call_agent(ctx.db, "competitor_comparison", comparison_context, variables=ctx.template_vars)
+    comparison_review, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, "competitor_comparison", comparison_context, variables=ctx.template_vars)
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
     add_log(ctx.db, ctx.task, f"Competitor Comparison completed", step=STEP_COMP_COMPARISON)
-    save_step_result(ctx.db, ctx.task, STEP_COMP_COMPARISON, result=comparison_review, model=actual_model, status="completed", cost=step_cost)
+    save_step_result(ctx.db, ctx.task, STEP_COMP_COMPARISON, result=comparison_review, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
 
 def phase_reader_opinion(ctx: PipelineContext):
     setup_template_vars(ctx)
@@ -611,11 +682,11 @@ def phase_reader_opinion(ctx: PipelineContext):
     reader_context = f"Article:\n{draft_html}"
     add_log(ctx.db, ctx.task, "Starting Reader Opinion analysis...", step=STEP_READER_OPINION)
     save_step_result(ctx.db, ctx.task, STEP_READER_OPINION, result=None, status="running")
-    reader_feedback, step_cost, actual_model = call_agent(ctx.db, "reader_opinion", reader_context, variables=ctx.template_vars)
+    reader_feedback, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, "reader_opinion", reader_context, variables=ctx.template_vars)
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
     add_log(ctx.db, ctx.task, f"Reader Opinion completed", step=STEP_READER_OPINION)
-    save_step_result(ctx.db, ctx.task, STEP_READER_OPINION, result=reader_feedback, model=actual_model, status="completed", cost=step_cost)
+    save_step_result(ctx.db, ctx.task, STEP_READER_OPINION, result=reader_feedback, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
 
 def phase_interlink(ctx: PipelineContext):
     setup_template_vars(ctx)
@@ -628,11 +699,11 @@ def phase_interlink(ctx: PipelineContext):
     )
     add_log(ctx.db, ctx.task, "Starting Interlinking & Citations...", step=STEP_INTERLINK)
     save_step_result(ctx.db, ctx.task, STEP_INTERLINK, result=None, status="running")
-    interlink_suggestions, step_cost, actual_model = call_agent(ctx.db, "interlinking_citations", interlink_context, variables=ctx.template_vars)
+    interlink_suggestions, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, "interlinking_citations", interlink_context, variables=ctx.template_vars)
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
     add_log(ctx.db, ctx.task, f"Interlinking & Citations completed", step=STEP_INTERLINK)
-    save_step_result(ctx.db, ctx.task, STEP_INTERLINK, result=interlink_suggestions, model=actual_model, status="completed", cost=step_cost)
+    save_step_result(ctx.db, ctx.task, STEP_INTERLINK, result=interlink_suggestions, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
 
 def phase_improver(ctx: PipelineContext):
     setup_template_vars(ctx)
@@ -649,11 +720,11 @@ def phase_improver(ctx: PipelineContext):
     )
     add_log(ctx.db, ctx.task, "Starting Improver (draft enhancement)...", step=STEP_IMPROVER)
     save_step_result(ctx.db, ctx.task, STEP_IMPROVER, result=None, status="running")
-    improved_html, step_cost, actual_model = call_agent(ctx.db, "improver", improver_context, variables=ctx.template_vars)
+    improved_html, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, "improver", improver_context, variables=ctx.template_vars)
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
     add_log(ctx.db, ctx.task, f"Improver completed ({len(improved_html)} chars)", step=STEP_IMPROVER)
-    save_step_result(ctx.db, ctx.task, STEP_IMPROVER, result=improved_html, model=actual_model, status="completed", cost=step_cost)
+    save_step_result(ctx.db, ctx.task, STEP_IMPROVER, result=improved_html, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
 
 def phase_final_editing(ctx: PipelineContext):
     setup_template_vars(ctx)
@@ -670,11 +741,11 @@ def phase_final_editing(ctx: PipelineContext):
     )
     add_log(ctx.db, ctx.task, "Starting Final Editing...", step=STEP_FINAL_EDIT)
     save_step_result(ctx.db, ctx.task, STEP_FINAL_EDIT, result=None, status="running")
-    final_html, step_cost, actual_model = call_agent(ctx.db, "final_editing", editing_context, variables=ctx.template_vars)
+    final_html, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, "final_editing", editing_context, variables=ctx.template_vars)
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
     add_log(ctx.db, ctx.task, f"Final Editing completed ({len(final_html)} chars)", step=STEP_FINAL_EDIT)
-    save_step_result(ctx.db, ctx.task, STEP_FINAL_EDIT, result=final_html, model=actual_model, status="completed", cost=step_cost)
+    save_step_result(ctx.db, ctx.task, STEP_FINAL_EDIT, result=final_html, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
 
 def phase_html_structure(ctx: PipelineContext):
     setup_template_vars(ctx)
@@ -698,11 +769,11 @@ def phase_html_structure(ctx: PipelineContext):
     )
     add_log(ctx.db, ctx.task, "Starting HTML Structure formatting...", step=STEP_HTML_STRUCT)
     save_step_result(ctx.db, ctx.task, STEP_HTML_STRUCT, result=None, status="running")
-    structured_html, step_cost, actual_model = call_agent(ctx.db, "html_structure", html_struct_context, variables=ctx.template_vars)
+    structured_html, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, "html_structure", html_struct_context, variables=ctx.template_vars)
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
     add_log(ctx.db, ctx.task, f"HTML Structure completed ({len(structured_html)} chars)", step=STEP_HTML_STRUCT)
-    save_step_result(ctx.db, ctx.task, STEP_HTML_STRUCT, result=structured_html, model=actual_model, status="completed", cost=step_cost)
+    save_step_result(ctx.db, ctx.task, STEP_HTML_STRUCT, result=structured_html, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
 
 def phase_content_fact_check(ctx: PipelineContext):
     if not settings.FACT_CHECK_ENABLED:
@@ -725,14 +796,14 @@ def phase_content_fact_check(ctx: PipelineContext):
     save_step_result(ctx.db, ctx.task, STEP_FACT_CHECK, result=None, status="running")
     
     try:
-        fact_check_json_str, step_cost, actual_model = call_agent(
-            ctx.db, "fact_checking", fact_check_context,
+        fact_check_json_str, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
+            ctx, "fact_checking", fact_check_context,
             response_format={"type": "json_object"}, variables=ctx.template_vars
         )
         ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
         
         add_log(ctx.db, ctx.task, f"Fact-Checking completed", step=STEP_FACT_CHECK)
-        save_step_result(ctx.db, ctx.task, STEP_FACT_CHECK, result=fact_check_json_str, model=actual_model, status="completed", cost=step_cost)
+        save_step_result(ctx.db, ctx.task, STEP_FACT_CHECK, result=fact_check_json_str, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
     except Exception as e:
         add_log(ctx.db, ctx.task, f"Fact-checking agent failed or not found: {str(e)}", level="warn", step=STEP_FACT_CHECK)
         save_step_result(ctx.db, ctx.task, STEP_FACT_CHECK, result='{"verification_status": "warn", "issues": [], "summary": "Failed to run fact_checking agent."}', status="completed")
@@ -743,13 +814,13 @@ def phase_meta_generation(ctx: PipelineContext):
     meta_context = f"Article HTML:\n{structured_html}"
     add_log(ctx.db, ctx.task, "Generating Meta Tags (JSON)...", step=STEP_META_GEN)
     save_step_result(ctx.db, ctx.task, STEP_META_GEN, result=None, status="running")
-    meta_json_str, step_cost, actual_model = call_agent(
-        ctx.db, "meta_generation", meta_context,
+    meta_json_str, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
+        ctx, "meta_generation", meta_context,
         response_format={"type": "json_object"}, variables=ctx.template_vars
     )
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     add_log(ctx.db, ctx.task, f"Meta Tags Generation completed", step=STEP_META_GEN)
-    save_step_result(ctx.db, ctx.task, STEP_META_GEN, result=meta_json_str, model=actual_model, status="completed", cost=step_cost)
+    save_step_result(ctx.db, ctx.task, STEP_META_GEN, result=meta_json_str, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
 
 def run_pipeline(db: Session, task_id: str):
     ctx = PipelineContext(db, task_id)
