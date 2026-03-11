@@ -64,7 +64,7 @@ def get_prompt_obj(db: Session, agent_name: str) -> Prompt:
         raise Exception(f"No active prompt found for agent: {agent_name}")
     return prompt_obj
 
-def save_step_result(db: Session, task: Task, step_name: str, result: str, model: str = None, status: str = "completed", cost: float = 0.0, variables_snapshot: dict = None, resolved_prompts: dict = None):
+def save_step_result(db: Session, task: Task, step_name: str, result: str, model: str = None, status: str = "completed", cost: float = 0.0, variables_snapshot: dict = None, resolved_prompts: dict = None, exclude_words_violations: dict = None):
     if task.step_results is None:
         task.step_results = {}
     
@@ -81,6 +81,8 @@ def save_step_result(db: Session, task: Task, step_name: str, result: str, model
         step_data["variables_snapshot"] = variables_snapshot
     if resolved_prompts:
         step_data["resolved_prompts"] = resolved_prompts
+    if exclude_words_violations:
+        step_data["exclude_words_violations"] = exclude_words_violations
     
     updated = dict(task.step_results)
     updated[step_name] = step_data
@@ -191,6 +193,20 @@ def call_agent(ctx: PipelineContext, agent_name: str, context: str, response_for
     
     user_msg = f"{user_template}\n\n[CONTEXT]\n{context}" if user_template else context
     
+    # --- INJECT RERUN FEEDBACK ---
+    step_results = ctx.task.step_results or {}
+    rerun_feedback = step_results.get("_rerun_feedback", {})
+    if rerun_feedback.get("step") == agent_name and rerun_feedback.get("feedback"):
+        user_msg += f"\n\n[HUMAN FEEDBACK ON PREVIOUS VERSION]\n{rerun_feedback['feedback']}"
+        add_log(ctx.db, ctx.task, f"Injected human feedback into prompt for {agent_name}", level="info", step=agent_name)
+        
+        # Clear it so we don't apply it again later
+        new_results = dict(step_results)
+        del new_results["_rerun_feedback"]
+        ctx.task.step_results = new_results
+        ctx.db.commit()
+    # -----------------------------
+    
     resolved_prompts["system_prompt"] = system_text[:6000]
     resolved_prompts["user_prompt"] = user_msg[:6000]
     
@@ -214,6 +230,46 @@ def call_agent(ctx: PipelineContext, agent_name: str, context: str, response_for
     
     res, cost, model = generate_text(**kwargs)
     return res, cost, model, resolved_prompts, variables_snapshot
+
+def call_agent_with_exclude_validation(ctx: PipelineContext, agent_name: str, context: str, step_constant: str, max_retries: int = 1):
+    from app.services.exclude_words_validator import ExcludeWordsValidator
+    
+    result_text, total_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, agent_name, context, variables=ctx.template_vars)
+    
+    exclude_str = ctx.template_vars.get("exclude_words", "")
+    if not exclude_str.strip():
+        return result_text, total_cost, actual_model, resolved_prompts, variables_snapshot, None
+        
+    validator = ExcludeWordsValidator(exclude_str)
+    report = validator.validate(result_text)
+    
+    if report["passed"]:
+        return result_text, total_cost, actual_model, resolved_prompts, variables_snapshot, None
+        
+    add_log(ctx.db, ctx.task, f"EXCLUDE_WORDS violation: found {report['found_words']}", level="warn", step=step_constant)
+    
+    retry_count = 0
+    while retry_count < max_retries and not report["passed"]:
+        retry_count += 1
+        add_log(ctx.db, ctx.task, f"Retrying agent {agent_name} due to exclude words violation (Attempt {retry_count}).", level="info", step=step_constant)
+        
+        retry_context = context + f"\n\nCRITICAL: Your previous output contained forbidden words: {report['found_words']}. You MUST NOT use these words. Rewrite the text avoiding them completely."
+        
+        retry_text, retry_cost, r_model, r_prompts, r_vars = call_agent(ctx, agent_name, retry_context, variables=ctx.template_vars)
+        total_cost += retry_cost
+        result_text = retry_text
+        actual_model = r_model
+        resolved_prompts = r_prompts
+        variables_snapshot = r_vars
+        
+        report = validator.validate(result_text)
+        
+    violations_dict = None
+    if not report["passed"]:
+        add_log(ctx.db, ctx.task, f"EXCLUDE_WORDS violation persists after retries: found {report['found_words']}", level="error", step=step_constant)
+        violations_dict = report["found_words"]
+        
+    return result_text, total_cost, actual_model, resolved_prompts, variables_snapshot, violations_dict
 
 MAX_COMPETITOR_TITLES = 10
 MAX_COMPETITOR_DESCRIPTIONS = 10
@@ -434,6 +490,7 @@ def setup_template_vars(ctx: PipelineContext):
     target_audience = ""
     rhythms_style = ""
     author_name = ""
+    author_exclude_words = ""
 
     if ctx.task.author_id:
         author = ctx.db.query(Author).filter(Author.id == ctx.task.author_id).first()
@@ -445,6 +502,14 @@ def setup_template_vars(ctx: PipelineContext):
             target_audience = author.target_audience or ""
             rhythms_style = author.rhythms_style or ""
             author_name = author.author or ""
+            author_exclude_words = author.exclude_words or ""
+
+    combined_exclude = []
+    if settings.EXCLUDE_WORDS:
+        combined_exclude.append(settings.EXCLUDE_WORDS)
+    if author_exclude_words:
+        combined_exclude.append(author_exclude_words)
+    final_exclude = ", ".join(combined_exclude)
 
     ctx.author_block = (
         f"Author Style/Text Block: {author_style}\n"
@@ -453,7 +518,7 @@ def setup_template_vars(ctx: PipelineContext):
         f"Face: {face}\n"
         f"Target Audience: {target_audience}\n"
         f"Rhythms & Style: {rhythms_style}\n"
-        f"Exclude Words: {settings.EXCLUDE_WORDS}"
+        f"Exclude Words: {final_exclude}"
     )
     already_covered_topics = ""
     if ctx.task.project_id:
@@ -477,7 +542,7 @@ def setup_template_vars(ctx: PipelineContext):
         "face": face,
         "year": year,
         "rhythms_style": rhythms_style,
-        "exclude_words": settings.EXCLUDE_WORDS,
+        "exclude_words": final_exclude,
         "site_name": ctx.site_name,
         "result_ai_structure_analysis": ctx.task.outline.get("ai_structure", ""),
         "intent": ctx.task.outline.get("ai_structure_parsed", {}).get("intent", ""),
@@ -706,11 +771,11 @@ def phase_primary_gen(ctx: PipelineContext):
     )
     add_log(ctx.db, ctx.task, "Starting Primary Generation...", step=STEP_PRIMARY_GEN)
     save_step_result(ctx.db, ctx.task, STEP_PRIMARY_GEN, result=None, status="running")
-    draft_html, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, "primary_generation", gen_context, variables=ctx.template_vars)
+    draft_html, step_cost, actual_model, resolved_prompts, variables_snapshot, violations = call_agent_with_exclude_validation(ctx, "primary_generation", gen_context, step_constant=STEP_PRIMARY_GEN)
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
     add_log(ctx.db, ctx.task, f"Primary Generation completed ({len(draft_html)} chars)", step=STEP_PRIMARY_GEN)
-    save_step_result(ctx.db, ctx.task, STEP_PRIMARY_GEN, result=draft_html, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
+    save_step_result(ctx.db, ctx.task, STEP_PRIMARY_GEN, result=draft_html, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts, exclude_words_violations=violations)
 
 def phase_competitor_comparison(ctx: PipelineContext):
     setup_template_vars(ctx)
@@ -771,11 +836,11 @@ def phase_improver(ctx: PipelineContext):
     )
     add_log(ctx.db, ctx.task, "Starting Improver (draft enhancement)...", step=STEP_IMPROVER)
     save_step_result(ctx.db, ctx.task, STEP_IMPROVER, result=None, status="running")
-    improved_html, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, "improver", improver_context, variables=ctx.template_vars)
+    improved_html, step_cost, actual_model, resolved_prompts, variables_snapshot, violations = call_agent_with_exclude_validation(ctx, "improver", improver_context, step_constant=STEP_IMPROVER)
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
     add_log(ctx.db, ctx.task, f"Improver completed ({len(improved_html)} chars)", step=STEP_IMPROVER)
-    save_step_result(ctx.db, ctx.task, STEP_IMPROVER, result=improved_html, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
+    save_step_result(ctx.db, ctx.task, STEP_IMPROVER, result=improved_html, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts, exclude_words_violations=violations)
 
 def phase_final_editing(ctx: PipelineContext):
     setup_template_vars(ctx)
@@ -792,11 +857,11 @@ def phase_final_editing(ctx: PipelineContext):
     )
     add_log(ctx.db, ctx.task, "Starting Final Editing...", step=STEP_FINAL_EDIT)
     save_step_result(ctx.db, ctx.task, STEP_FINAL_EDIT, result=None, status="running")
-    final_html, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, "final_editing", editing_context, variables=ctx.template_vars)
+    final_html, step_cost, actual_model, resolved_prompts, variables_snapshot, violations = call_agent_with_exclude_validation(ctx, "final_editing", editing_context, step_constant=STEP_FINAL_EDIT)
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
     add_log(ctx.db, ctx.task, f"Final Editing completed ({len(final_html)} chars)", step=STEP_FINAL_EDIT)
-    save_step_result(ctx.db, ctx.task, STEP_FINAL_EDIT, result=final_html, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
+    save_step_result(ctx.db, ctx.task, STEP_FINAL_EDIT, result=final_html, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts, exclude_words_violations=violations)
 
 def phase_html_structure(ctx: PipelineContext):
     setup_template_vars(ctx)

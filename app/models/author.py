@@ -18,5 +18,6 @@ class Author(Base):
     face = Column(Text, nullable=True)
     target_audience = Column(Text, nullable=True)
     rhythms_style = Column(Text, nullable=True)
+    exclude_words = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

@@ -463,6 +463,11 @@ def render_task_step_monitor(task_id: str, task_status: str, task_keyword: str, 
             elif step.get("result"):
                 result_text = step["result"][:50000]
                 
+                violations = step.get("exclude_words_violations")
+                if violations:
+                    violation_details = ", ".join([f"**{word}** ({count})" for word, count in violations.items()])
+                    st.warning(f"⚠️ Найдены запрещённые слова: {violation_details}")
+                
                 # Setup tabs for Result, Resolved Prompts, and Debug Variables
                 tab_res, tab_prompts, tab_vars = st.tabs(["📄 Результат", "💬 Промпты", "🐞 Debug Переменных"])
                 
@@ -518,6 +523,25 @@ def render_task_step_monitor(task_id: str, task_status: str, task_keyword: str, 
             step_cost = step.get("cost", 0.0)
             step_time = step.get("timestamp", "")
             st.caption(f"🤖 **{step_model}**  ·  💰 **${step_cost:.4f}**  ·  🕐 {step_time}")
+            
+            if s_status in ("completed", "completed_with_warnings", "failed"):
+                st.markdown("---")
+                with st.expander("🔄 Перегенерировать этот шаг"):
+                    with st.form(key=f"rerun_{key_prefix}_{step_key}_{task_id}"):
+                        fb = st.text_area("Что исправить? (feedback для LLM)")
+                        casc = st.checkbox("Cascade — сбросить и перезапустить все последующие шаги", value=True)
+                        submit_rerun = st.form_submit_button("Запустить", type="primary")
+                        if submit_rerun:
+                            res = post_data(f"tasks/{task_id}/rerun-step", {
+                                "step_name": step_key,
+                                "feedback": fb,
+                                "cascade": casc
+                            })
+                            if res:
+                                st.success("Шаг отправлен на перегенерацию.")
+                                import time
+                                time.sleep(1)
+                                st.rerun()
 
 # ----- TAB: TASKS -----
 def render_tasks():
@@ -788,6 +812,7 @@ def render_authors():
             
             a_target_audience = st.text_input("Target Audience", help="Целевая аудитория")
             a_rhythms_style = st.text_input("Rhythms & Style", help="Ритм и стиль повествования")
+            a_exclude_words = st.text_input("Exclude Words", help="Запрещенные слова для автора (через запятую)")
             
             submit = st.form_submit_button("Добавить Автора")
             if submit and a_name and a_country and a_lang:
@@ -802,7 +827,8 @@ def render_authors():
                     "year": a_year,
                     "face": a_face,
                     "target_audience": a_target_audience,
-                    "rhythms_style": a_rhythms_style
+                    "rhythms_style": a_rhythms_style,
+                    "exclude_words": a_exclude_words
                 })
                 if res:
                     st.success("Автор добавлен!")
@@ -813,7 +839,7 @@ def render_authors():
     authors = fetch_data("authors/")
     if authors:
         df = pd.DataFrame(authors)
-        st.dataframe(df[["id", "author", "country", "co_short", "language", "city", "bio"]], use_container_width=True)
+        st.dataframe(df[["id", "author", "country", "co_short", "language", "city", "bio", "exclude_words"]], use_container_width=True)
         
         st.subheader("Удалить автора")
         del_sel = st.selectbox("Выберите автора для удаления", options=[f"{a['id']} - {a['author']}" for a in authors])

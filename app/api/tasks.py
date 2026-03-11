@@ -12,8 +12,11 @@ from app.database import get_db
 from app.models.task import Task
 from app.models.site import Site
 from app.models.author import Author
+from app.models.article import GeneratedArticle
 from app.workers.tasks import process_generation_task
 from app.config import settings
+from app.services.pipeline_constants import ALL_STEPS
+from datetime import datetime
 
 router = APIRouter()
 
@@ -487,3 +490,84 @@ def force_task_status(task_id: str, payload: ForceStatusRequest, db: Session = D
         return {"msg": "Task forcefully marked as completed"}
     else:
         raise HTTPException(status_code=400, detail="Invalid action. Use 'complete' or 'fail'")
+
+class RerunStepRequest(BaseModel):
+    step_name: str
+    feedback: str
+    cascade: bool = True
+
+@router.post("/{task_id}/rerun-step")
+def rerun_task_step(task_id: str, payload: RerunStepRequest, db: Session = Depends(get_db)):
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+        
+    if task.status not in ("completed", "processing", "failed", "pending"):
+        raise HTTPException(status_code=400, detail="Task status does not allow rerunning steps")
+        
+    step_results = dict(task.step_results or {})
+    if payload.step_name not in step_results or step_results[payload.step_name].get("status") != "completed":
+        raise HTTPException(status_code=400, detail=f"Step '{payload.step_name}' is not completed or does not exist")
+        
+    invalidated_steps = []
+    
+    if payload.cascade:
+        try:
+            step_idx = ALL_STEPS.index(payload.step_name)
+            steps_to_remove = ALL_STEPS[step_idx:]
+        except ValueError:
+            steps_to_remove = [payload.step_name]
+            
+        for s in steps_to_remove:
+            if s in step_results:
+                invalidated_steps.append(s)
+                del step_results[s]
+                
+        # Delete generated article if exists since we are cascading
+        article = db.query(GeneratedArticle).filter(GeneratedArticle.task_id == task_id).first()
+        if article:
+            db.delete(article)
+    else:
+        invalidated_steps.append(payload.step_name)
+        del step_results[payload.step_name]
+        
+    # Save feedback
+    step_results["_rerun_feedback"] = {
+        "step": payload.step_name,
+        "feedback": payload.feedback,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    
+    # Store previous version of the step for history
+    prev_versions_key = f"{payload.step_name}_prev_versions"
+    if prev_versions_key not in step_results:
+        step_results[prev_versions_key] = []
+        
+    # We retrieve the actual previous output from the DB task before it was deleted in step_results
+    old_step_data = task.step_results.get(payload.step_name)
+    if old_step_data:
+        step_results[prev_versions_key].append(old_step_data)
+        
+    task.step_results = step_results
+    task.status = "pending"
+    
+    # Log the action
+    log_msg = f"🔄 Rerun requested for step '{payload.step_name}' with feedback: '{payload.feedback[:200]}'. Cascade: {payload.cascade}. Invalidated steps: {invalidated_steps}"
+    
+    logs = list(task.logs or [])
+    logs.append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "level": "info",
+        "step": payload.step_name,
+        "message": log_msg
+    })
+    task.logs = logs
+    
+    db.commit()
+    
+    process_generation_task.delay(str(task.id))
+    
+    return {
+        "msg": f"Step '{payload.step_name}' queued for re-run",
+        "invalidated_steps": invalidated_steps
+    }

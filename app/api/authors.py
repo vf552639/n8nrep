@@ -19,6 +19,7 @@ class AuthorCreate(BaseModel):
     face: str = None
     target_audience: str = None
     rhythms_style: str = None
+    exclude_words: str = None
 
 @router.get("/")
 def get_authors(db: Session = Depends(get_db)):
@@ -36,7 +37,8 @@ def get_authors(db: Session = Depends(get_db)):
         "year": a.year,
         "face": a.face,
         "target_audience": a.target_audience,
-        "rhythms_style": a.rhythms_style
+        "rhythms_style": a.rhythms_style,
+        "exclude_words": a.exclude_words
     } for a in authors]
 
 @router.post("/")
