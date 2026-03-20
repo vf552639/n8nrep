@@ -208,6 +208,18 @@ def call_agent(ctx: PipelineContext, agent_name: str, context: str, response_for
                 )
                 system_text += exclude_instruction
         # --- END INJECT ---
+        
+        if agent_name == "final_editing":
+            schema_instruction = (
+                "\n\n[SCHEMA/JSON-LD PROHIBITION — CRITICAL RULE]\n"
+                "You MUST NOT include any Schema.org markup, JSON-LD scripts, "
+                "or placeholder blocks like [SCHEMA: ...], [🛠️ SCHEMA: ...], "
+                "<script type=\"application/ld+json\">, or any references to structured data markup "
+                "in your output. Do NOT suggest, mention, or output any Schema.org related content. "
+                "Your output must be pure article HTML only (p, h2, h3, ul, ol, strong, em, a tags). "
+                "This rule has the HIGHEST priority."
+            )
+            system_text += schema_instruction
     
     user_msg = f"{user_template}\n\n[CONTEXT]\n{context}" if user_template else context
     
@@ -868,9 +880,16 @@ def phase_final_editing(ctx: PipelineContext):
         improved_html = ctx.task.step_results.get(STEP_PRIMARY_GEN, {}).get("result", "")
         
     outline_json = ctx.task.outline.get("final_outline", {})
+    
+    avg_words = ctx.template_vars.get("avg_word_count", "0")
+    input_word_count = len(BeautifulSoup(improved_html, 'html.parser').get_text().split())
+    input_char_count = len(improved_html)
+
     editing_context = (
         f"Improved HTML:\n{improved_html}\n\n"
         f"Original Outline:\n{json.dumps(outline_json, ensure_ascii=False)}\n\n"
+        f"Target word count (competitor average): {avg_words} words\n"
+        f"Current article stats: {input_word_count} words, {input_char_count} characters\n\n"
         f"Review & verify this HTML article matches the outline structure."
     )
     add_log(ctx.db, ctx.task, "Starting Final Editing...", step=STEP_FINAL_EDIT)
@@ -878,7 +897,32 @@ def phase_final_editing(ctx: PipelineContext):
     final_html, step_cost, actual_model, resolved_prompts, variables_snapshot, violations = call_agent_with_exclude_validation(ctx, "final_editing", editing_context, step_constant=STEP_FINAL_EDIT)
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
-    add_log(ctx.db, ctx.task, f"Final Editing completed ({len(final_html)} chars)", step=STEP_FINAL_EDIT)
+    # Remove SCHEMA placeholder blocks and scripts
+    final_html = re.sub(r'\[.*?SCHEMA.*?\]', '', final_html, flags=re.IGNORECASE | re.DOTALL)
+    final_html = re.sub(r'<script[^>]*application/ld\+json[^>]*>.*?</script>', '', final_html, flags=re.IGNORECASE | re.DOTALL)
+    final_html = re.sub(r'\n{3,}', '\n\n', final_html)
+
+    # Force-remove any remaining exclude words as last resort
+    exclude_str = ctx.template_vars.get("exclude_words", "")
+    if exclude_str.strip():
+        from app.services.exclude_words_validator import ExcludeWordsValidator
+        validator = ExcludeWordsValidator(exclude_str)
+        final_report = validator.validate(final_html)
+        if not final_report["passed"]:
+            add_log(ctx.db, ctx.task, 
+                f"Force-removing remaining exclude words after final editing: {final_report['found_words']}", 
+                level="warn", step=STEP_FINAL_EDIT)
+            final_html, removal_report = validator.remove_violations(final_html)
+
+    # Calculate output stats
+    output_word_count = len(BeautifulSoup(final_html, 'html.parser').get_text().split())
+    output_char_count = len(final_html)
+
+    add_log(ctx.db, ctx.task, 
+        f"Final Editing completed | input: {input_word_count} words / {input_char_count} chars | "
+        f"output: {output_word_count} words / {output_char_count} chars | "
+        f"target avg: {avg_words} words", 
+        step=STEP_FINAL_EDIT)
     save_step_result(ctx.db, ctx.task, STEP_FINAL_EDIT, result=final_html, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts, exclude_words_violations=violations)
 
 def phase_html_structure(ctx: PipelineContext):
