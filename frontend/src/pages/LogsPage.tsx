@@ -1,16 +1,32 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Search, Terminal } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import api from "@/api/client";
 
 export default function LogsPage() {
   const [level, setLevel] = useState("ALL");
+  const [searchTerm, setSearchTerm] = useState("");
+  const logsEndRef = useRef<HTMLDivElement>(null);
 
-  // In a real implementation this would fetch from a websockets /celery-logs endpoint or similar
-  const dummyLogs = [
-    "[2026-03-20 12:00:01] INFO [pipeline.py:45] Task 1st started for keyword 'example'",
-    "[2026-03-20 12:00:05] WARNING [utils.py:12] Retrying OpenRouter API request",
-    "[2026-03-20 12:01:00] INFO [step_monitor.py:8] Step 1 completed successfully",
-    "[2026-03-20 12:05:00] ERROR [celery_app.py:59] Worker timeout on task 1st",
-  ];
+  const { data: logsData, isLoading } = useQuery({
+    queryKey: ["logs", level],
+    queryFn: async () => {
+      const res = await api.get<{logs: string[]}>(`/logs?lines=200&level=${level}`);
+      return res.data.logs;
+    },
+    refetchInterval: 3000 // Poll every 3 seconds
+  });
+
+  const logs = logsData || [];
+  
+  const filteredLogs = logs.filter(log => 
+    searchTerm ? log.toLowerCase().includes(searchTerm.toLowerCase()) : true
+  );
+
+  useEffect(() => {
+    // Auto scroll to bottom when new logs arrive
+    logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [filteredLogs]);
 
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)]">
@@ -33,6 +49,8 @@ export default function LogsPage() {
                  <input 
                     type="text" 
                     placeholder="Search logs..." 
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
                     className="bg-slate-950 border border-slate-700 rounded-md py-1.5 pl-9 pr-3 text-sm text-slate-300 w-64 focus:outline-none focus:border-slate-500"
                  />
              </div>
@@ -50,7 +68,9 @@ export default function LogsPage() {
         </div>
 
         <div className="flex-1 p-4 overflow-auto font-mono text-xs sm:text-sm whitespace-pre-wrap leading-relaxed">
-            {dummyLogs.map((log, i) => (
+            {isLoading && <div className="text-slate-500 mb-4 animate-pulse">Loading logs...</div>}
+            
+            {filteredLogs.map((log, i) => (
                 <div key={i} className={`py-0.5 ${
                     log.includes('ERROR') ? 'text-red-400 font-medium' : 
                     log.includes('WARNING') ? 'text-amber-400' : 'text-slate-300'
@@ -58,7 +78,12 @@ export default function LogsPage() {
                     {log}
                 </div>
             ))}
-            <div className="animate-pulse text-slate-600 mt-2">Waiting for new logs...</div>
+            
+            {filteredLogs.length === 0 && !isLoading && (
+              <div className="text-slate-500 italic mt-2">No logs found matching criteria.</div>
+            )}
+            
+            <div ref={logsEndRef} className="h-1 mt-2"></div>
         </div>
       </div>
     </div>

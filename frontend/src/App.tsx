@@ -9,6 +9,7 @@ import TaskDetailPage from "./pages/TaskDetailPage";
 import ArticlesPage from "./pages/ArticlesPage";
 import ArticleDetailPage from "./pages/ArticleDetailPage";
 import SitesPage from "./pages/SitesPage";
+import SiteDetailPage from "./pages/SiteDetailPage";
 import AuthorsPage from "./pages/AuthorsPage";
 import PromptsPage from "./pages/PromptsPage";
 import BlueprintsPage from "./pages/BlueprintsPage";
@@ -18,7 +19,7 @@ import SettingsPage from "./pages/SettingsPage";
 import LogsPage from "./pages/LogsPage";
 
 // Layouts
-import MainLayout from "./components/layout/MainLayout";
+import MainLayout from "@/components/layout/MainLayout";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -41,6 +42,7 @@ function App() {
           <Route path="articles" element={<ArticlesPage />} />
           <Route path="articles/:id" element={<ArticleDetailPage />} />
           <Route path="sites" element={<SitesPage />} />
+          <Route path="sites/:id" element={<SiteDetailPage />} />
           <Route path="authors" element={<AuthorsPage />} />
           <Route path="prompts" element={<PromptsPage />} />
           <Route path="blueprints" element={<BlueprintsPage />} />

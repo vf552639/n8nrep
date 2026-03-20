@@ -1,9 +1,22 @@
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import tasks, articles, sites, authors, prompts, dashboard, settings_api, blueprints, projects, health
+from app.api import tasks, articles, sites, authors, prompts, dashboard, settings_api, blueprints, projects, health, logs
 from app.database import engine, Base
 from app.config import settings
 from app.api.deps import verify_api_key
+import logging
+import os
+
+# Configure file logging
+os.makedirs("logs", exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] %(levelname)s [%(name)s:%(lineno)s] %(message)s",
+    handlers=[
+        logging.FileHandler("logs/app.log", mode="a"),
+        logging.StreamHandler()
+    ]
+)
 
 # Create tables is intentionally removed here.
 # The Supabase tables are managed via manual SQL and Alembic migrations.
@@ -38,6 +51,7 @@ app.include_router(settings_api.router, prefix="/api/settings", tags=["Settings"
 app.include_router(blueprints.router, prefix="/api/blueprints", tags=["Blueprints"])
 app.include_router(projects.router, prefix="/api/projects", tags=["Projects"])
 app.include_router(health.router, prefix="/api/health", tags=["Health"])
+app.include_router(logs.router, prefix="/api/logs", tags=["Logs"])
 
 @app.get("/")
 def read_root():

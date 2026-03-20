@@ -1,12 +1,14 @@
-import { useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useParams, Link } from "react-router-dom";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import toast from "react-hot-toast";
 import api from "@/api/client";
 import { Project } from "@/types/project";
 import StatusBadge from "@/components/common/StatusBadge";
-import { Download, Pause, Play } from "lucide-react";
+import { Download, Pause, Play, CheckCircle2, CircleDashed, FileText, ChevronRight } from "lucide-react";
 
 export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const queryClient = useQueryClient();
 
   const { data: project, isLoading } = useQuery({
     queryKey: ["project", id],
@@ -14,6 +16,20 @@ export default function ProjectDetailPage() {
       const res = await api.get<Project>(`/projects/${id}`);
       return res.data;
     },
+    refetchInterval: (query) => {
+      const p = query.state.data;
+      if (p?.status === "generating" || p?.status === "pending") return 3000;
+      return false;
+    }
+  });
+
+  const actionMutation = useMutation({
+    mutationFn: (action: "stop" | "resume") => api.post(`/projects/${id}/${action}`),
+    onSuccess: (_, action) => {
+      toast.success(`Project ${action === "stop" ? "stopped (waiting for current task)" : "resumed"}`);
+      queryClient.invalidateQueries({ queryKey: ["project", id] });
+    },
+    onError: () => toast.error("Action failed")
   });
 
   if (isLoading) return <div className="p-6 text-slate-500">Loading project...</div>;
@@ -31,12 +47,20 @@ export default function ProjectDetailPage() {
         </div>
         <div className="flex gap-2">
           {project.status === "generating" && (
-            <button className="flex items-center gap-2 bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 px-3 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm">
+            <button 
+              onClick={() => actionMutation.mutate("stop")}
+              disabled={actionMutation.isPending}
+              className="flex items-center gap-2 bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 px-3 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm disabled:opacity-70"
+            >
               <Pause className="w-4 h-4" /> Stop Project
             </button>
           )}
           {project.status === "stopped" && (
-            <button className="flex items-center gap-2 bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 px-3 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm">
+            <button 
+              onClick={() => actionMutation.mutate("resume")}
+              disabled={actionMutation.isPending}
+              className="flex items-center gap-2 bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 px-3 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm disabled:opacity-70"
+            >
               <Play className="w-4 h-4" /> Resume
             </button>
           )}
@@ -66,13 +90,51 @@ export default function ProjectDetailPage() {
         <div className="text-right text-sm font-bold text-slate-600">{Math.round(project.progress || 0)}% Complete</div>
       </div>
 
-      <div className="bg-white border rounded-xl shadow-sm p-6 overflow-hidden min-h-[400px]">
-        <h2 className="text-lg font-semibold text-slate-800 mb-6 border-b pb-4">Project Tasks Execution</h2>
-        <div className="text-center text-slate-500 mt-16 bg-slate-50 border border-dashed rounded-lg p-10 max-w-lg mx-auto">
-            <Play className="w-10 h-10 mx-auto text-slate-300 mb-4" />
-            <div className="font-medium text-slate-700">Task List Monitor Details</div>
-            <p className="text-sm mt-1 text-slate-500">Each page task will display progress inline here.</p>
+      <div className="bg-white border rounded-xl shadow-sm overflow-hidden min-h-[400px]">
+        <div className="p-6 pb-4 border-b">
+          <h2 className="text-lg font-semibold text-slate-800">Project Tasks Execution</h2>
         </div>
+        
+        {project.tasks && project.tasks.length > 0 ? (
+          <div className="divide-y">
+            {project.tasks.map((task, i) => (
+              <div key={task.id} className="p-4 hover:bg-slate-50 transition-colors flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="flex-shrink-0 font-mono text-slate-400 text-sm">#{i + 1}</div>
+                  <div className="flex items-center gap-2">
+                     {task.status === 'completed' && <CheckCircle2 className="w-5 h-5 text-emerald-500" />}
+                     {task.status === 'running' && <CircleDashed className="w-5 h-5 text-blue-500 animate-[spin_3s_linear_infinite]" />}
+                     {task.status === 'pending' && <CircleDashed className="w-5 h-5 text-slate-300" />}
+                     {task.status === 'failed' && <CircleDashed className="w-5 h-5 text-red-500" />}
+                  </div>
+                  <div>
+                    <div className="font-medium text-slate-800 break-all">{task.main_keyword}</div>
+                    <div className="text-xs text-slate-500 mt-0.5 flex gap-2">
+                       <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 uppercase tracking-tighter">{task.page_type}</span>
+                       {task.current_step && <span className="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded text-xs">{task.current_step}</span>}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-6">
+                  <div className="text-sm font-medium text-slate-500">{Math.round(task.progress)}%</div>
+                  <Link 
+                    to={`/tasks/${task.id}`}
+                    className="flex items-center justify-center p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors"
+                    title="View Task Detail"
+                  >
+                    <ChevronRight className="w-5 h-5" />
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center text-slate-500 mt-16 bg-slate-50 border border-dashed rounded-lg p-10 max-w-lg mx-auto">
+              <FileText className="w-10 h-10 mx-auto text-slate-300 mb-4" />
+              <div className="font-medium text-slate-700">No tasks generated yet</div>
+              <p className="text-sm mt-1 text-slate-500">Once the blueprint is parsed, tasks will populate here.</p>
+          </div>
+        )}
       </div>
     </div>
   );

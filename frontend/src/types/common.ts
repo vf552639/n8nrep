@@ -1,10 +1,4 @@
-export interface PaginatedList<T> {
-  items: T[];
-  total: number;
-  skip: number;
-  limit: number;
-}
-
+// PaginatedList removed as backend returns T[] directly.
 export interface ApiResponse<T> {
   data?: T;
   message?: string;
@@ -12,9 +6,20 @@ export interface ApiResponse<T> {
 }
 
 export interface DashboardStats {
-  total: number;
-  processing: number;
-  completed: number;
-  failed: number;
-  pending: number;
+  tasks: {
+    total: number;
+    completed: number;
+    failed: number;
+    processing: number;
+    pending: number;
+  };
+  sites: number;
+  sequential_mode: boolean;
+}
+
+export interface QueueStatus {
+  celery_workers_online: boolean;
+  active_tasks?: Record<string, any>;
+  queued_tasks?: Record<string, any>;
+  error?: string;
 }

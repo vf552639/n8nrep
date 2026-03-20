@@ -9,11 +9,15 @@ export interface Project {
   status: "pending" | "generating" | "stopped" | "completed" | "failed";
   progress: number;
   created_at: string;
+  tasks?: ProjectTaskExpanded[];
 }
 
-export interface ProjectTask {
+export interface ProjectTaskExpanded {
   id: string;
-  project_id: string;
-  task_id: string;
-  page_slug: string;
+  blueprint_page_id: string | null;
+  status: string;
+  main_keyword: string;
+  page_type: string;
+  progress: number;
+  current_step: string | null;
 }

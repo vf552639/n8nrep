@@ -1,10 +1,34 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import toast from "react-hot-toast";
 import { Save } from "lucide-react";
+import api from "@/api/client";
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState("general");
-  const [globalExcludeWords, setGlobalExcludeWords] = useState("gambling, casino, porn");
-  const [excludedDomains, setExcludedDomains] = useState("example.com, spam.org");
+  const [settings, setSettings] = useState<Record<string, string>>({});
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["settings"],
+    queryFn: async () => {
+      const res = await api.get<Record<string, string>>("/settings");
+      return res.data;
+    }
+  });
+
+  useEffect(() => {
+    if (data) {
+      setSettings(data);
+    }
+  }, [data]);
+
+  const saveMutation = useMutation({
+    mutationFn: (newSettings: Record<string, string>) => api.put("/settings", newSettings),
+    onSuccess: () => toast.success("Settings saved! Restart backend to apply API keys change."),
+    onError: () => toast.error("Failed to save settings.")
+  });
+
+  if (isLoading) return <div className="p-6 text-slate-500">Loading settings...</div>;
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -13,7 +37,11 @@ export default function SettingsPage() {
            <h1 className="text-3xl font-bold tracking-tight text-slate-900">Settings</h1>
            <p className="text-sm text-slate-500 mt-1">Configure global application behavior and defaults.</p>
         </div>
-        <button className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg transition-colors text-sm font-medium shadow-sm">
+        <button 
+          onClick={() => saveMutation.mutate(settings)}
+          disabled={saveMutation.isPending}
+          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg transition-colors text-sm font-medium shadow-sm disabled:opacity-70"
+        >
           <Save className="w-4 h-4" /> Save Settings
         </button>
       </div>
@@ -48,7 +76,12 @@ export default function SettingsPage() {
                  </div>
                  <div>
                      <label className="block text-sm font-medium text-slate-700 mb-1">Max Concurrent Celery Workers</label>
-                     <input type="number" defaultValue={5} className="w-full border p-2.5 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                     <input 
+                       type="number" 
+                       value={settings.CELERY_CONCURRENCY || ""} 
+                       onChange={(e) => setSettings({...settings, CELERY_CONCURRENCY: e.target.value})}
+                       className="w-full border p-2.5 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500" 
+                     />
                  </div>
              </div>
           </div>
@@ -60,8 +93,8 @@ export default function SettingsPage() {
             <p className="text-sm text-slate-500">These words will be checked against all generated texts across all authors. Separate by comma.</p>
             <textarea
               className="w-full p-4 border rounded-lg text-sm font-mono outline-none focus:ring-2 focus:ring-blue-500 min-h-[200px]"
-              value={globalExcludeWords}
-              onChange={(e) => setGlobalExcludeWords(e.target.value)}
+              value={settings.EXCLUDE_WORDS || ""}
+              onChange={(e) => setSettings({...settings, EXCLUDE_WORDS: e.target.value})}
               placeholder="e.g. gambling, violence..."
             />
           </div>
@@ -73,8 +106,8 @@ export default function SettingsPage() {
             <p className="text-sm text-slate-500">Domains listed here will be filtered out from SERP results automatically.</p>
             <textarea
               className="w-full p-4 border rounded-lg text-sm font-mono outline-none focus:ring-2 focus:ring-blue-500 min-h-[200px]"
-              value={excludedDomains}
-              onChange={(e) => setExcludedDomains(e.target.value)}
+              value={settings.EXCLUDED_DOMAINS || ""}
+              onChange={(e) => setSettings({...settings, EXCLUDED_DOMAINS: e.target.value})}
               placeholder="e.g. reddit.com, quora.com..."
             />
           </div>

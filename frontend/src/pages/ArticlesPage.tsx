@@ -3,7 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import api from "@/api/client";
 import { Article } from "@/types/article";
-import { PaginatedList } from "@/types/common";
+// API mapping
+
 import DataTable from "@/components/common/DataTable";
 
 export default function ArticlesPage() {
@@ -13,7 +14,7 @@ export default function ArticlesPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["articles", { page }],
     queryFn: async () => {
-      const res = await api.get<PaginatedList<Article>>("/articles", {
+      const res = await api.get<Article[]>("/articles", {
         params: { skip: page * 50, limit: 50 },
       });
       return res.data;
@@ -42,7 +43,7 @@ export default function ArticlesPage() {
       </div>
       <DataTable 
         columns={columns} 
-        data={data?.items || []} 
+        data={data || []} 
         isLoading={isLoading} 
         onRowClick={(article) => navigate(`/articles/${article.id}`)}
       />
