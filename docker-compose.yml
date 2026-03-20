@@ -74,3 +74,18 @@ services:
     depends_on:
       web:
         condition: service_healthy
+
+  frontend-react:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules # Prevent host node_modules from overriding container's
+    ports:
+      - "3000:5173"
+    env_file:
+      - .env
+    depends_on:
+      web:
+        condition: service_healthy
