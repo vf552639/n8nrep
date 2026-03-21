@@ -9,12 +9,28 @@ const api = axios.create({
   },
 });
 
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem("api_key");
+    if (token) {
+      config.headers["Authorization"] = `Bearer ${token}`;
+      config.headers["X-API-Key"] = token;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    // Attempt to extract the detail message from FastAPI HTTPExceptions
-    const msg = error.response?.data?.detail || error.message || "An unknown error occurred";
-    toast.error(msg);
+    if (error.response?.status === 401 || error.response?.status === 403) {
+      toast.error("Authentication failed or missing API Key.");
+    } else {
+      // Attempt to extract the detail message from FastAPI HTTPExceptions
+      const msg = error.response?.data?.detail || error.message || "An unknown error occurred";
+      toast.error(msg);
+    }
     return Promise.reject(error);
   }
 );

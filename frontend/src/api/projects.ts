@@ -1,5 +1,5 @@
 import api from "./client";
-import { Project, ProjectTask } from "@/types/project";
+import { Project, ProjectTaskExpanded as ProjectTask } from "@/types/project";
 
 export const projectsApi = {
   getAll: (params?: { skip?: number; limit?: number }) => 

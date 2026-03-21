@@ -41,6 +41,13 @@ export default function ArticleDetailPage() {
           >
             Download HTML
           </a>
+          <a
+            href={`${import.meta.env.VITE_API_URL || "http://localhost:8000/api"}/articles/${id}/download?format=docx`}
+            className="bg-blue-600 hover:bg-blue-700 shadow-sm text-white px-4 py-2 rounded-md transition-colors text-sm font-medium border border-blue-600"
+            download
+          >
+            Export Word
+          </a>
         </div>
       </div>
 

@@ -79,11 +79,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules # Prevent host node_modules from overriding container's
     ports:
-      - "3000:5173"
+      - "3000:3000"
     env_file:
       - .env
     depends_on:

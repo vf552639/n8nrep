@@ -1,51 +1,68 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import api from "@/api/client";
 import { Article } from "@/types/article";
-// API mapping
-
-import DataTable from "@/components/common/DataTable";
+import { ReactTable } from "@/components/common/ReactTable";
 
 export default function ArticlesPage() {
   const navigate = useNavigate();
-  const [page, setPage] = useState(0);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["articles", { page }],
+    queryKey: ["articles"],
     queryFn: async () => {
       const res = await api.get<Article[]>("/articles", {
-        params: { skip: page * 50, limit: 50 },
+        params: { limit: 1000 },
       });
       return res.data;
     },
   });
 
   const columns = [
-    { key: "title", header: "Title", render: (a: Article) => <div className="max-w-xs truncate font-medium text-slate-800" title={a.title}>{a.title}</div> },
-    { key: "word_count", header: "Words", render: (a: Article) => <span className="text-slate-600">{a.word_count?.toLocaleString() || 0} words</span> },
     { 
-      key: "fact_check_status", header: "Fact Check", 
-      render: (a: Article) => {
-        if (!a.fact_check_status) return <span className="text-slate-400 text-xs">N/A</span>;
-        const color = a.fact_check_status === 'passed' ? 'text-emerald-700 bg-emerald-50' : a.fact_check_status === 'needs_review' ? 'text-amber-700 bg-amber-50' : 'text-red-700 bg-red-50';
-        return <span className={`px-2 py-0.5 rounded text-xs font-medium uppercase tracking-wide border ${color}`}>{a.fact_check_status.replace('_', ' ')}</span>
+      accessorKey: "title", 
+      header: "Title", 
+      cell: ({ row }: any) => <div className="max-w-xs truncate font-medium text-slate-800" title={row.original.title}>{row.original.title || "Untitled Article"}</div> 
+    },
+    { 
+      accessorKey: "word_count", 
+      header: "Words", 
+      cell: ({ row }: any) => <span className="text-slate-600 font-mono">{row.original.word_count?.toLocaleString() || 0}</span> 
+    },
+    { 
+      accessorKey: "fact_check_status", 
+      header: "Fact Check", 
+      cell: ({ row }: any) => {
+        const status = row.original.fact_check_status;
+        if (!status) return <span className="text-slate-400 text-xs">N/A</span>;
+        const color = status === 'passed' ? 'text-emerald-700 bg-emerald-50' : status === 'needs_review' ? 'text-amber-700 bg-amber-50' : 'text-red-700 bg-red-50';
+        return <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide border ${color}`}>{status.replace('_', ' ')}</span>
       }
     },
-    { key: "cost", header: "Cost", render: (a: Article) => <span className="text-emerald-600 font-mono">${a.cost?.toFixed(4) || "0.0000"}</span> },
-    { key: "created_at", header: "Date", render: (a: Article) => <span className="text-slate-500 whitespace-nowrap">{new Date(a.created_at).toLocaleDateString()}</span> },
+    { 
+      accessorKey: "cost", 
+      header: "Cost", 
+      cell: ({ row }: any) => <span className="text-emerald-600 font-mono">${row.original.cost?.toFixed(4) || "0.0000"}</span> 
+    },
+    { 
+      accessorKey: "created_at", 
+      header: "Date", 
+      cell: ({ row }: any) => <span className="text-slate-500 whitespace-nowrap">{new Date(row.original.created_at).toLocaleDateString()}</span> 
+    },
   ];
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold tracking-tight text-slate-900">Generated Articles</h1>
+      <div className="flex justify-between items-center bg-white p-5 rounded-xl border shadow-sm">
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900 border-l-4 border-emerald-500 pl-3">Generated Articles</h1>
+        <div className="text-sm text-slate-500 bg-slate-50 px-3 py-1.5 rounded-md border">
+           Total: <span className="font-bold text-slate-700">{data?.length || 0}</span>
+        </div>
       </div>
-      <DataTable 
-        columns={columns} 
+      <ReactTable 
+        columns={columns as any} 
         data={data || []} 
         isLoading={isLoading} 
-        onRowClick={(article) => navigate(`/articles/${article.id}`)}
+        onRowClick={(article: any) => navigate(`/articles/${article.id}`)}
       />
     </div>
   );

@@ -4,9 +4,15 @@ import { cn } from "@/lib/utils";
 import { CheckCircle2, CircleDashed, XCircle, ArrowRightCircle, RefreshCw } from "lucide-react";
 import StepRerunForm from "./StepRerunForm";
 import ExcludeWordsAlert from "./ExcludeWordsAlert";
+import JsonViewer from "@/components/common/JsonViewer";
+
+interface ExtendedStepResult extends StepResult {
+  step_name: string;
+  result_data?: any;
+}
 
 interface Props {
-  step: StepResult;
+  step: ExtendedStepResult;
   taskId: string;
   index: number;
 }
@@ -30,7 +36,7 @@ export default function StepCard({ step, taskId, index }: Props) {
     skipped: "bg-slate-50 border-slate-200 opacity-70"
   };
 
-  const hasViolations = step.result_data?.exclude_words_violations?.length > 0;
+  const hasViolations = step.result?.exclude_words_violations?.length > 0 || step.result_data?.exclude_words_violations?.length > 0;
 
   return (
     <div className={cn("rounded-lg border p-3.5 transition-all outline-none", bgStyles[step.status])}>
@@ -65,9 +71,7 @@ export default function StepCard({ step, taskId, index }: Props) {
             <ExcludeWordsAlert violations={step.result_data.exclude_words_violations} />
           )}
           
-          <div className="bg-slate-900 rounded-md p-3 overflow-auto max-h-60 text-xs font-mono text-slate-300">
-            <pre>{JSON.stringify(step.result_data, null, 2) || "No result data available"}</pre>
-          </div>
+            <JsonViewer data={step.result || step.result_data || { note: "No result data available" }} />
           
           {step.status === "completed" && (
             <div className="flex justify-end pt-2">

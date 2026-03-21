@@ -8,6 +8,25 @@ interface Props {
   isActive: boolean;
 }
 
+const ALL_STEPS = [
+  "serp_research",
+  "competitor_scraping",
+  "ai_structure_analysis",
+  "chunk_cluster_analysis",
+  "competitor_structure_analysis",
+  "final_structure_analysis",
+  "structure_fact_checking",
+  "primary_generation",
+  "competitor_comparison",
+  "reader_opinion",
+  "interlinking_citations",
+  "improver",
+  "final_editing",
+  "content_fact_checking",
+  "html_structure",
+  "meta_generation"
+];
+
 export default function StepMonitor({ taskId, isActive }: Props) {
   const { data: stepResp, refetch } = useQuery({
     queryKey: ["task-steps", taskId],
@@ -18,10 +37,7 @@ export default function StepMonitor({ taskId, isActive }: Props) {
 
   if (!stepResp) return <div className="text-sm text-slate-500 text-center py-4">Loading pipeline steps...</div>;
 
-  const stepsList = Object.entries(stepResp.step_results || {}).map(([name, result]) => ({
-    step_name: name,
-    ...result,
-  }));
+  const results = stepResp.step_results || {};
 
   return (
     <div className="space-y-4">
@@ -33,9 +49,17 @@ export default function StepMonitor({ taskId, isActive }: Props) {
          </div>
       </div>
       <div className="space-y-3">
-        {stepsList.map((step, i) => (
-          <StepCard key={step.step_name + i} step={step as any} taskId={taskId} index={i} />
-        ))}
+        {ALL_STEPS.map((stepName, i) => {
+          const result = results[stepName] || { status: "pending" };
+          return (
+            <StepCard 
+              key={stepName} 
+              step={{ step_name: stepName, ...result } as any} 
+              taskId={taskId} 
+              index={i} 
+            />
+          );
+        })}
       </div>
     </div>
   );

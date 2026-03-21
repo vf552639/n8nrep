@@ -2,7 +2,8 @@ export interface Project {
   id: string;
   name: string;
   seed_keyword: string;
-  target_site_id: string;
+  blueprint_id: string;
+  site_id: string;
   country: string;
   language: string;
   author_id?: string;

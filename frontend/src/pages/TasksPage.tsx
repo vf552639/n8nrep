@@ -1,27 +1,34 @@
-import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState, useRef } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import { tasksApi } from "@/api/tasks";
-import { Task } from "@/types/task";
-// API mapping
-import DataTable from "@/components/common/DataTable";
+import { ReactTable } from "@/components/common/ReactTable";
 import StatusBadge from "@/components/common/StatusBadge";
-import { Plus, Upload, Play, Square, X } from "lucide-react";
+import { Plus, Upload, Play, X, Search, Filter } from "lucide-react";
+import QueueControls from "@/components/tasks/QueueControls";
+import { sitesApi } from "@/api/sites";
 
 export default function TasksPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [page, setPage] = useState(0);
   const [statusFilter, setStatusFilter] = useState("");
+  const [siteFilter, setSiteFilter] = useState("");
+  const [search, setSearch] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
 
-  const { data, isLoading } = useQuery({
-    queryKey: ["tasks", { status: statusFilter, page }],
+  const { data: tasks, isLoading } = useQuery({
+    queryKey: ["tasks", { status: statusFilter, site: siteFilter }],
     queryFn: async () => {
-      return tasksApi.getAll({ status: statusFilter || undefined, skip: page * 50, limit: 50 });
+      // Assuming backend supports these filters in `getAll`
+      return tasksApi.getAll({ status: statusFilter || undefined, limit: 1000 });
     },
+  });
+
+  const { data: sites } = useQuery({
+    queryKey: ["sites"],
+    queryFn: () => sitesApi.getAll(),
   });
 
   const handleStartNext = async () => {
@@ -44,112 +51,280 @@ export default function TasksPage() {
     }
   };
 
+  const filteredTasks = (tasks || []).filter(t => {
+    if (siteFilter && t.target_site_id !== siteFilter) return false;
+    if (search && !t.main_keyword.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
+
   const columns = [
-    { key: "main_keyword", header: "Keyword" },
-    { key: "country", header: "Country" },
+    { accessorKey: "main_keyword", header: "Keyword" },
+    { accessorKey: "country", header: "Country" },
     { 
-      key: "status", 
+      accessorKey: "status", 
       header: "Status",
-      render: (t: Task) => <StatusBadge status={t.status} />
+      cell: ({ row }: any) => <StatusBadge status={row.original.status} />
     },
     { 
-      key: "total_cost", 
+      accessorKey: "progress", 
+      header: "Progress",
+      cell: ({ row }: any) => <span className="text-slate-500 font-medium">{row.original.progress || 0}%</span>
+    },
+    { 
+      accessorKey: "total_cost", 
       header: "Cost",
-      render: (t: Task) => <span className="text-slate-500">${t.total_cost?.toFixed(4) || "0.0000"}</span>
+      cell: ({ row }: any) => <span className="text-slate-500 font-mono">${row.original.total_cost?.toFixed(4) || "0.0000"}</span>
     },
     { 
-      key: "created_at", 
+      accessorKey: "created_at", 
       header: "Date",
-      render: (t: Task) => new Date(t.created_at).toLocaleString()
+      cell: ({ row }: any) => new Date(row.original.created_at).toLocaleString()
     },
   ];
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h1 className="text-3xl font-bold tracking-tight text-slate-900">Tasks</h1>
-        <div className="flex gap-2">
-          <select 
-            className="border rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-          >
-            <option value="">All Statuses</option>
-            <option value="pending">Pending</option>
-            <option value="processing">Processing</option>
-            <option value="completed">Completed</option>
-            <option value="failed">Failed</option>
-          </select>
+        <div className="flex flex-wrap gap-2">
           <button 
             onClick={() => setIsImportOpen(true)}
-            className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-800 px-4 py-2 rounded-md transition-colors text-sm font-medium border shadow-sm"
+            className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-800 px-4 py-2 rounded-lg transition-colors text-sm font-medium border shadow-sm"
           >
             <Upload className="w-4 h-4" /> Import CSV
           </button>
           <button 
             onClick={() => setIsCreateOpen(true)}
-            className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-md transition-colors text-sm font-medium shadow-sm"
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors text-sm font-medium shadow-sm"
           >
             <Plus className="w-4 h-4" /> Create Task
           </button>
         </div>
       </div>
 
-      <div className="flex gap-2 bg-white p-3 rounded-lg border shadow-sm item-center">
-        <div className="text-sm font-medium text-slate-700 mr-4 self-center px-2">Queue Controls:</div>
-        <button onClick={handleStartNext} className="flex items-center gap-2 bg-blue-50 text-blue-700 hover:bg-blue-100 px-3 py-1.5 rounded text-sm transition-colors border border-blue-200 shadow-sm">
-          <Play className="w-4 h-4" /> Start Next
-        </button>
-        <button onClick={handleStartAll} className="flex items-center gap-2 bg-green-50 text-green-700 hover:bg-green-100 px-3 py-1.5 rounded text-sm transition-colors border border-green-200 shadow-sm">
-          <Play className="w-4 h-4" /> Start All
-        </button>
-        <button onClick={() => toast("Stop Queue not supported yet", { icon: "ℹ️"})} className="flex items-center gap-2 bg-red-50 text-red-700 hover:bg-red-100 px-3 py-1.5 rounded text-sm transition-colors border border-red-200 shadow-sm">
-          <Square className="w-4 h-4" /> Stop Queue
-        </button>
+      <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center bg-white p-4 rounded-xl border shadow-sm">
+        <div className="flex-1 flex gap-3 flex-wrap items-center">
+            <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input 
+                    type="text" 
+                    placeholder="Search keyword..." 
+                    className="pl-9 pr-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none w-64"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                />
+            </div>
+            <div className="flex items-center gap-2">
+                <Filter className="w-4 h-4 text-slate-400" />
+                <select 
+                    className="border bg-slate-50 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                >
+                    <option value="">All Statuses</option>
+                    <option value="pending">Pending</option>
+                    <option value="processing">Processing</option>
+                    <option value="completed">Completed</option>
+                    <option value="failed">Failed</option>
+                </select>
+                <select 
+                    className="border bg-slate-50 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none max-w-xs"
+                    value={siteFilter}
+                    onChange={(e) => setSiteFilter(e.target.value)}
+                >
+                    <option value="">All Sites</option>
+                    {sites?.map((s: any) => (
+                        <option key={s.id} value={s.id}>{s.domain}</option>
+                    ))}
+                </select>
+            </div>
+        </div>
+        <div className="hidden lg:block w-px h-8 bg-slate-200"></div>
+        <div className="flex items-center gap-2">
+          <button onClick={handleStartNext} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg text-sm transition-colors border border-blue-200 font-medium">
+            <Play className="w-4 h-4" /> Start Next
+          </button>
+          <button onClick={handleStartAll} className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg text-sm transition-colors border border-emerald-200 font-medium">
+            <Play className="w-4 h-4" /> Start All
+          </button>
+          <QueueControls />
+        </div>
       </div>
 
-      <DataTable 
-        columns={columns} 
-        data={data || []} 
+      <ReactTable 
+        columns={columns as any} 
+        data={filteredTasks} 
         isLoading={isLoading} 
-        onRowClick={(task) => navigate(`/tasks/${task.id}`)}
+        onRowClick={(task: any) => navigate(`/tasks/${task.id}`)}
       />
 
       {isCreateOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-bold">Create Task (Stub)</h2>
-              <button onClick={() => setIsCreateOpen(false)}><X className="w-5 h-5 text-gray-500" /></button>
-            </div>
-            <p className="text-sm text-gray-600 mb-4">This form is a placeholder as requested in TЗ.</p>
-            <div className="flex justify-end gap-2">
-              <button onClick={() => setIsCreateOpen(false)} className="px-4 py-2 border rounded text-sm">Cancel</button>
-              <button onClick={() => { setIsCreateOpen(false); toast("Task created", { icon: "✅" }) }} className="px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">Save</button>
-             </div>
-          </div>
-        </div>
+        <CreateTaskModal onClose={() => setIsCreateOpen(false)} sites={sites || []} />
       )}
 
       {isImportOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-bold">Import Tasks (Stub)</h2>
-              <button onClick={() => setIsImportOpen(false)}><X className="w-5 h-5 text-gray-500" /></button>
-            </div>
-            <p className="text-sm text-gray-600 mb-4">File upload stub placeholder as requested in TЗ.</p>
-            <div className="mt-4 border-2 border-dashed border-gray-300 rounded p-8 text-center text-gray-500 flex flex-col items-center">
-               <Upload className="w-8 h-8 mb-2" />
-               Upload CSV
-            </div>
-            <div className="flex justify-end gap-2 mt-4">
-              <button onClick={() => setIsImportOpen(false)} className="px-4 py-2 border rounded text-sm">Cancel</button>
-              <button onClick={() => { setIsImportOpen(false); toast("File uploaded", { icon: "✅" }) }} className="px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">Import</button>
-             </div>
-          </div>
-        </div>
+        <ImportTasksModal onClose={() => setIsImportOpen(false)} />
       )}
+    </div>
+  );
+}
+
+function CreateTaskModal({ onClose, sites }: { onClose: () => void, sites: any[] }) {
+  const queryClient = useQueryClient();
+  const [formData, setFormData] = useState({
+    main_keyword: "",
+    country: "US",
+    language: "en",
+    target_site_id: "",
+    page_type: "article"
+  });
+
+  const mutation = useMutation({
+    mutationFn: (data: any) => tasksApi.create(data),
+    onSuccess: () => {
+      toast.success("Task created successfully");
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      onClose();
+    },
+    onError: () => toast.error("Failed to create task")
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.main_keyword || !formData.target_site_id) {
+        toast.error("Please fill required fields");
+        return;
+    }
+    mutation.mutate(formData);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden border border-slate-200">
+        <div className="px-6 py-4 border-b flex justify-between items-center bg-slate-50/50">
+          <h2 className="text-lg font-bold text-slate-800">Create New Task</h2>
+          <button onClick={onClose} className="p-1 hover:bg-slate-200 rounded-md transition-colors text-slate-500 hover:text-slate-700"><X className="w-5 h-5" /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Keyword *</label>
+            <input 
+              required
+              className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
+              value={formData.main_keyword} 
+              onChange={e => setFormData({...formData, main_keyword: e.target.value})} 
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Country</label>
+              <input 
+                className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
+                value={formData.country} 
+                onChange={e => setFormData({...formData, country: e.target.value})} 
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Language</label>
+              <input 
+                className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
+                value={formData.language} 
+                onChange={e => setFormData({...formData, language: e.target.value})} 
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Target Site *</label>
+            <select 
+              required
+              className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white" 
+              value={formData.target_site_id} 
+              onChange={e => setFormData({...formData, target_site_id: e.target.value})}
+            >
+              <option value="" disabled>Select a site...</option>
+              {sites?.map((s: any) => (
+                 <option key={s.id} value={s.id}>{s.domain}</option>
+              ))}
+            </select>
+          </div>
+          <div className="pt-4 flex justify-end gap-3 border-t">
+            <button type="button" onClick={onClose} className="px-4 py-2 font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Cancel</button>
+            <button type="submit" disabled={mutation.isPending} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors shadow-sm disabled:opacity-50">
+              {mutation.isPending ? "Creating..." : "Create Task"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function ImportTasksModal({ onClose }: { onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: (f: File) => {
+      const data = new FormData();
+      data.append("file", f);
+      return tasksApi.bulkImport(data);
+    },
+    onSuccess: (res: any) => {
+      toast.success(`Imported ${res.detail || "tasks"} successfully`);
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      onClose();
+    },
+    onError: () => toast.error("Failed to import tasks")
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!file) {
+        toast.error("Please select a CSV file");
+        return;
+    }
+    mutation.mutate(file);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden border border-slate-200">
+        <div className="px-6 py-4 border-b flex justify-between items-center bg-slate-50/50">
+          <h2 className="text-lg font-bold text-slate-800">Import Tasks via CSV</h2>
+          <button onClick={onClose} className="p-1 hover:bg-slate-200 rounded-md transition-colors text-slate-500 hover:text-slate-700"><X className="w-5 h-5" /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <p className="text-sm text-slate-500 mb-4">Upload a CSV file with columns: <code>keyword</code>, <code>country</code>, <code>language</code>, <code>target_site_id</code>.</p>
+          <div 
+            onClick={() => fileInputRef.current?.click()}
+            className="border-2 border-dashed border-slate-300 hover:border-blue-500 hover:bg-blue-50 transition-colors rounded-xl p-8 text-center cursor-pointer flex flex-col items-center justify-center"
+          >
+             <Upload className="w-8 h-8 text-slate-400 mb-3" />
+             {file ? (
+                 <span className="font-medium text-blue-700">{file.name}</span>
+             ) : (
+                 <>
+                   <span className="font-medium text-slate-700">Click to browse or drag and drop</span>
+                   <span className="text-xs text-slate-500 mt-1">CSV files only</span>
+                 </>
+             )}
+             <input 
+               type="file" 
+               accept=".csv" 
+               className="hidden" 
+               ref={fileInputRef}
+               onChange={(e) => setFile(e.target.files?.[0] || null)}
+             />
+          </div>
+          <div className="pt-4 flex justify-end gap-3">
+            <button type="button" onClick={onClose} className="px-4 py-2 font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Cancel</button>
+            <button type="submit" disabled={mutation.isPending || !file} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors shadow-sm disabled:opacity-50">
+              {mutation.isPending ? "Importing..." : "Run Import"}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

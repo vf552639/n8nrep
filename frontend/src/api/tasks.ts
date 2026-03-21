@@ -14,6 +14,11 @@ export const tasksApi = {
   create: (data: TaskCreate) => 
     api.post<{id: string, status: string}>("/tasks", data).then(res => res.data),
     
+  bulkImport: (formData: FormData) =>
+    api.post("/tasks/bulk", formData, {
+      headers: { "Content-Type": "multipart/form-data" }
+    }).then(res => res.data),
+    
   startNext: () => 
     api.post("/tasks/next").then(res => res.data),
     

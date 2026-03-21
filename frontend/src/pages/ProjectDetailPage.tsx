@@ -1,14 +1,17 @@
 import { useParams, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import toast from "react-hot-toast";
 import api from "@/api/client";
 import { Project } from "@/types/project";
 import StatusBadge from "@/components/common/StatusBadge";
-import { Download, Pause, Play, CheckCircle2, CircleDashed, FileText, ChevronRight } from "lucide-react";
+import StepMonitor from "@/components/tasks/StepMonitor";
+import { Download, Pause, Play, CheckCircle2, CircleDashed, FileText, ChevronRight, ChevronDown } from "lucide-react";
 
 export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
+  const [expandedTask, setExpandedTask] = useState<string | null>(null);
 
   const { data: project, isLoading } = useQuery({
     queryKey: ["project", id],
@@ -41,8 +44,9 @@ export default function ProjectDetailPage() {
         <div>
           <h1 className="text-3xl font-bold text-slate-900 tracking-tight">{project.name}</h1>
           <div className="text-sm text-slate-500 mt-2 flex gap-4">
+            <span className="flex items-center gap-1">Blueprint: <span className="font-semibold text-slate-700">{project.blueprint_id}</span></span>
             <span className="flex items-center gap-1">Seed: <span className="font-semibold text-slate-700 bg-slate-100 px-2 rounded">{project.seed_keyword}</span></span>
-            <span className="flex items-center gap-1">Target: <span className="font-medium">{project.target_site_id}</span></span>
+            <span className="flex items-center gap-1">Site: <span className="font-medium">{project.site_id}</span></span>
           </div>
         </div>
         <div className="flex gap-2">
@@ -83,7 +87,7 @@ export default function ProjectDetailPage() {
         </div>
         <div className="w-full bg-slate-100 rounded-full h-4 relative overflow-hidden my-4 border shadow-inner">
           <div 
-            className={`h-4 rounded-full transition-all duration-500 ${project.progress === 100 ? 'bg-emerald-500' : 'bg-blue-500'}`} 
+            className={`h-4 rounded-full transition-all duration-500 border-r border-black/10 ${project.progress === 100 ? 'bg-emerald-500' : 'bg-blue-500'}`} 
             style={{ width: `${project.progress || 0}%` }}
           />
         </div>
@@ -97,36 +101,53 @@ export default function ProjectDetailPage() {
         
         {project.tasks && project.tasks.length > 0 ? (
           <div className="divide-y">
-            {project.tasks.map((task, i) => (
-              <div key={task.id} className="p-4 hover:bg-slate-50 transition-colors flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="flex-shrink-0 font-mono text-slate-400 text-sm">#{i + 1}</div>
-                  <div className="flex items-center gap-2">
-                     {task.status === 'completed' && <CheckCircle2 className="w-5 h-5 text-emerald-500" />}
-                     {task.status === 'running' && <CircleDashed className="w-5 h-5 text-blue-500 animate-[spin_3s_linear_infinite]" />}
-                     {task.status === 'pending' && <CircleDashed className="w-5 h-5 text-slate-300" />}
-                     {task.status === 'failed' && <CircleDashed className="w-5 h-5 text-red-500" />}
-                  </div>
-                  <div>
-                    <div className="font-medium text-slate-800 break-all">{task.main_keyword}</div>
-                    <div className="text-xs text-slate-500 mt-0.5 flex gap-2">
-                       <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 uppercase tracking-tighter">{task.page_type}</span>
-                       {task.current_step && <span className="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded text-xs">{task.current_step}</span>}
+            {project.tasks.map((task, i) => {
+              const isExpanded = expandedTask === task.id;
+              return (
+                <div key={task.id} className="flex flex-col">
+                  <div 
+                    className="p-4 hover:bg-slate-50 transition-colors flex items-center justify-between cursor-pointer"
+                    onClick={() => setExpandedTask(isExpanded ? null : task.id)}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="flex-shrink-0 font-mono text-slate-400 text-sm w-6">#{i + 1}</div>
+                      <div className="flex items-center gap-2">
+                         {task.status === 'completed' && <CheckCircle2 className="w-5 h-5 text-emerald-500" />}
+                         {task.status === 'running' && <CircleDashed className="w-5 h-5 text-blue-500 animate-[spin_3s_linear_infinite]" />}
+                         {task.status === 'pending' && <CircleDashed className="w-5 h-5 text-slate-300" />}
+                         {task.status === 'failed' && <CircleDashed className="w-5 h-5 text-red-500" />}
+                      </div>
+                      <div>
+                        <div className="font-medium text-slate-800 break-all">{task.main_keyword}</div>
+                        <div className="text-xs text-slate-500 mt-0.5 flex gap-2">
+                           <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 uppercase tracking-tighter">{task.page_type}</span>
+                           {task.current_step && <span className="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded text-xs">{task.current_step.replace(/_/g, " ")}</span>}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-6">
+                      <div className="text-sm font-medium text-slate-500">{Math.round(task.progress)}%</div>
+                      <Link 
+                        to={`/tasks/${task.id}`}
+                        className="flex items-center justify-center p-2 text-blue-600 hover:bg-blue-50 border border-transparent hover:border-blue-200 rounded-md transition-all text-xs font-semibold"
+                        title="Open Task Detail Page"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        Open Detailed View
+                      </Link>
+                      <button className="text-slate-400 hover:text-slate-700 p-1">
+                        {isExpanded ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
+                      </button>
                     </div>
                   </div>
+                  {isExpanded && (
+                    <div className="bg-slate-50/50 p-6 border-t border-slate-100 shadow-inner">
+                      <StepMonitor taskId={task.id} isActive={['running', 'pending'].includes(task.status)} />
+                    </div>
+                  )}
                 </div>
-                <div className="flex items-center gap-6">
-                  <div className="text-sm font-medium text-slate-500">{Math.round(task.progress)}%</div>
-                  <Link 
-                    to={`/tasks/${task.id}`}
-                    className="flex items-center justify-center p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors"
-                    title="View Task Detail"
-                  >
-                    <ChevronRight className="w-5 h-5" />
-                  </Link>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="text-center text-slate-500 mt-16 bg-slate-50 border border-dashed rounded-lg p-10 max-w-lg mx-auto">
