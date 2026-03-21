@@ -159,7 +159,7 @@ export default function TasksPage() {
       />
 
       {isCreateOpen && (
-        <CreateTaskModal onClose={() => setIsCreateOpen(false)} sites={sites || []} />
+        <CreateTaskModal onClose={() => setIsCreateOpen(false)} />
       )}
 
       {isImportOpen && (
@@ -169,7 +169,7 @@ export default function TasksPage() {
   );
 }
 
-function CreateTaskModal({ onClose, sites }: { onClose: () => void, sites: any[] }) {
+function CreateTaskModal({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
   const { data: authors } = useQuery({
     queryKey: ["authors"],
@@ -179,20 +179,26 @@ function CreateTaskModal({ onClose, sites }: { onClose: () => void, sites: any[]
   const [formData, setFormData] = useState({
     main_keyword: "",
     additional_keywords: "",
-    priority: 0,
-    country: "US",
-    language: "en",
-    target_site_id: "",
-    author_id: "",
+    country: "",
+    language: "",
+    target_site: "",
+    author_id: "" as string | null,
     page_type: "article"
   });
 
+  // Extract unique countries and languages from authors
+  const countries = Array.from(new Set((authors || []).map((a: any) => a.country).filter(Boolean))).sort();
+  const languages = Array.from(new Set((authors || []).map((a: any) => a.language).filter(Boolean))).sort();
+
+  const filteredAuthors = (authors || []).filter(
+    (a: any) => a.country === formData.country && a.language === formData.language
+  );
+
   const mutation = useMutation({
     mutationFn: (data: any) => {
-      // transform priority to number, null author if empty
-      const payload = { ...data, priority: Number(data.priority) };
+      const payload = { ...data };
       if (!payload.author_id) {
-          delete payload.author_id;
+          payload.author_id = null;
       }
       return tasksApi.create(payload);
     },
@@ -206,8 +212,8 @@ function CreateTaskModal({ onClose, sites }: { onClose: () => void, sites: any[]
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.main_keyword || !formData.target_site_id) {
-        toast.error("Please fill required fields");
+    if (!formData.main_keyword || !formData.target_site || !formData.country || !formData.language) {
+        toast.error("Please fill required fields: Keyword, Site, Country, Language");
         return;
     }
     mutation.mutate(formData);
@@ -235,7 +241,7 @@ function CreateTaskModal({ onClose, sites }: { onClose: () => void, sites: any[]
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Additional Keywords</label>
               <textarea 
-                className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none h-20" 
+                className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none h-16" 
                 placeholder="Comma separated secondary keywords..."
                 value={formData.additional_keywords} 
                 onChange={e => setFormData({...formData, additional_keywords: e.target.value})} 
@@ -244,63 +250,74 @@ function CreateTaskModal({ onClose, sites }: { onClose: () => void, sites: any[]
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Target Site *</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Country *</label>
                 <select 
                   required
                   className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white" 
-                  value={formData.target_site_id} 
-                  onChange={e => setFormData({...formData, target_site_id: e.target.value})}
+                  value={formData.country} 
+                  onChange={e => setFormData({...formData, country: e.target.value, author_id: ""})}
                 >
-                  <option value="" disabled>Select a site...</option>
-                  {sites?.map((s: any) => (
-                     <option key={s.id} value={s.id}>{s.domain}</option>
-                  ))}
+                  <option value="" disabled>Select country...</option>
+                  {(countries as string[]).map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Language *</label>
+                <select 
+                  required
+                  className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white" 
+                  value={formData.language} 
+                  onChange={e => setFormData({...formData, language: e.target.value, author_id: ""})}
+                >
+                  <option value="" disabled>Select language...</option>
+                  {(languages as string[]).map(l => <option key={l} value={l}>{l}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Target Site *</label>
+                <input 
+                  required
+                  type="text"
+                  placeholder="e.g. example.com"
+                  className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white" 
+                  value={formData.target_site} 
+                  onChange={e => setFormData({...formData, target_site: e.target.value})}
+                />
               </div>
               
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Author</label>
                 <select 
-                  className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white" 
-                  value={formData.author_id} 
-                  onChange={e => setFormData({...formData, author_id: e.target.value})}
+                  className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white disabled:bg-slate-50 disabled:text-slate-400" 
+                  value={formData.author_id || ""} 
+                  onChange={e => setFormData({...formData, author_id: e.target.value || null})}
+                  disabled={!formData.country || !formData.language}
                 >
-                  <option value="">No author (Auto)</option>
-                  {authors?.map((a: any) => (
-                     <option key={a.id} value={a.id}>{a.name}</option>
+                  <option value="">Auto (by GEO/Language)</option>
+                  {filteredAuthors?.map((a: any) => (
+                     <option key={a.id} value={a.id}>{a.author || a.name || a.id}</option>
                   ))}
                 </select>
+                {(!formData.country || !formData.language) && (
+                   <p className="text-xs text-slate-500 mt-1">Select Country and Language first</p>
+                )}
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Country</label>
-                <input 
-                  className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
-                  value={formData.country} 
-                  onChange={e => setFormData({...formData, country: e.target.value})} 
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Language</label>
-                <input 
-                  className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
-                  value={formData.language} 
-                  onChange={e => setFormData({...formData, language: e.target.value})} 
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Priority</label>
-                <select 
-                  className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white" 
-                  value={formData.priority} 
-                  onChange={e => setFormData({...formData, priority: Number(e.target.value)})}
-                >
-                  <option value={0}>Normal (0)</option>
-                  <option value={1}>High (1)</option>
-                </select>
-              </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Page Type</label>
+              <select 
+                className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white" 
+                value={formData.page_type} 
+                onChange={e => setFormData({...formData, page_type: e.target.value})}
+              >
+                <option value="article">Article</option>
+                <option value="homepage">Homepage</option>
+                <option value="category">Category</option>
+              </select>
             </div>
           </form>
         </div>
