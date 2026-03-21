@@ -64,3 +64,21 @@ def update_settings(settings_in: SettingsUpdate):
             dotenv.set_key(path, key, value)
             
     return {"msg": "Settings updated in .env (Restart maybe required)"}
+
+@router.get("/openrouter-models")
+def get_openrouter_models():
+    try:
+        import requests
+        r = requests.get("https://openrouter.ai/api/v1/models", timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            models = sorted([m["id"] for m in data.get("data", [])])
+            return {"models": models}
+    except Exception:
+        pass
+    return {"models": [
+        "openai/gpt-4o-mini", "openai/gpt-4o", 
+        "anthropic/claude-3-5-sonnet", "anthropic/claude-3-haiku",
+        "google/gemini-flash-1.5", "google/gemini-2.5-pro",
+        "meta-llama/llama-3-8b-instruct"
+    ]}

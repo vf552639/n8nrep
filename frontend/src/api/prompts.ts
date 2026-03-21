@@ -8,8 +8,8 @@ export const promptsApi = {
   getOne: (id: string) => 
     api.get<Prompt>(`/prompts/${id}`).then(res => res.data),
     
-  update: (id: string, data: Partial<Prompt>) => 
-    api.put<Prompt>(`/prompts/${id}`, data).then(res => res.data),
+  update: (data: Partial<Prompt>) => 
+    api.post<Prompt>(`/prompts/`, data).then(res => res.data),
     
   getVersions: (id: string) => 
     api.get<PromptVersion[]>(`/prompts/${id}/versions`).then(res => res.data),

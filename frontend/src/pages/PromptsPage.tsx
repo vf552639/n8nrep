@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Editor from "@monaco-editor/react";
 import toast from "react-hot-toast";
+import api from "@/api/client";
 import { promptsApi } from "@/api/prompts";
 import { Prompt } from "@/types/prompt";
 import { Play, Save, Settings2, X, FileJson, Loader2, ChevronDown, ChevronRight, Search, Copy } from "lucide-react";
@@ -101,22 +102,47 @@ export default function PromptsPage() {
   const [isVariablesOpen, setIsVariablesOpen] = useState(false);
   const [variablesQuery, setVariablesQuery] = useState("");
 
+  const knownAgents = Object.keys(AGENT_MAP);
+
   // default query without active_only fetches the filtered list automatically via backend default
   const { data: prompts, isLoading } = useQuery({
     queryKey: ["prompts"],
     queryFn: () => promptsApi.getAll(),
   });
 
-  const activePrompt = prompts?.find(p => p.id === activePromptId) || prompts?.[0];
+  const filteredPrompts = prompts?.filter((p: Prompt) => knownAgents.includes(p.agent_name));
+  const activePromptListInfo = filteredPrompts?.find(p => p.id === activePromptId) || filteredPrompts?.[0];
+  const derivedActiveId = activePromptId || activePromptListInfo?.id;
+
+  const { data: orModels } = useQuery({
+    queryKey: ["openrouter-models"],
+    queryFn: async () => {
+      const res = await api.get("/settings/openrouter-models");
+      return res.data.models as string[];
+    },
+    staleTime: 3600000,
+  });
+
+  const { data: fullPrompt, isLoading: isLoadingPrompt } = useQuery({
+    queryKey: ["prompt", derivedActiveId],
+    queryFn: () => derivedActiveId ? promptsApi.getOne(derivedActiveId) : null,
+    enabled: !!derivedActiveId,
+  });
 
   useEffect(() => {
-    if (activePrompt && activePrompt.id !== editState?.id) {
-      setEditState(activePrompt);
+    if (!activePromptId && derivedActiveId) {
+       setActivePromptId(derivedActiveId);
     }
-  }, [activePrompt, editState?.id]);
+  }, [activePromptId, derivedActiveId]);
+
+  useEffect(() => {
+    if (fullPrompt && fullPrompt.id !== editState?.id) {
+      setEditState(fullPrompt);
+    }
+  }, [fullPrompt, editState?.id]);
 
   const saveMutation = useMutation({
-    mutationFn: (data: Partial<Prompt>) => promptsApi.update(data.id!, data),
+    mutationFn: (data: Partial<Prompt>) => promptsApi.update(data),
     onSuccess: () => {
       toast.success("Prompt saved successfully");
       queryClient.invalidateQueries({ queryKey: ["prompts"] });
@@ -132,11 +158,11 @@ export default function PromptsPage() {
           {isLoading ? (
             <div className="p-4 text-center text-sm text-slate-500">Loading prompts...</div>
           ) : (
-            prompts?.map((prompt) => (
+            filteredPrompts?.map((prompt: Prompt) => (
               <button
                 key={prompt.id}
                 onClick={() => setActivePromptId(prompt.id)}
-                className={`w-full text-left px-3 py-2.5 rounded-md text-sm transition-colors ${(activePromptId ? activePromptId === prompt.id : prompts[0].id === prompt.id)
+                className={`w-full text-left px-3 py-2.5 rounded-md text-sm transition-colors ${(activePromptId ? activePromptId === prompt.id : filteredPrompts[0]?.id === prompt.id)
                     ? "bg-blue-50 text-blue-700 font-medium"
                     : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                 }`}
@@ -149,73 +175,131 @@ export default function PromptsPage() {
       </div>
 
       <div className="flex-1 bg-white border rounded-lg shadow-sm flex flex-col min-w-0">
-        {activePrompt && editState ? (
+        {activePromptListInfo && editState && !isLoadingPrompt ? (
           <>
-            <div className="p-4 border-b flex flex-wrap justify-between items-center bg-slate-50 rounded-t-lg shrink-0 gap-4">
+            <div className="p-4 border-b flex flex-col xl:flex-row justify-between items-start xl:items-center bg-slate-50 rounded-t-lg shrink-0 gap-4">
               <div>
                 <h2 className="font-semibold text-slate-800 capitalize text-lg">
-                  {AGENT_MAP[activePrompt.agent_name] || activePrompt.agent_name.replace(/_/g, " ")}
+                  {AGENT_MAP[activePromptListInfo.agent_name] || activePromptListInfo.agent_name.replace(/_/g, " ")}
                 </h2>
                 <div className="text-xs text-slate-500 mt-1 flex gap-4">
-                  <span className="flex items-center gap-1">v{activePrompt.version}</span>
+                  <span className="flex items-center gap-1">v{activePromptListInfo.version}</span>
                 </div>
               </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex items-center gap-2 mr-2">
-                   <label className="text-xs text-slate-500 font-medium">Model</label>
-                   <select 
-                     value={editState.model || "gpt-4"} 
-                     onChange={e => setEditState(prev => prev ? {...prev, model: e.target.value} : null)}
-                     className="text-xs border rounded p-1"
-                   >
-                     <option value="gpt-4o">gpt-4o</option>
-                     <option value="gpt-4-turbo">gpt-4 Turbo</option>
-                     <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
-                     <option value="claude-3-5-sonnet-20240620">claude-3.5-sonnet</option>
-                   </select>
-                </div>
-                <div className="flex items-center gap-2 mr-2">
-                   <label className="text-xs text-slate-500 font-medium">Temp</label>
+              <div className="flex flex-col gap-3 w-full xl:w-auto mt-2 xl:mt-0">
+                <div className="flex items-center gap-2">
+                   <label className="text-xs text-slate-500 font-medium w-12 shrink-0">Model</label>
                    <input 
-                     type="number" step="0.1" min="0" max="2"
-                     value={editState.temperature ?? 0.7} 
-                     onChange={e => setEditState(prev => prev ? {...prev, temperature: parseFloat(e.target.value)} : null)}
-                     className="text-xs border rounded p-1 w-16"
+                     list="openrouter-models-list"
+                     value={editState.model || "openai/gpt-4o"} 
+                     onChange={e => setEditState(prev => prev ? {...prev, model: e.target.value} : null)}
+                     className="text-xs border rounded p-1.5 w-48 sm:w-64 bg-white"
+                     placeholder="Search models..."
                    />
-                </div>
-                <div className="flex items-center gap-2 mr-2">
-                   <label className="text-xs text-slate-500 font-medium">Tokens</label>
+                   <datalist id="openrouter-models-list">
+                     {(orModels || ["openai/gpt-4o"]).map(m => (
+                       <option key={m} value={m}>{m}</option>
+                     ))}
+                   </datalist>
+                   
+                   <label className="text-xs text-slate-500 font-medium ml-2 sm:ml-4 mr-1">Tokens</label>
                    <input 
                      type="number" step="100" min="100"
                      value={editState.max_tokens ?? 2000} 
                      onChange={e => setEditState(prev => prev ? {...prev, max_tokens: parseInt(e.target.value)} : null)}
-                     className="text-xs border rounded p-1 w-20"
+                     className="text-xs border rounded p-1.5 w-20 bg-white"
                    />
                 </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 bg-white p-2.5 rounded border border-slate-200 shadow-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                      <input type="checkbox" className="rounded"
+                        checked={editState.temperature !== undefined}
+                        onChange={e => setEditState(prev => prev ? {...prev, temperature: e.target.checked ? 0.7 : undefined} : null)}
+                      />
+                      Temperature
+                    </label>
+                    <input type="number" step="0.1" min="0" max="2" disabled={editState.temperature === undefined}
+                      value={editState.temperature ?? 0.7} 
+                      onChange={e => setEditState(prev => prev ? {...prev, temperature: parseFloat(e.target.value)} : null)}
+                      className="text-xs border rounded p-1 w-16 text-right disabled:opacity-50 disabled:bg-slate-50"
+                    />
+                  </div>
+                  
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                      <input type="checkbox" className="rounded"
+                        checked={editState.frequency_penalty !== undefined}
+                        onChange={e => setEditState(prev => prev ? {...prev, frequency_penalty: e.target.checked ? 0.0 : undefined} : null)}
+                      />
+                      Freq. Penalty
+                    </label>
+                    <input type="number" step="0.1" min="-2" max="2" disabled={editState.frequency_penalty === undefined}
+                      value={editState.frequency_penalty ?? 0.0} 
+                      onChange={e => setEditState(prev => prev ? {...prev, frequency_penalty: parseFloat(e.target.value)} : null)}
+                      className="text-xs border rounded p-1 w-16 text-right disabled:opacity-50 disabled:bg-slate-50"
+                    />
+                  </div>
+                  
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                      <input type="checkbox" className="rounded"
+                        checked={editState.presence_penalty !== undefined}
+                        onChange={e => setEditState(prev => prev ? {...prev, presence_penalty: e.target.checked ? 0.0 : undefined} : null)}
+                      />
+                      Pres. Penalty
+                    </label>
+                    <input type="number" step="0.1" min="-2" max="2" disabled={editState.presence_penalty === undefined}
+                      value={editState.presence_penalty ?? 0.0} 
+                      onChange={e => setEditState(prev => prev ? {...prev, presence_penalty: parseFloat(e.target.value)} : null)}
+                      className="text-xs border rounded p-1 w-16 text-right disabled:opacity-50 disabled:bg-slate-50"
+                    />
+                  </div>
+                  
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                      <input type="checkbox" className="rounded"
+                        checked={editState.top_p !== undefined}
+                        onChange={e => setEditState(prev => prev ? {...prev, top_p: e.target.checked ? 1.0 : undefined} : null)}
+                      />
+                      Top P
+                    </label>
+                    <input type="number" step="0.05" min="0" max="1" disabled={editState.top_p === undefined}
+                      value={editState.top_p ?? 1.0} 
+                      onChange={e => setEditState(prev => prev ? {...prev, top_p: parseFloat(e.target.value)} : null)}
+                      className="text-xs border rounded p-1 w-16 text-right disabled:opacity-50 disabled:bg-slate-50"
+                    />
+                  </div>
+                </div>
 
-                <label className="flex items-center gap-2 text-sm text-slate-700 mr-2 cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    className="rounded border-slate-300"
-                    checked={editState.skip_in_pipeline || false}
-                    onChange={(e) => setEditState(prev => prev ? {...prev, skip_in_pipeline: e.target.checked} : null)}
-                  />
-                  Skip
-                </label>
-                <div className="h-6 w-px bg-slate-300 mx-1"></div>
-                <button 
-                  onClick={() => setIsTestOpen(true)}
-                  className="flex items-center gap-2 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 px-3 py-1.5 rounded-md transition-colors text-sm font-medium border border-emerald-200 shadow-sm"
-                >
-                  <Play className="w-4 h-4" /> Test
-                </button>
-                <button 
-                  onClick={() => saveMutation.mutate(editState)}
-                  disabled={saveMutation.isPending}
-                  className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-md transition-colors text-sm font-medium shadow-sm disabled:opacity-70"
-                >
-                  <Save className="w-4 h-4" /> Save
-                </button>
+                <div className="flex items-center justify-between pt-2 mt-1 border-t border-slate-200">
+                  <label className="flex items-center gap-2 text-sm font-medium text-slate-700 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      checked={editState.skip_in_pipeline || false}
+                      onChange={(e) => setEditState(prev => prev ? {...prev, skip_in_pipeline: e.target.checked} : null)}
+                    />
+                    Skip in pipeline
+                  </label>
+                  
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => setIsTestOpen(true)}
+                      className="flex items-center gap-2 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 px-4 py-1.5 rounded-md transition-colors text-sm font-medium border border-emerald-200 shadow-sm"
+                    >
+                      <Play className="w-4 h-4" /> Test
+                    </button>
+                    <button 
+                      onClick={() => saveMutation.mutate(editState)}
+                      disabled={saveMutation.isPending}
+                      className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 rounded-md transition-colors text-sm font-medium shadow-sm disabled:opacity-70"
+                    >
+                      <Save className="w-4 h-4" /> Save
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
             

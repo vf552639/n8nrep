@@ -8,6 +8,9 @@ export interface Prompt {
   model: string;
   max_tokens: number;
   temperature: number;
+  frequency_penalty?: number;
+  presence_penalty?: number;
+  top_p?: number;
   response_format?: string;
   skip_in_pipeline?: boolean;
   min_output_length?: number;
