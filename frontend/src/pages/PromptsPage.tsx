@@ -18,7 +18,7 @@ import {
   PanelRightOpen,
   History,
   RotateCcw,
-  GripVertical,
+  Copy,
 } from "lucide-react";
 
 const AGENT_MAP: Record<string, string> = {
@@ -130,14 +130,21 @@ function normalizePrompt(p: Partial<Prompt> | null) {
   };
 }
 
-function isPromptDirty(edit: Partial<Prompt> | null, saved: Prompt | null | undefined, params: { freq: boolean; pres: boolean; top: boolean }) {
+function isPromptDirty(
+  edit: Partial<Prompt> | null,
+  saved: Prompt | null | undefined,
+  params: { temp: boolean; freq: boolean; pres: boolean; top: boolean }
+) {
   if (!edit || !saved) return false;
   const e = normalizePrompt(edit);
   const s = normalizePrompt(saved);
   if (!e || !s) return false;
   if (e.system_prompt !== s.system_prompt || e.user_prompt !== s.user_prompt) return true;
   if (e.model !== s.model) return true;
-  if (e.temperature !== s.temperature) return true;
+  const effTemp = params.temp ? e.temperature : 1.0;
+  const savTempOn = (saved.temperature ?? 0.7) !== 1.0;
+  if (params.temp !== savTempOn) return true;
+  if (effTemp !== (saved.temperature ?? 0.7)) return true;
   if (e.skip_in_pipeline !== s.skip_in_pipeline) return true;
   const effFreq = params.freq ? e.frequency_penalty : 0;
   const effPres = params.pres ? e.presence_penalty : 0;
@@ -175,7 +182,7 @@ export default function PromptsPage() {
   const [isTestOpen, setIsTestOpen] = useState(false);
   const [testTab, setTestTab] = useState<TestTab>("context");
   const [variablesQuery, setVariablesQuery] = useState("");
-  const [paramsEnabled, setParamsEnabled] = useState({ freq: false, pres: false, top: false });
+  const [paramsEnabled, setParamsEnabled] = useState({ temp: true, freq: false, pres: false, top: false });
   const [variablesDrawerOpen, setVariablesDrawerOpen] = useState(false);
   const [versionMenuOpen, setVersionMenuOpen] = useState(false);
   const versionMenuRef = useRef<HTMLDivElement>(null);
@@ -228,6 +235,7 @@ export default function PromptsPage() {
 
       setEditState(cleanPrompt);
       setParamsEnabled({
+        temp: (cleanPrompt.temperature ?? 0.7) !== 1.0,
         freq: cleanPrompt.frequency_penalty !== undefined && cleanPrompt.frequency_penalty !== 0.0,
         pres: cleanPrompt.presence_penalty !== undefined && cleanPrompt.presence_penalty !== 0.0,
         top: cleanPrompt.top_p !== undefined && cleanPrompt.top_p !== 1.0,
@@ -254,7 +262,7 @@ export default function PromptsPage() {
     mutationFn: (data: Partial<Prompt>) => {
       const payload: Partial<Prompt> = {
         ...data,
-        temperature: data.temperature ?? 0.7,
+        temperature: paramsEnabled.temp ? (data.temperature ?? 0.7) : 1.0,
         frequency_penalty: paramsEnabled.freq ? (data.frequency_penalty ?? 0.0) : 0.0,
         presence_penalty: paramsEnabled.pres ? (data.presence_penalty ?? 0.0) : 0.0,
         top_p: paramsEnabled.top ? (data.top_p ?? 1.0) : 1.0,
@@ -349,10 +357,10 @@ export default function PromptsPage() {
                       e.dataTransfer.effectAllowed = "copy";
                     }}
                     onClick={() => copyVar(v.name)}
-                    className="flex w-full items-center gap-1 rounded border border-slate-200 bg-slate-50 px-1 py-0.5 text-left font-mono text-[10px] text-teal-700 hover:bg-slate-100"
+                    className="flex w-full items-center justify-between gap-2 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-left font-mono text-[11px] text-teal-700 hover:bg-slate-100"
                   >
-                    <GripVertical className="h-3 w-3 shrink-0 cursor-grab text-slate-400 active:cursor-grabbing" aria-hidden />
                     <span className="min-w-0 flex-1 truncate">{`{{${v.name}}}`}</span>
+                    <Copy className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
                   </button>
                 ))}
               </div>
@@ -398,79 +406,76 @@ export default function PromptsPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
-      <h1 className="shrink-0 text-2xl font-bold tracking-tight text-slate-900">SEO Workflow Optimizer</h1>
+      <h1 className="shrink-0 text-xl font-bold text-slate-900">SEO Workflow Optimizer</h1>
 
       {activePromptListInfo && editState && !isLoadingPrompt && (
-        <div className="shrink-0 rounded-lg border border-slate-300 bg-slate-200/90 px-4 py-3 shadow-sm">
-          <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+        <div className="shrink-0 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <span className="text-sm font-semibold text-slate-800">Model Settings</span>
-            <div className="flex items-center gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
               <span className="text-xs font-medium text-slate-600">Model</span>
               <ModelSelector
-                className="w-[min(100%,220px)] shrink-0"
+                className="w-[min(100%,280px)] shrink-0"
                 value={editState.model || "openai/gpt-4o"}
                 models={orModels || ["openai/gpt-4o"]}
                 onChange={(m) => setEditState((prev) => (prev ? { ...prev, model: m } : null))}
               />
             </div>
 
-            <div className="flex min-w-[140px] flex-col gap-0.5">
-              <label className="flex items-center gap-1 text-[11px] text-slate-700">
-                <input type="checkbox" className="rounded border-slate-400 text-blue-600" checked disabled />
-                <span>Temperature</span>
+            <div className="flex min-w-0 flex-col gap-1 sm:min-w-[160px]">
+              <label className="flex items-center gap-1.5 text-xs text-slate-700">
+                <input
+                  type="checkbox"
+                  className="rounded border-slate-300 text-blue-600"
+                  checked={paramsEnabled.temp}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setParamsEnabled((p) => ({ ...p, temp: checked }));
+                    if (!checked) setEditState((prev) => (prev ? { ...prev, temperature: 1.0 } : null));
+                  }}
+                />
+                <span className="whitespace-nowrap">Temperature</span>
               </label>
               <input
                 type="range"
                 min={0}
                 max={2}
                 step={0.1}
+                disabled={!paramsEnabled.temp}
                 value={editState.temperature ?? 0.7}
                 onChange={(e) =>
                   setEditState((prev) => (prev ? { ...prev, temperature: parseFloat(e.target.value) } : null))
                 }
-                className="h-1.5 w-full cursor-pointer accent-blue-600"
+                className="h-1 w-full max-w-[140px] cursor-pointer accent-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
               />
               <input
                 type="number"
                 step={0.1}
                 min={0}
                 max={2}
+                disabled={!paramsEnabled.temp}
                 value={editState.temperature ?? 0.7}
                 onChange={(e) => setEditState((prev) => (prev ? { ...prev, temperature: parseFloat(e.target.value) } : null))}
                 onBlur={(e) => {
                   const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, 0), 2);
                   setEditState((prev) => (prev ? { ...prev, temperature: val } : null));
                 }}
-                className="w-full rounded border border-slate-300 bg-white px-1 py-0.5 text-right font-mono text-[11px]"
+                className="w-20 rounded border border-slate-200 bg-white px-2 py-0.5 text-right font-mono text-xs disabled:opacity-40"
               />
             </div>
 
-            <div className="flex min-w-[140px] flex-col gap-0.5">
-              <label className="flex items-center gap-1 text-[11px] text-slate-700">
-                <input
-                  type="checkbox"
-                  className="rounded border-slate-400 text-blue-600"
-                  checked={paramsEnabled.freq}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setParamsEnabled((p) => ({ ...p, freq: checked }));
-                    if (!checked) setEditState((prev) => (prev ? { ...prev, frequency_penalty: 0.0 } : null));
-                  }}
-                />
-                <span>Freq. Penalty</span>
-              </label>
+            <label className="flex items-center gap-1.5 text-xs text-slate-700">
               <input
-                type="range"
-                min={-2}
-                max={2}
-                step={0.1}
-                disabled={!paramsEnabled.freq}
-                value={editState.frequency_penalty ?? 0}
-                onChange={(e) =>
-                  setEditState((prev) => (prev ? { ...prev, frequency_penalty: parseFloat(e.target.value) } : null))
-                }
-                className="h-1.5 w-full cursor-pointer accent-blue-600 disabled:opacity-40"
+                type="checkbox"
+                className="rounded border-slate-300 text-blue-600"
+                checked={paramsEnabled.freq}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setParamsEnabled((p) => ({ ...p, freq: checked }));
+                  if (!checked) setEditState((prev) => (prev ? { ...prev, frequency_penalty: 0.0 } : null));
+                }}
               />
+              <span className="whitespace-nowrap">Freq. Penalty</span>
               <input
                 type="number"
                 step={0.1}
@@ -483,36 +488,22 @@ export default function PromptsPage() {
                   const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, -2), 2);
                   setEditState((prev) => (prev ? { ...prev, frequency_penalty: val } : null));
                 }}
-                className="w-full rounded border border-slate-300 bg-white px-1 py-0.5 text-right font-mono text-[11px] disabled:opacity-40"
+                className="w-16 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-right font-mono text-xs disabled:opacity-40"
               />
-            </div>
+            </label>
 
-            <div className="flex min-w-[140px] flex-col gap-0.5">
-              <label className="flex items-center gap-1 text-[11px] text-slate-700">
-                <input
-                  type="checkbox"
-                  className="rounded border-slate-400 text-blue-600"
-                  checked={paramsEnabled.pres}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setParamsEnabled((p) => ({ ...p, pres: checked }));
-                    if (!checked) setEditState((prev) => (prev ? { ...prev, presence_penalty: 0.0 } : null));
-                  }}
-                />
-                <span>Pres. Penalty</span>
-              </label>
+            <label className="flex items-center gap-1.5 text-xs text-slate-700">
               <input
-                type="range"
-                min={-2}
-                max={2}
-                step={0.1}
-                disabled={!paramsEnabled.pres}
-                value={editState.presence_penalty ?? 0}
-                onChange={(e) =>
-                  setEditState((prev) => (prev ? { ...prev, presence_penalty: parseFloat(e.target.value) } : null))
-                }
-                className="h-1.5 w-full cursor-pointer accent-blue-600 disabled:opacity-40"
+                type="checkbox"
+                className="rounded border-slate-300 text-blue-600"
+                checked={paramsEnabled.pres}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setParamsEnabled((p) => ({ ...p, pres: checked }));
+                  if (!checked) setEditState((prev) => (prev ? { ...prev, presence_penalty: 0.0 } : null));
+                }}
               />
+              <span className="whitespace-nowrap">Pres. Penalty</span>
               <input
                 type="number"
                 step={0.1}
@@ -525,36 +516,22 @@ export default function PromptsPage() {
                   const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, -2), 2);
                   setEditState((prev) => (prev ? { ...prev, presence_penalty: val } : null));
                 }}
-                className="w-full rounded border border-slate-300 bg-white px-1 py-0.5 text-right font-mono text-[11px] disabled:opacity-40"
+                className="w-16 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-right font-mono text-xs disabled:opacity-40"
               />
-            </div>
+            </label>
 
-            <div className="flex min-w-[140px] flex-col gap-0.5">
-              <label className="flex items-center gap-1 text-[11px] text-slate-700">
-                <input
-                  type="checkbox"
-                  className="rounded border-slate-400 text-blue-600"
-                  checked={paramsEnabled.top}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setParamsEnabled((p) => ({ ...p, top: checked }));
-                    if (!checked) setEditState((prev) => (prev ? { ...prev, top_p: 1.0 } : null));
-                  }}
-                />
-                <span>Top P</span>
-              </label>
+            <label className="flex items-center gap-1.5 text-xs text-slate-700">
               <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.01}
-                disabled={!paramsEnabled.top}
-                value={editState.top_p ?? 1}
-                onChange={(e) =>
-                  setEditState((prev) => (prev ? { ...prev, top_p: parseFloat(e.target.value) } : null))
-                }
-                className="h-1.5 w-full cursor-pointer accent-blue-600 disabled:opacity-40"
+                type="checkbox"
+                className="rounded border-slate-300 text-blue-600"
+                checked={paramsEnabled.top}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setParamsEnabled((p) => ({ ...p, top: checked }));
+                  if (!checked) setEditState((prev) => (prev ? { ...prev, top_p: 1.0 } : null));
+                }}
               />
+              <span className="whitespace-nowrap">Top P</span>
               <input
                 type="number"
                 step={0.1}
@@ -567,29 +544,19 @@ export default function PromptsPage() {
                   const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, 0), 1);
                   setEditState((prev) => (prev ? { ...prev, top_p: val } : null));
                 }}
-                className="w-full rounded border border-slate-300 bg-white px-1 py-0.5 text-right font-mono text-[11px] disabled:opacity-40"
+                className="w-16 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-right font-mono text-xs disabled:opacity-40"
               />
-            </div>
-
-            <label className="ml-auto flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-800">
-              <input
-                type="checkbox"
-                className="rounded border-orange-400 text-orange-500 focus:ring-orange-500"
-                checked={editState.skip_in_pipeline || false}
-                onChange={(e) => setEditState((prev) => (prev ? { ...prev, skip_in_pipeline: e.target.checked } : null))}
-              />
-              Skip in pipeline
             </label>
 
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="ml-auto flex shrink-0 items-center gap-2">
               <button
                 type="button"
                 onClick={() => {
                   setIsTestOpen((o) => !o);
                   if (isTestOpen) setTestTab("context");
                 }}
-                className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
-                  isTestOpen ? "border-blue-400 bg-blue-100 text-blue-800" : "border-slate-400 bg-white text-slate-800 hover:bg-slate-50"
+                className={`inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium transition-colors ${
+                  isTestOpen ? "border-blue-400 bg-blue-50 text-blue-800" : "text-slate-800 hover:bg-slate-50"
                 }`}
               >
                 <Play className="h-4 w-4" /> Test
@@ -598,12 +565,12 @@ export default function PromptsPage() {
                 type="button"
                 onClick={() => saveMutation.mutate(editState)}
                 disabled={saveMutation.isPending || !isDirty}
-                className="relative inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-70"
+                className="relative inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 disabled:opacity-70"
               >
                 {isDirty && (
-                  <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-white" aria-hidden />
+                  <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-amber-300 ring-2 ring-white" aria-hidden />
                 )}
-                <Save className="h-4 w-4 fill-current" />
+                <Save className="h-4 w-4" />
                 {isDirty ? "Save*" : "Save"}
               </button>
             </div>
@@ -612,31 +579,33 @@ export default function PromptsPage() {
       )}
 
       <div className="flex min-h-0 flex-1 gap-2 xl:gap-3">
-        <div className="flex w-[240px] shrink-0 flex-col overflow-hidden rounded-lg border border-slate-700 bg-[#1e293b] min-h-0">
-          <div className="shrink-0 border-b border-slate-600 px-3 py-3 text-sm font-semibold text-white">Available Agents</div>
-          <div className="min-h-0 flex-1 space-y-1 overflow-auto p-2">
+        <div className="flex w-[240px] shrink-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm min-h-0">
+          <div className="shrink-0 border-b border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-800">
+            Available Agents
+          </div>
+          <div className="min-h-0 flex-1 space-y-0.5 overflow-auto p-2">
             {isLoading ? (
-              <div className="p-4 text-center text-sm text-slate-400">Loading prompts...</div>
+              <div className="p-4 text-center text-sm text-slate-500">Loading prompts...</div>
             ) : (
               filteredPrompts?.map((prompt: Prompt) => {
                 const selected = activePromptId
                   ? activePromptId === prompt.id
                   : filteredPrompts?.[0]?.id === prompt.id;
                 const skipped = prompt.skip_in_pipeline;
-                const dotClass = skipped ? "bg-amber-400" : selected ? "bg-emerald-400" : "bg-blue-400";
+                const dotClass = selected ? "bg-blue-500" : skipped ? "bg-slate-400" : "bg-emerald-500";
                 return (
                   <button
                     key={prompt.id}
                     type="button"
                     onClick={() => requestSelectAgent(prompt.id)}
-                    className={`flex w-full items-start gap-2 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
+                    className={`flex w-full items-start gap-2 rounded-md border-l-2 py-2 pl-2 pr-2 text-left text-sm transition-colors ${
                       selected
-                        ? "bg-blue-600 font-medium text-white"
-                        : "text-slate-200 hover:bg-slate-700"
+                        ? "border-blue-500 bg-blue-50 font-medium text-blue-800"
+                        : "border-transparent text-slate-700 hover:bg-slate-50"
                     }`}
                   >
                     <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dotClass}`} aria-hidden />
-                    <span className={`min-w-0 flex-1 ${skipped ? "text-amber-200 line-through" : ""}`}>
+                    <span className={`min-w-0 flex-1 ${skipped ? "text-slate-500 line-through" : ""}`}>
                       {AGENT_MAP[prompt.agent_name] || prompt.agent_name.replace(/_/g, " ")}
                     </span>
                   </button>
@@ -649,7 +618,7 @@ export default function PromptsPage() {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-none border border-slate-200 bg-white shadow-sm">
           {activePromptListInfo && editState && !isLoadingPrompt ? (
             <>
-              <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-200 px-3 py-2">
+              <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-3 py-2">
                 <h2 className="min-w-0 flex-1 text-lg font-semibold capitalize text-slate-800 truncate">
                   {AGENT_MAP[activePromptListInfo.agent_name] || activePromptListInfo.agent_name.replace(/_/g, " ")}
                 </h2>
@@ -657,10 +626,10 @@ export default function PromptsPage() {
                   <button
                     type="button"
                     onClick={() => setVersionMenuOpen((o) => !o)}
-                    className="inline-flex items-center gap-1 rounded-full bg-slate-200 px-2.5 py-0.5 text-xs font-semibold text-slate-800 hover:bg-slate-300"
+                    className="inline-flex items-center gap-0.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
                   >
                     v{activePromptListInfo.version}
-                    <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                    <ChevronDown className="h-3 w-3 opacity-70" />
                   </button>
                   {versionMenuOpen && versionRows && versionRows.length > 0 && (
                     <div className="absolute left-0 z-50 mt-1 w-72 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
@@ -712,19 +681,28 @@ export default function PromptsPage() {
                   <PanelRightOpen className="h-3.5 w-3.5" />
                   Variables ({VAR_COUNT})
                 </button>
+                <label className="ml-auto flex shrink-0 cursor-pointer items-center gap-2 text-xs font-medium text-slate-700">
+                  <input
+                    type="checkbox"
+                    className="rounded border-orange-300 text-orange-500 focus:ring-orange-500"
+                    checked={editState.skip_in_pipeline || false}
+                    onChange={(e) => setEditState((prev) => (prev ? { ...prev, skip_in_pipeline: e.target.checked } : null))}
+                  />
+                  Skip in pipeline
+                </label>
               </div>
 
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                <div className="flex min-h-0 flex-1 flex-col overflow-hidden xl:flex-row xl:divide-x xl:divide-slate-200">
-                  <div className="flex min-h-[180px] min-w-0 flex-1 flex-col border-b border-slate-200 xl:border-b-0">
-                    <div className="shrink-0 border-b border-slate-700 bg-slate-800 px-2.5 py-2 text-xs font-bold uppercase tracking-wider text-white">
+                <div className="flex min-h-0 flex-1 flex-col divide-y divide-slate-200 overflow-hidden">
+                  <div className="flex min-h-[45%] min-w-0 flex-1 flex-col">
+                    <div className="shrink-0 border-b border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
                       System Prompt
                     </div>
-                    <div className="relative min-h-0 flex-1 bg-[#1e1e1e]">
+                    <div className="relative min-h-0 flex-1 bg-white">
                       <Editor
                         height="100%"
                         language="markdown"
-                        theme="vs-dark"
+                        theme="vs"
                         value={editState.system_prompt || ""}
                         onChange={(val) => setEditState((prev) => (prev ? { ...prev, system_prompt: val || "" } : null))}
                         onMount={(ed) => attachVarDrop(ed)}
@@ -733,15 +711,15 @@ export default function PromptsPage() {
                       />
                     </div>
                   </div>
-                  <div className="flex min-h-[180px] min-w-0 flex-1 flex-col">
-                    <div className="shrink-0 border-b border-slate-700 bg-slate-800 px-2.5 py-2 text-xs font-bold uppercase tracking-wider text-white">
+                  <div className="flex min-h-[45%] min-w-0 flex-1 flex-col">
+                    <div className="shrink-0 border-b border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
                       User Prompt
                     </div>
-                    <div className="relative min-h-0 flex-1 bg-[#1e1e1e]">
+                    <div className="relative min-h-0 flex-1 bg-white">
                       <Editor
                         height="100%"
                         language="markdown"
-                        theme="vs-dark"
+                        theme="vs"
                         value={editState.user_prompt || ""}
                         onChange={(val) => setEditState((prev) => (prev ? { ...prev, user_prompt: val || "" } : null))}
                         onMount={(ed) => attachVarDrop(ed)}
