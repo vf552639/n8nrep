@@ -1,13 +1,16 @@
 import { useState, useRef, useEffect } from "react";
 import { ChevronDown, Search } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface ModelSelectorProps {
   value: string;
   models: string[];
   onChange: (model: string) => void;
+  /** Override width; default full width of parent */
+  className?: string;
 }
 
-export function ModelSelector({ value, models, onChange }: ModelSelectorProps) {
+export function ModelSelector({ value, models, onChange, className }: ModelSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -27,7 +30,7 @@ export function ModelSelector({ value, models, onChange }: ModelSelectorProps) {
   );
 
   return (
-    <div className="relative w-full" ref={dropdownRef}>
+    <div className={cn("relative w-full", className)} ref={dropdownRef}>
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}

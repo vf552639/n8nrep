@@ -10,7 +10,6 @@ import CopyButton from "@/components/common/CopyButton";
 import {
   Play,
   Save,
-  Settings2,
   X,
   FileJson,
   Loader2,
@@ -346,7 +345,7 @@ export default function PromptsPage() {
                       title="Click to copy"
                     >
                       <span className="truncate pr-4">{`{{${v.name}}}`}</span>
-                      <Copy className="w-3 h-3 text-blue-400 opacity-0 group-hover/var:opacity-100 transition-opacity shrink-0 absolute right-1.5" />
+                      <Copy className="w-3 h-3 shrink-0 text-blue-500 opacity-60 transition-opacity hover:opacity-100 absolute right-1.5" />
                     </button>
                     <span className="text-slate-500 mt-[2px] px-1 truncate leading-tight" title={v.desc}>
                       {v.desc}
@@ -381,7 +380,7 @@ export default function PromptsPage() {
             filteredPrompts?.map((prompt: Prompt) => {
               const selected = (activePromptId ? activePromptId === prompt.id : filteredPrompts[0]?.id === prompt.id);
               const skipped = prompt.skip_in_pipeline;
-              const dotClass = skipped ? "bg-amber-500" : selected ? "bg-emerald-500" : "bg-slate-400";
+              const dotClass = skipped ? "bg-amber-500" : selected ? "bg-emerald-500" : "bg-blue-400";
               return (
                 <button
                   key={prompt.id}
@@ -405,16 +404,17 @@ export default function PromptsPage() {
       <div className="flex-1 bg-white border rounded-lg shadow-sm flex flex-col min-w-0 min-h-0">
         {activePromptListInfo && editState && !isLoadingPrompt ? (
           <>
-            <div className="p-4 border-b flex flex-col xl:flex-row justify-between items-start xl:items-center bg-slate-50 rounded-t-lg shrink-0 gap-4">
-              <div className="flex flex-wrap items-center gap-2 min-w-0">
-                <h2 className="font-semibold text-slate-800 capitalize text-lg truncate">
+            <div className="shrink-0 rounded-t-lg border-b border-slate-200 bg-white">
+              {/* Row 1: agent title, version, mobile variables, skip */}
+              <div className="flex flex-wrap items-center gap-2 px-4 py-2">
+                <h2 className="min-w-0 flex-1 text-lg font-semibold capitalize text-slate-800 truncate">
                   {AGENT_MAP[activePromptListInfo.agent_name] || activePromptListInfo.agent_name.replace(/_/g, " ")}
                 </h2>
-                <div className="relative" ref={versionMenuRef}>
+                <div className="relative shrink-0" ref={versionMenuRef}>
                   <button
                     type="button"
                     onClick={() => setVersionMenuOpen((o) => !o)}
-                    className="inline-flex items-center gap-1 rounded-full bg-slate-200/80 px-2.5 py-0.5 text-xs font-semibold text-slate-800 hover:bg-slate-300/80"
+                    className="inline-flex items-center gap-1 rounded-full bg-slate-200 px-2.5 py-0.5 text-xs font-semibold text-slate-800 hover:bg-slate-300"
                   >
                     v{activePromptListInfo.version}
                     <ChevronDown className="h-3.5 w-3.5 opacity-70" />
@@ -461,180 +461,160 @@ export default function PromptsPage() {
                     </div>
                   )}
                 </div>
-              </div>
-
-              <div className="flex w-full items-center justify-end gap-2 xl:hidden">
                 <button
                   type="button"
                   onClick={() => setVariablesDrawerOpen(true)}
-                  className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                  className="inline-flex shrink-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 xl:hidden"
                 >
-                  <PanelRightOpen className="h-4 w-4" />
+                  <PanelRightOpen className="h-3.5 w-3.5" />
                   Variables ({VAR_COUNT})
                 </button>
+                <label className="ml-auto flex shrink-0 cursor-pointer items-center gap-2 text-xs font-medium text-slate-700">
+                  <input
+                    type="checkbox"
+                    className="rounded border-orange-300 text-orange-500 focus:ring-orange-500"
+                    checked={editState.skip_in_pipeline || false}
+                    onChange={(e) => setEditState((prev) => (prev ? { ...prev, skip_in_pipeline: e.target.checked } : null))}
+                  />
+                  Skip in pipeline
+                </label>
               </div>
 
-              <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-5 space-y-4 w-full xl:w-[500px] shrink-0">
-                <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                  <Settings2 className="w-4 h-4 text-slate-400" />
-                  Model Settings
-                </div>
+              {/* Row 2: compact model + params + Test / Save */}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-slate-100 bg-slate-50/90 px-4 py-2">
+                <span className="text-xs font-medium text-slate-500">Model</span>
+                <ModelSelector
+                  className="w-[min(100%,220px)] shrink-0"
+                  value={editState.model || "openai/gpt-4o"}
+                  models={orModels || ["openai/gpt-4o"]}
+                  onChange={(m) => setEditState((prev) => (prev ? { ...prev, model: m } : null))}
+                />
 
-                <div className="flex flex-col gap-1 w-full">
-                  <label className="text-xs text-slate-500 font-medium">Model</label>
-                  <ModelSelector
-                    value={editState.model || "openai/gpt-4o"}
-                    models={orModels || ["openai/gpt-4o"]}
-                    onChange={(m) => setEditState((prev) => (prev ? { ...prev, model: m } : null))}
+                <label className="flex items-center gap-1.5 text-xs text-slate-700">
+                  <input type="checkbox" className="rounded border-slate-300 text-blue-600" checked disabled />
+                  <span className="whitespace-nowrap">Temperature</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="2"
+                    value={editState.temperature ?? 0.7}
+                    onChange={(e) => setEditState((prev) => (prev ? { ...prev, temperature: parseFloat(e.target.value) } : null))}
+                    onBlur={(e) => {
+                      const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, 0), 2);
+                      setEditState((prev) => (prev ? { ...prev, temperature: val } : null));
+                    }}
+                    className="w-16 rounded border border-slate-200 bg-white px-1 py-0.5 text-right font-mono text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
-                </div>
+                </label>
 
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                  <div className="bg-slate-50 rounded-lg p-3 border border-slate-100 flex flex-col justify-between">
-                    <label className="flex items-center gap-2 text-[11px] font-medium text-slate-600 mb-2 whitespace-nowrap">
-                      <input type="checkbox" className="rounded border-slate-300 text-blue-600 cursor-not-allowed" checked readOnly />
-                      Temperature
-                    </label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0"
-                      max="2"
-                      value={editState.temperature ?? 0.7}
-                      onChange={(e) => setEditState((prev) => (prev ? { ...prev, temperature: parseFloat(e.target.value) } : null))}
-                      onBlur={(e) => {
-                        const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, 0), 2);
-                        setEditState((prev) => (prev ? { ...prev, temperature: val } : null));
-                      }}
-                      className="w-full text-sm border border-slate-200 rounded-md px-2 py-1.5 text-right font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                    />
-                  </div>
+                <label className="flex items-center gap-1.5 text-xs text-slate-700">
+                  <input
+                    type="checkbox"
+                    className="rounded border-slate-300 text-blue-600"
+                    checked={paramsEnabled.freq}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setParamsEnabled((p) => ({ ...p, freq: checked }));
+                      if (!checked) setEditState((prev) => (prev ? { ...prev, frequency_penalty: 0.0 } : null));
+                    }}
+                  />
+                  <span className="whitespace-nowrap">Freq. Penalty</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="-2"
+                    max="2"
+                    disabled={!paramsEnabled.freq}
+                    value={editState.frequency_penalty ?? 0.0}
+                    onChange={(e) => setEditState((prev) => (prev ? { ...prev, frequency_penalty: parseFloat(e.target.value) } : null))}
+                    onBlur={(e) => {
+                      const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, -2), 2);
+                      setEditState((prev) => (prev ? { ...prev, frequency_penalty: val } : null));
+                    }}
+                    className="w-16 rounded border border-slate-200 bg-white px-1 py-0.5 text-right font-mono text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-40"
+                  />
+                </label>
 
-                  <div className="bg-slate-50 rounded-lg p-3 border border-slate-100 flex flex-col justify-between">
-                    <label className="flex items-center gap-2 text-[11px] font-medium text-slate-600 cursor-pointer mb-2 whitespace-nowrap">
-                      <input
-                        type="checkbox"
-                        className="rounded border-slate-300 text-blue-600"
-                        checked={paramsEnabled.freq}
-                        onChange={(e) => {
-                          const checked = e.target.checked;
-                          setParamsEnabled((p) => ({ ...p, freq: checked }));
-                          if (!checked) setEditState((prev) => (prev ? { ...prev, frequency_penalty: 0.0 } : null));
-                        }}
-                      />
-                      Freq. Penalty
-                    </label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="-2"
-                      max="2"
-                      disabled={!paramsEnabled.freq}
-                      value={editState.frequency_penalty ?? 0.0}
-                      onChange={(e) => setEditState((prev) => (prev ? { ...prev, frequency_penalty: parseFloat(e.target.value) } : null))}
-                      onBlur={(e) => {
-                        const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, -2), 2);
-                        setEditState((prev) => (prev ? { ...prev, frequency_penalty: val } : null));
-                      }}
-                      className="w-full text-sm border border-slate-200 rounded-md px-2 py-1.5 text-right font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none disabled:opacity-40 disabled:bg-slate-100"
-                    />
-                  </div>
+                <label className="flex items-center gap-1.5 text-xs text-slate-700">
+                  <input
+                    type="checkbox"
+                    className="rounded border-slate-300 text-blue-600"
+                    checked={paramsEnabled.pres}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setParamsEnabled((p) => ({ ...p, pres: checked }));
+                      if (!checked) setEditState((prev) => (prev ? { ...prev, presence_penalty: 0.0 } : null));
+                    }}
+                  />
+                  <span className="whitespace-nowrap">Pres. Penalty</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="-2"
+                    max="2"
+                    disabled={!paramsEnabled.pres}
+                    value={editState.presence_penalty ?? 0.0}
+                    onChange={(e) => setEditState((prev) => (prev ? { ...prev, presence_penalty: parseFloat(e.target.value) } : null))}
+                    onBlur={(e) => {
+                      const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, -2), 2);
+                      setEditState((prev) => (prev ? { ...prev, presence_penalty: val } : null));
+                    }}
+                    className="w-16 rounded border border-slate-200 bg-white px-1 py-0.5 text-right font-mono text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-40"
+                  />
+                </label>
 
-                  <div className="bg-slate-50 rounded-lg p-3 border border-slate-100 flex flex-col justify-between">
-                    <label className="flex items-center gap-2 text-[11px] font-medium text-slate-600 cursor-pointer mb-2 whitespace-nowrap">
-                      <input
-                        type="checkbox"
-                        className="rounded border-slate-300 text-blue-600"
-                        checked={paramsEnabled.pres}
-                        onChange={(e) => {
-                          const checked = e.target.checked;
-                          setParamsEnabled((p) => ({ ...p, pres: checked }));
-                          if (!checked) setEditState((prev) => (prev ? { ...prev, presence_penalty: 0.0 } : null));
-                        }}
-                      />
-                      Pres. Penalty
-                    </label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="-2"
-                      max="2"
-                      disabled={!paramsEnabled.pres}
-                      value={editState.presence_penalty ?? 0.0}
-                      onChange={(e) => setEditState((prev) => (prev ? { ...prev, presence_penalty: parseFloat(e.target.value) } : null))}
-                      onBlur={(e) => {
-                        const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, -2), 2);
-                        setEditState((prev) => (prev ? { ...prev, presence_penalty: val } : null));
-                      }}
-                      className="w-full text-sm border border-slate-200 rounded-md px-2 py-1.5 text-right font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none disabled:opacity-40 disabled:bg-slate-100"
-                    />
-                  </div>
+                <label className="flex items-center gap-1.5 text-xs text-slate-700">
+                  <input
+                    type="checkbox"
+                    className="rounded border-slate-300 text-blue-600"
+                    checked={paramsEnabled.top}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setParamsEnabled((p) => ({ ...p, top: checked }));
+                      if (!checked) setEditState((prev) => (prev ? { ...prev, top_p: 1.0 } : null));
+                    }}
+                  />
+                  <span className="whitespace-nowrap">Top P</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="1"
+                    disabled={!paramsEnabled.top}
+                    value={editState.top_p ?? 1.0}
+                    onChange={(e) => setEditState((prev) => (prev ? { ...prev, top_p: parseFloat(e.target.value) } : null))}
+                    onBlur={(e) => {
+                      const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, 0), 1);
+                      setEditState((prev) => (prev ? { ...prev, top_p: val } : null));
+                    }}
+                    className="w-16 rounded border border-slate-200 bg-white px-1 py-0.5 text-right font-mono text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-40"
+                  />
+                </label>
 
-                  <div className="bg-slate-50 rounded-lg p-3 border border-slate-100 flex flex-col justify-between">
-                    <label className="flex items-center gap-2 text-[11px] font-medium text-slate-600 cursor-pointer mb-2 whitespace-nowrap">
-                      <input
-                        type="checkbox"
-                        className="rounded border-slate-300 text-blue-600"
-                        checked={paramsEnabled.top}
-                        onChange={(e) => {
-                          const checked = e.target.checked;
-                          setParamsEnabled((p) => ({ ...p, top: checked }));
-                          if (!checked) setEditState((prev) => (prev ? { ...prev, top_p: 1.0 } : null));
-                        }}
-                      />
-                      Top P
-                    </label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0"
-                      max="1"
-                      disabled={!paramsEnabled.top}
-                      value={editState.top_p ?? 1.0}
-                      onChange={(e) => setEditState((prev) => (prev ? { ...prev, top_p: parseFloat(e.target.value) } : null))}
-                      onBlur={(e) => {
-                        const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, 0), 1);
-                        setEditState((prev) => (prev ? { ...prev, top_p: val } : null));
-                      }}
-                      className="w-full text-sm border border-slate-200 rounded-md px-2 py-1.5 text-right font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none disabled:opacity-40 disabled:bg-slate-100"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between border-t border-slate-200 pt-4 mt-2">
-                  <label className="flex items-center gap-2 text-[13px] font-medium text-slate-700 cursor-pointer group">
-                    <input
-                      type="checkbox"
-                      className="rounded border-orange-300 text-orange-500 focus:ring-orange-500 cursor-pointer"
-                      checked={editState.skip_in_pipeline || false}
-                      onChange={(e) => setEditState((prev) => (prev ? { ...prev, skip_in_pipeline: e.target.checked } : null))}
-                    />
-                    Skip in pipeline
-                  </label>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsTestOpen((o) => !o);
-                        if (isTestOpen) setTestTab("context");
-                      }}
-                      className={`flex items-center gap-2 px-4 py-1.5 rounded-md transition-colors text-sm font-medium border ${
-                        isTestOpen ? "bg-blue-100 text-blue-800 border-blue-300" : "bg-slate-100 text-slate-700 hover:bg-slate-200 border-slate-200"
-                      }`}
-                    >
-                      <Play className="w-4 h-4" /> Test
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => saveMutation.mutate(editState)}
-                      disabled={saveMutation.isPending || !isDirty}
-                      className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 rounded-md transition-colors text-sm font-medium shadow-sm disabled:opacity-70"
-                    >
-                      <Save className="w-4 h-4" />
-                      {isDirty ? "Save*" : "Save"}
-                    </button>
-                  </div>
+                <div className="ml-auto flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsTestOpen((o) => !o);
+                      if (isTestOpen) setTestTab("context");
+                    }}
+                    className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                      isTestOpen ? "border-blue-300 bg-blue-100 text-blue-800" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                    }`}
+                  >
+                    <Play className="h-3.5 w-3.5" /> Test
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => saveMutation.mutate(editState)}
+                    disabled={saveMutation.isPending || !isDirty}
+                    className="relative inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-70"
+                  >
+                    {isDirty && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-white" aria-hidden />}
+                    <Save className="h-3.5 w-3.5" />
+                    {isDirty ? "Save*" : "Save"}
+                  </button>
                 </div>
               </div>
             </div>
@@ -691,9 +671,9 @@ export default function PromptsPage() {
       </div>
 
       <div className="hidden xl:flex w-[280px] bg-white border rounded-lg shadow-sm flex-col shrink-0 min-h-0">
-        <div className="p-3 border-b bg-slate-50 font-semibold text-slate-800 rounded-t-lg flex items-center justify-between shrink-0">
-          <span className="text-sm">Available Variables</span>
-          <span className="text-xs text-slate-500 bg-slate-200 px-1.5 py-0.5 rounded-md">{VAR_COUNT}</span>
+        <div className="p-3 border-b bg-slate-50 font-semibold text-slate-800 rounded-t-lg flex items-center justify-between gap-2 shrink-0">
+          <span className="text-sm">Variable Explorer</span>
+          <span className="text-xs font-medium text-slate-600">({VAR_COUNT})</span>
         </div>
         <div className="flex flex-col flex-1 min-h-0">{variableExplorerInner}</div>
       </div>
@@ -708,7 +688,9 @@ export default function PromptsPage() {
           />
           <div className="absolute inset-y-0 right-0 flex w-[min(100vw,320px)] flex-col border-l border-slate-200 bg-white shadow-xl">
             <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-2">
-              <span className="text-sm font-semibold text-slate-800">Variables ({VAR_COUNT})</span>
+              <span className="text-sm font-semibold text-slate-800">
+                Variable Explorer <span className="text-slate-600">({VAR_COUNT})</span>
+              </span>
               <button
                 type="button"
                 onClick={() => setVariablesDrawerOpen(false)}
