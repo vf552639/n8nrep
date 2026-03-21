@@ -26,9 +26,9 @@ def generate_text(
     top_p: float = 1.0,
     max_retries: int = 3,
     response_format: Optional[Dict[str, str]] = None
-) -> Tuple[str, float, str]:
+) -> Tuple[str, float, str, Optional[Dict[str, Any]]]:
     """
-    Generic LLM call with retry policy. Returns (generated_text, estimated_cost, actual_model).
+    Generic LLM call with retry policy. Returns (generated_text, estimated_cost, actual_model, usage_or_none).
     """
     client = get_openai_client()
     
@@ -83,7 +83,14 @@ def generate_text(
                     cost = (prompt_tokens * 0.1 / 1000000) + (completion_tokens * 0.5 / 1000000)
                     
             actual_model = getattr(response, "model", None) or model
-            return response.choices[0].message.content, cost, actual_model
+            usage_info: Optional[Dict[str, Any]] = None
+            if response.usage:
+                usage_info = {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "completion_tokens": response.usage.completion_tokens,
+                    "total_tokens": response.usage.total_tokens,
+                }
+            return response.choices[0].message.content, cost, actual_model, usage_info
             
         except Exception as e:
             last_error = str(e)

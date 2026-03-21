@@ -20,9 +20,11 @@ export interface PromptVersion {
   id: string;
   prompt_id: string;
   version: number;
-  system_prompt: string;
-  user_prompt: string;
-  created_at: string;
+  is_active?: boolean;
+  updated_at?: string;
+  system_prompt?: string;
+  user_prompt?: string;
+  created_at?: string;
 }
 
 export interface PromptTest {

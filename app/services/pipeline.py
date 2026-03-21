@@ -258,7 +258,7 @@ def call_agent(ctx: PipelineContext, agent_name: str, context: str, response_for
     if response_format:
         kwargs["response_format"] = response_format
     
-    res, cost, model = generate_text(**kwargs)
+    res, cost, model, _ = generate_text(**kwargs)
     return res, cost, model, resolved_prompts, variables_snapshot
 
 def call_agent_with_exclude_validation(ctx: PipelineContext, agent_name: str, context: str, step_constant: str, max_retries: int = 1):
