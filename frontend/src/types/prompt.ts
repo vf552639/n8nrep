@@ -6,7 +6,6 @@ export interface Prompt {
   system_prompt: string;
   user_prompt: string;
   model: string;
-  max_tokens: number;
   temperature: number;
   frequency_penalty?: number;
   presence_penalty?: number;

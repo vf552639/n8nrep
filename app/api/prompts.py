@@ -66,10 +66,10 @@ def get_prompt(prompt_id: str, db: Session = Depends(get_db)):
         "skip_in_pipeline": prompt.skip_in_pipeline,
         "model": prompt.model,
         "max_tokens": prompt.max_tokens,
-        "temperature": prompt.temperature,
-        "frequency_penalty": prompt.frequency_penalty,
-        "presence_penalty": prompt.presence_penalty,
-        "top_p": prompt.top_p
+        "temperature": prompt.temperature if prompt.temperature is not None else 0.7,
+        "frequency_penalty": prompt.frequency_penalty if prompt.frequency_penalty is not None else 0.0,
+        "presence_penalty": prompt.presence_penalty if prompt.presence_penalty is not None else 0.0,
+        "top_p": prompt.top_p if prompt.top_p is not None else 1.0
     }
 
 @router.post("/")
