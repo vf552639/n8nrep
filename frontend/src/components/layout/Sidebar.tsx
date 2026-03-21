@@ -11,6 +11,7 @@ import {
   FolderKanban,
   Settings,
   ScrollText,
+  Wrench,
 } from "lucide-react";
 
 const navItems = [
@@ -28,27 +29,39 @@ const navItems = [
 
 export default function Sidebar() {
   return (
-    <div className="w-64 bg-slate-900 h-screen text-slate-300 flex flex-col shrink-0">
-      <div className="p-4 text-xl font-bold text-white border-b border-slate-800">
-        SEO Setup
-      </div>
-      <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
+    <div className="flex h-screen w-64 shrink-0 flex-col bg-slate-900 text-slate-300">
+      <div className="border-b border-slate-800 p-4 text-xl font-bold text-white">SEO Setup</div>
+      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto p-4">
         {navItems.map((item) => (
           <NavLink
             key={item.path}
             to={item.path}
             className={({ isActive }) =>
               cn(
-                "flex items-center space-x-3 px-3 py-2 rounded-md hover:bg-slate-800 transition-colors",
-                isActive ? "bg-slate-800 text-white font-medium" : ""
+                "flex items-center space-x-3 rounded-md px-3 py-2 transition-colors hover:bg-slate-800",
+                isActive ? "bg-slate-800 font-medium text-white" : ""
               )
             }
           >
-            <item.icon className="w-5 h-5" />
+            <item.icon className="h-5 w-5 shrink-0" />
             <span>{item.name}</span>
           </NavLink>
         ))}
       </nav>
+      <div className="shrink-0 border-t border-slate-800 p-2">
+        <NavLink
+          to="/seo-setup"
+          className={({ isActive }) =>
+            cn(
+              "flex items-center space-x-3 rounded-md px-3 py-2.5 transition-colors hover:bg-slate-800",
+              isActive ? "bg-slate-800 font-medium text-white" : ""
+            )
+          }
+        >
+          <Wrench className="h-5 w-5 shrink-0" />
+          <span>SEO Setup</span>
+        </NavLink>
+      </div>
     </div>
   );
 }

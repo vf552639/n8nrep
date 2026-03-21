@@ -15,10 +15,10 @@ import {
   Loader2,
   ChevronDown,
   Search,
-  Copy,
   PanelRightOpen,
   History,
   RotateCcw,
+  GripVertical,
 } from "lucide-react";
 
 const AGENT_MAP: Record<string, string> = {
@@ -293,31 +293,36 @@ export default function PromptsPage() {
     setIsTestOpen(false);
   };
 
+  const copyVar = (name: string) => {
+    navigator.clipboard.writeText(`{{${name}}}`);
+    toast.success(`Copied {{${name}}}`);
+  };
+
   const variableExplorerInner = (
     <>
-      <div className="p-3 border-b">
+      <div className="border-b p-2">
         <div className="relative">
-          <Search className="absolute left-2.5 top-2 h-4 w-4 text-slate-400" />
+          <Search className="absolute left-2 top-1.5 h-3.5 w-3.5 text-slate-400" />
           <input
             type="text"
             placeholder="Search..."
             value={variablesQuery}
             onChange={(e) => setVariablesQuery(e.target.value)}
-            className="w-full pl-9 pr-4 py-1.5 text-xs border border-slate-200 rounded-md bg-white shadow-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded border border-slate-200 bg-white py-1 pl-7 pr-2 text-[11px] shadow-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
           />
           {variablesQuery && (
             <button
               type="button"
               onClick={() => setVariablesQuery("")}
-              className="absolute right-2.5 top-2 h-4 w-4 text-slate-400 hover:text-slate-600"
+              className="absolute right-1.5 top-1.5 text-slate-400 hover:text-slate-600"
             >
-              <X className="w-3 h-3" />
+              <X className="h-3 w-3" />
             </button>
           )}
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto p-3 space-y-5 min-h-0">
+      <div className="min-h-0 flex-1 space-y-3 overflow-auto p-2">
         {PROMPT_VARIABLES.map((group) => {
           const filteredVars = group.vars.filter(
             (v) =>
@@ -328,29 +333,27 @@ export default function PromptsPage() {
           if (filteredVars.length === 0) return null;
 
           return (
-            <div key={group.group} className="space-y-2">
-              <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 border-b border-slate-100 pb-1">
+            <div key={group.group} className="space-y-1">
+              <h4 className="border-b border-slate-100 pb-0.5 text-[9px] font-bold uppercase tracking-wider text-slate-500">
                 {group.group}
               </h4>
-              <div className="space-y-1.5">
+              <div className="space-y-0.5">
                 {filteredVars.map((v) => (
-                  <div key={v.name} className="flex flex-col text-[11px] group/var">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard.writeText(`{{${v.name}}}`);
-                        toast.success(`Copied {{${v.name}}}`);
-                      }}
-                      className="flex items-center text-[10px] justify-between font-mono text-blue-700 bg-blue-50/50 px-2 py-1 rounded border border-blue-100 hover:bg-blue-100 transition-colors cursor-pointer text-left w-full relative"
-                      title="Click to copy"
-                    >
-                      <span className="truncate pr-4">{`{{${v.name}}}`}</span>
-                      <Copy className="w-3 h-3 shrink-0 text-blue-500 opacity-60 transition-opacity hover:opacity-100 absolute right-1.5" />
-                    </button>
-                    <span className="text-slate-500 mt-[2px] px-1 truncate leading-tight" title={v.desc}>
-                      {v.desc}
-                    </span>
-                  </div>
+                  <button
+                    key={v.name}
+                    type="button"
+                    draggable
+                    title={v.desc}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData("text/plain", `{{${v.name}}}`);
+                      e.dataTransfer.effectAllowed = "copy";
+                    }}
+                    onClick={() => copyVar(v.name)}
+                    className="flex w-full items-center gap-1 rounded border border-slate-200 bg-slate-50 px-1 py-0.5 text-left font-mono text-[10px] text-teal-700 hover:bg-slate-100"
+                  >
+                    <GripVertical className="h-3 w-3 shrink-0 cursor-grab text-slate-400 active:cursor-grabbing" aria-hidden />
+                    <span className="min-w-0 flex-1 truncate">{`{{${v.name}}}`}</span>
+                  </button>
                 ))}
               </div>
             </div>
@@ -364,49 +367,289 @@ export default function PromptsPage() {
                 v.name.toLowerCase().includes(variablesQuery.toLowerCase()) ||
                 v.desc.toLowerCase().includes(variablesQuery.toLowerCase())
             ).length === 0
-        ) && <div className="text-xs text-slate-500 text-center py-4">No variables found</div>}
+        ) && <div className="py-3 text-center text-[11px] text-slate-500">No variables found</div>}
       </div>
     </>
   );
 
-  return (
-    <div className="flex h-[calc(100vh-8rem)] gap-2 xl:gap-4 min-h-0">
-      <div className="w-[220px] bg-white border rounded-lg shadow-sm flex flex-col shrink-0 min-h-0">
-        <div className="p-4 border-b bg-slate-50 font-semibold text-slate-800 rounded-t-lg">Available Agents</div>
-        <div className="flex-1 overflow-auto p-2 space-y-1 min-h-0">
-          {isLoading ? (
-            <div className="p-4 text-center text-sm text-slate-500">Loading prompts...</div>
-          ) : (
-            filteredPrompts?.map((prompt: Prompt) => {
-              const selected = (activePromptId ? activePromptId === prompt.id : filteredPrompts[0]?.id === prompt.id);
-              const skipped = prompt.skip_in_pipeline;
-              const dotClass = skipped ? "bg-amber-500" : selected ? "bg-emerald-500" : "bg-blue-400";
-              return (
-                <button
-                  key={prompt.id}
-                  type="button"
-                  onClick={() => requestSelectAgent(prompt.id)}
-                  className={`w-full text-left px-3 py-2.5 rounded-md text-sm transition-colors flex items-start gap-2 ${
-                    selected ? "bg-blue-50 text-blue-700 font-medium ring-1 ring-blue-200" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                  }`}
-                >
-                  <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dotClass}`} aria-hidden />
-                  <span className={`min-w-0 flex-1 ${skipped ? "line-through text-amber-800/90" : ""}`}>
-                    {AGENT_MAP[prompt.agent_name] || prompt.agent_name.replace(/_/g, " ")}
-                  </span>
-                </button>
-              );
-            })
-          )}
-        </div>
-      </div>
+  const attachVarDrop = (editor: { getDomNode: () => HTMLElement | null; trigger: (s: string, t: string, a: { text: string }) => void; onDidDispose: (fn: () => void) => void }) => {
+    const el = editor.getDomNode();
+    if (!el) return;
+    const onOver = (e: DragEvent) => {
+      e.preventDefault();
+      try {
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      } catch {
+        /* ignore */
+      }
+    };
+    const onDrop = (e: DragEvent) => {
+      e.preventDefault();
+      const t = e.dataTransfer?.getData("text/plain");
+      if (t) editor.trigger("keyboard", "type", { text: t });
+    };
+    el.addEventListener("dragover", onOver);
+    el.addEventListener("drop", onDrop);
+    editor.onDidDispose(() => {
+      el.removeEventListener("dragover", onOver);
+      el.removeEventListener("drop", onDrop);
+    });
+  };
 
-      <div className="flex-1 bg-white border rounded-lg shadow-sm flex flex-col min-w-0 min-h-0">
-        {activePromptListInfo && editState && !isLoadingPrompt ? (
-          <>
-            <div className="shrink-0 rounded-t-lg border-b border-slate-200 bg-white">
-              {/* Row 1: agent title, version, mobile variables, skip */}
-              <div className="flex flex-wrap items-center gap-2 px-4 py-2">
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      <h1 className="shrink-0 text-2xl font-bold tracking-tight text-slate-900">SEO Workflow Optimizer</h1>
+
+      {activePromptListInfo && editState && !isLoadingPrompt && (
+        <div className="shrink-0 rounded-lg border border-slate-300 bg-slate-200/90 px-4 py-3 shadow-sm">
+          <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+            <span className="text-sm font-semibold text-slate-800">Model Settings</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-slate-600">Model</span>
+              <ModelSelector
+                className="w-[min(100%,220px)] shrink-0"
+                value={editState.model || "openai/gpt-4o"}
+                models={orModels || ["openai/gpt-4o"]}
+                onChange={(m) => setEditState((prev) => (prev ? { ...prev, model: m } : null))}
+              />
+            </div>
+
+            <div className="flex min-w-[140px] flex-col gap-0.5">
+              <label className="flex items-center gap-1 text-[11px] text-slate-700">
+                <input type="checkbox" className="rounded border-slate-400 text-blue-600" checked disabled />
+                <span>Temperature</span>
+              </label>
+              <input
+                type="range"
+                min={0}
+                max={2}
+                step={0.1}
+                value={editState.temperature ?? 0.7}
+                onChange={(e) =>
+                  setEditState((prev) => (prev ? { ...prev, temperature: parseFloat(e.target.value) } : null))
+                }
+                className="h-1.5 w-full cursor-pointer accent-blue-600"
+              />
+              <input
+                type="number"
+                step={0.1}
+                min={0}
+                max={2}
+                value={editState.temperature ?? 0.7}
+                onChange={(e) => setEditState((prev) => (prev ? { ...prev, temperature: parseFloat(e.target.value) } : null))}
+                onBlur={(e) => {
+                  const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, 0), 2);
+                  setEditState((prev) => (prev ? { ...prev, temperature: val } : null));
+                }}
+                className="w-full rounded border border-slate-300 bg-white px-1 py-0.5 text-right font-mono text-[11px]"
+              />
+            </div>
+
+            <div className="flex min-w-[140px] flex-col gap-0.5">
+              <label className="flex items-center gap-1 text-[11px] text-slate-700">
+                <input
+                  type="checkbox"
+                  className="rounded border-slate-400 text-blue-600"
+                  checked={paramsEnabled.freq}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setParamsEnabled((p) => ({ ...p, freq: checked }));
+                    if (!checked) setEditState((prev) => (prev ? { ...prev, frequency_penalty: 0.0 } : null));
+                  }}
+                />
+                <span>Freq. Penalty</span>
+              </label>
+              <input
+                type="range"
+                min={-2}
+                max={2}
+                step={0.1}
+                disabled={!paramsEnabled.freq}
+                value={editState.frequency_penalty ?? 0}
+                onChange={(e) =>
+                  setEditState((prev) => (prev ? { ...prev, frequency_penalty: parseFloat(e.target.value) } : null))
+                }
+                className="h-1.5 w-full cursor-pointer accent-blue-600 disabled:opacity-40"
+              />
+              <input
+                type="number"
+                step={0.1}
+                min={-2}
+                max={2}
+                disabled={!paramsEnabled.freq}
+                value={editState.frequency_penalty ?? 0.0}
+                onChange={(e) => setEditState((prev) => (prev ? { ...prev, frequency_penalty: parseFloat(e.target.value) } : null))}
+                onBlur={(e) => {
+                  const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, -2), 2);
+                  setEditState((prev) => (prev ? { ...prev, frequency_penalty: val } : null));
+                }}
+                className="w-full rounded border border-slate-300 bg-white px-1 py-0.5 text-right font-mono text-[11px] disabled:opacity-40"
+              />
+            </div>
+
+            <div className="flex min-w-[140px] flex-col gap-0.5">
+              <label className="flex items-center gap-1 text-[11px] text-slate-700">
+                <input
+                  type="checkbox"
+                  className="rounded border-slate-400 text-blue-600"
+                  checked={paramsEnabled.pres}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setParamsEnabled((p) => ({ ...p, pres: checked }));
+                    if (!checked) setEditState((prev) => (prev ? { ...prev, presence_penalty: 0.0 } : null));
+                  }}
+                />
+                <span>Pres. Penalty</span>
+              </label>
+              <input
+                type="range"
+                min={-2}
+                max={2}
+                step={0.1}
+                disabled={!paramsEnabled.pres}
+                value={editState.presence_penalty ?? 0}
+                onChange={(e) =>
+                  setEditState((prev) => (prev ? { ...prev, presence_penalty: parseFloat(e.target.value) } : null))
+                }
+                className="h-1.5 w-full cursor-pointer accent-blue-600 disabled:opacity-40"
+              />
+              <input
+                type="number"
+                step={0.1}
+                min={-2}
+                max={2}
+                disabled={!paramsEnabled.pres}
+                value={editState.presence_penalty ?? 0.0}
+                onChange={(e) => setEditState((prev) => (prev ? { ...prev, presence_penalty: parseFloat(e.target.value) } : null))}
+                onBlur={(e) => {
+                  const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, -2), 2);
+                  setEditState((prev) => (prev ? { ...prev, presence_penalty: val } : null));
+                }}
+                className="w-full rounded border border-slate-300 bg-white px-1 py-0.5 text-right font-mono text-[11px] disabled:opacity-40"
+              />
+            </div>
+
+            <div className="flex min-w-[140px] flex-col gap-0.5">
+              <label className="flex items-center gap-1 text-[11px] text-slate-700">
+                <input
+                  type="checkbox"
+                  className="rounded border-slate-400 text-blue-600"
+                  checked={paramsEnabled.top}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setParamsEnabled((p) => ({ ...p, top: checked }));
+                    if (!checked) setEditState((prev) => (prev ? { ...prev, top_p: 1.0 } : null));
+                  }}
+                />
+                <span>Top P</span>
+              </label>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                disabled={!paramsEnabled.top}
+                value={editState.top_p ?? 1}
+                onChange={(e) =>
+                  setEditState((prev) => (prev ? { ...prev, top_p: parseFloat(e.target.value) } : null))
+                }
+                className="h-1.5 w-full cursor-pointer accent-blue-600 disabled:opacity-40"
+              />
+              <input
+                type="number"
+                step={0.1}
+                min={0}
+                max={1}
+                disabled={!paramsEnabled.top}
+                value={editState.top_p ?? 1.0}
+                onChange={(e) => setEditState((prev) => (prev ? { ...prev, top_p: parseFloat(e.target.value) } : null))}
+                onBlur={(e) => {
+                  const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, 0), 1);
+                  setEditState((prev) => (prev ? { ...prev, top_p: val } : null));
+                }}
+                className="w-full rounded border border-slate-300 bg-white px-1 py-0.5 text-right font-mono text-[11px] disabled:opacity-40"
+              />
+            </div>
+
+            <label className="ml-auto flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-800">
+              <input
+                type="checkbox"
+                className="rounded border-orange-400 text-orange-500 focus:ring-orange-500"
+                checked={editState.skip_in_pipeline || false}
+                onChange={(e) => setEditState((prev) => (prev ? { ...prev, skip_in_pipeline: e.target.checked } : null))}
+              />
+              Skip in pipeline
+            </label>
+
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsTestOpen((o) => !o);
+                  if (isTestOpen) setTestTab("context");
+                }}
+                className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+                  isTestOpen ? "border-blue-400 bg-blue-100 text-blue-800" : "border-slate-400 bg-white text-slate-800 hover:bg-slate-50"
+                }`}
+              >
+                <Play className="h-4 w-4" /> Test
+              </button>
+              <button
+                type="button"
+                onClick={() => saveMutation.mutate(editState)}
+                disabled={saveMutation.isPending || !isDirty}
+                className="relative inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-70"
+              >
+                {isDirty && (
+                  <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-white" aria-hidden />
+                )}
+                <Save className="h-4 w-4 fill-current" />
+                {isDirty ? "Save*" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="flex min-h-0 flex-1 gap-2 xl:gap-3">
+        <div className="flex w-[240px] shrink-0 flex-col overflow-hidden rounded-lg border border-slate-700 bg-[#1e293b] min-h-0">
+          <div className="shrink-0 border-b border-slate-600 px-3 py-3 text-sm font-semibold text-white">Available Agents</div>
+          <div className="min-h-0 flex-1 space-y-1 overflow-auto p-2">
+            {isLoading ? (
+              <div className="p-4 text-center text-sm text-slate-400">Loading prompts...</div>
+            ) : (
+              filteredPrompts?.map((prompt: Prompt) => {
+                const selected = activePromptId
+                  ? activePromptId === prompt.id
+                  : filteredPrompts?.[0]?.id === prompt.id;
+                const skipped = prompt.skip_in_pipeline;
+                const dotClass = skipped ? "bg-amber-400" : selected ? "bg-emerald-400" : "bg-blue-400";
+                return (
+                  <button
+                    key={prompt.id}
+                    type="button"
+                    onClick={() => requestSelectAgent(prompt.id)}
+                    className={`flex w-full items-start gap-2 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
+                      selected
+                        ? "bg-blue-600 font-medium text-white"
+                        : "text-slate-200 hover:bg-slate-700"
+                    }`}
+                  >
+                    <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dotClass}`} aria-hidden />
+                    <span className={`min-w-0 flex-1 ${skipped ? "text-amber-200 line-through" : ""}`}>
+                      {AGENT_MAP[prompt.agent_name] || prompt.agent_name.replace(/_/g, " ")}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-none border border-slate-200 bg-white shadow-sm">
+          {activePromptListInfo && editState && !isLoadingPrompt ? (
+            <>
+              <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-200 px-3 py-2">
                 <h2 className="min-w-0 flex-1 text-lg font-semibold capitalize text-slate-800 truncate">
                   {AGENT_MAP[activePromptListInfo.agent_name] || activePromptListInfo.agent_name.replace(/_/g, " ")}
                 </h2>
@@ -469,213 +712,70 @@ export default function PromptsPage() {
                   <PanelRightOpen className="h-3.5 w-3.5" />
                   Variables ({VAR_COUNT})
                 </button>
-                <label className="ml-auto flex shrink-0 cursor-pointer items-center gap-2 text-xs font-medium text-slate-700">
-                  <input
-                    type="checkbox"
-                    className="rounded border-orange-300 text-orange-500 focus:ring-orange-500"
-                    checked={editState.skip_in_pipeline || false}
-                    onChange={(e) => setEditState((prev) => (prev ? { ...prev, skip_in_pipeline: e.target.checked } : null))}
-                  />
-                  Skip in pipeline
-                </label>
               </div>
 
-              {/* Row 2: compact model + params + Test / Save */}
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-slate-100 bg-slate-50/90 px-4 py-2">
-                <span className="text-xs font-medium text-slate-500">Model</span>
-                <ModelSelector
-                  className="w-[min(100%,220px)] shrink-0"
-                  value={editState.model || "openai/gpt-4o"}
-                  models={orModels || ["openai/gpt-4o"]}
-                  onChange={(m) => setEditState((prev) => (prev ? { ...prev, model: m } : null))}
-                />
-
-                <label className="flex items-center gap-1.5 text-xs text-slate-700">
-                  <input type="checkbox" className="rounded border-slate-300 text-blue-600" checked disabled />
-                  <span className="whitespace-nowrap">Temperature</span>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    max="2"
-                    value={editState.temperature ?? 0.7}
-                    onChange={(e) => setEditState((prev) => (prev ? { ...prev, temperature: parseFloat(e.target.value) } : null))}
-                    onBlur={(e) => {
-                      const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, 0), 2);
-                      setEditState((prev) => (prev ? { ...prev, temperature: val } : null));
-                    }}
-                    className="w-16 rounded border border-slate-200 bg-white px-1 py-0.5 text-right font-mono text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
-                </label>
-
-                <label className="flex items-center gap-1.5 text-xs text-slate-700">
-                  <input
-                    type="checkbox"
-                    className="rounded border-slate-300 text-blue-600"
-                    checked={paramsEnabled.freq}
-                    onChange={(e) => {
-                      const checked = e.target.checked;
-                      setParamsEnabled((p) => ({ ...p, freq: checked }));
-                      if (!checked) setEditState((prev) => (prev ? { ...prev, frequency_penalty: 0.0 } : null));
-                    }}
-                  />
-                  <span className="whitespace-nowrap">Freq. Penalty</span>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="-2"
-                    max="2"
-                    disabled={!paramsEnabled.freq}
-                    value={editState.frequency_penalty ?? 0.0}
-                    onChange={(e) => setEditState((prev) => (prev ? { ...prev, frequency_penalty: parseFloat(e.target.value) } : null))}
-                    onBlur={(e) => {
-                      const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, -2), 2);
-                      setEditState((prev) => (prev ? { ...prev, frequency_penalty: val } : null));
-                    }}
-                    className="w-16 rounded border border-slate-200 bg-white px-1 py-0.5 text-right font-mono text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-40"
-                  />
-                </label>
-
-                <label className="flex items-center gap-1.5 text-xs text-slate-700">
-                  <input
-                    type="checkbox"
-                    className="rounded border-slate-300 text-blue-600"
-                    checked={paramsEnabled.pres}
-                    onChange={(e) => {
-                      const checked = e.target.checked;
-                      setParamsEnabled((p) => ({ ...p, pres: checked }));
-                      if (!checked) setEditState((prev) => (prev ? { ...prev, presence_penalty: 0.0 } : null));
-                    }}
-                  />
-                  <span className="whitespace-nowrap">Pres. Penalty</span>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="-2"
-                    max="2"
-                    disabled={!paramsEnabled.pres}
-                    value={editState.presence_penalty ?? 0.0}
-                    onChange={(e) => setEditState((prev) => (prev ? { ...prev, presence_penalty: parseFloat(e.target.value) } : null))}
-                    onBlur={(e) => {
-                      const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, -2), 2);
-                      setEditState((prev) => (prev ? { ...prev, presence_penalty: val } : null));
-                    }}
-                    className="w-16 rounded border border-slate-200 bg-white px-1 py-0.5 text-right font-mono text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-40"
-                  />
-                </label>
-
-                <label className="flex items-center gap-1.5 text-xs text-slate-700">
-                  <input
-                    type="checkbox"
-                    className="rounded border-slate-300 text-blue-600"
-                    checked={paramsEnabled.top}
-                    onChange={(e) => {
-                      const checked = e.target.checked;
-                      setParamsEnabled((p) => ({ ...p, top: checked }));
-                      if (!checked) setEditState((prev) => (prev ? { ...prev, top_p: 1.0 } : null));
-                    }}
-                  />
-                  <span className="whitespace-nowrap">Top P</span>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    max="1"
-                    disabled={!paramsEnabled.top}
-                    value={editState.top_p ?? 1.0}
-                    onChange={(e) => setEditState((prev) => (prev ? { ...prev, top_p: parseFloat(e.target.value) } : null))}
-                    onBlur={(e) => {
-                      const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, 0), 1);
-                      setEditState((prev) => (prev ? { ...prev, top_p: val } : null));
-                    }}
-                    className="w-16 rounded border border-slate-200 bg-white px-1 py-0.5 text-right font-mono text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-40"
-                  />
-                </label>
-
-                <div className="ml-auto flex shrink-0 items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsTestOpen((o) => !o);
-                      if (isTestOpen) setTestTab("context");
-                    }}
-                    className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
-                      isTestOpen ? "border-blue-300 bg-blue-100 text-blue-800" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
-                    }`}
-                  >
-                    <Play className="h-3.5 w-3.5" /> Test
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => saveMutation.mutate(editState)}
-                    disabled={saveMutation.isPending || !isDirty}
-                    className="relative inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-70"
-                  >
-                    {isDirty && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-white" aria-hidden />}
-                    <Save className="h-3.5 w-3.5" />
-                    {isDirty ? "Save*" : "Save"}
-                  </button>
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden xl:flex-row xl:divide-x xl:divide-slate-200">
+                  <div className="flex min-h-[180px] min-w-0 flex-1 flex-col border-b border-slate-200 xl:border-b-0">
+                    <div className="shrink-0 border-b border-slate-700 bg-slate-800 px-2.5 py-2 text-xs font-bold uppercase tracking-wider text-white">
+                      System Prompt
+                    </div>
+                    <div className="relative min-h-0 flex-1 bg-[#1e1e1e]">
+                      <Editor
+                        height="100%"
+                        language="markdown"
+                        theme="vs-dark"
+                        value={editState.system_prompt || ""}
+                        onChange={(val) => setEditState((prev) => (prev ? { ...prev, system_prompt: val || "" } : null))}
+                        onMount={(ed) => attachVarDrop(ed)}
+                        options={{ minimap: { enabled: false }, wordWrap: "on", padding: { top: 16 } }}
+                        className="rounded-none"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex min-h-[180px] min-w-0 flex-1 flex-col">
+                    <div className="shrink-0 border-b border-slate-700 bg-slate-800 px-2.5 py-2 text-xs font-bold uppercase tracking-wider text-white">
+                      User Prompt
+                    </div>
+                    <div className="relative min-h-0 flex-1 bg-[#1e1e1e]">
+                      <Editor
+                        height="100%"
+                        language="markdown"
+                        theme="vs-dark"
+                        value={editState.user_prompt || ""}
+                        onChange={(val) => setEditState((prev) => (prev ? { ...prev, user_prompt: val || "" } : null))}
+                        onMount={(ed) => attachVarDrop(ed)}
+                        options={{ minimap: { enabled: false }, wordWrap: "on", padding: { top: 16 } }}
+                        className="rounded-none"
+                      />
+                    </div>
+                  </div>
                 </div>
+
+                {isTestOpen && editState.id && (
+                  <PromptTestPanel
+                    promptId={editState.id}
+                    model={editState.model || "openai/gpt-4o"}
+                    agentLabel={AGENT_MAP[activePromptListInfo.agent_name] || activePromptListInfo.agent_name}
+                    testTab={testTab}
+                    setTestTab={setTestTab}
+                    onClose={() => setIsTestOpen(false)}
+                  />
+                )}
               </div>
-            </div>
-
-            <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-              <div className="flex-1 flex flex-col xl:flex-row min-h-0 divide-y xl:divide-y-0 xl:divide-x overflow-hidden">
-                <div className="flex-1 flex flex-col min-h-[200px] min-w-0">
-                  <div className="p-2.5 bg-slate-100 text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 border-b">
-                    System Prompt
-                  </div>
-                  <div className="flex-1 relative bg-[#fffffe] min-h-0">
-                    <Editor
-                      height="100%"
-                      language="markdown"
-                      theme="vs-light"
-                      value={editState.system_prompt || ""}
-                      onChange={(val) => setEditState((prev) => (prev ? { ...prev, system_prompt: val || "" } : null))}
-                      options={{ minimap: { enabled: false }, wordWrap: "on", padding: { top: 16 } }}
-                    />
-                  </div>
-                </div>
-                <div className="flex-1 flex flex-col min-h-[200px] min-w-0">
-                  <div className="p-2.5 bg-slate-100 text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 border-b">
-                    User Prompt
-                  </div>
-                  <div className="flex-1 relative bg-[#fffffe] min-h-0">
-                    <Editor
-                      height="100%"
-                      language="markdown"
-                      theme="vs-light"
-                      value={editState.user_prompt || ""}
-                      onChange={(val) => setEditState((prev) => (prev ? { ...prev, user_prompt: val || "" } : null))}
-                      options={{ minimap: { enabled: false }, wordWrap: "on", padding: { top: 16 } }}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {isTestOpen && editState.id && (
-                <PromptTestPanel
-                  promptId={editState.id}
-                  model={editState.model || "openai/gpt-4o"}
-                  agentLabel={AGENT_MAP[activePromptListInfo.agent_name] || activePromptListInfo.agent_name}
-                  testTab={testTab}
-                  setTestTab={setTestTab}
-                  onClose={() => setIsTestOpen(false)}
-                />
-              )}
-            </div>
-          </>
-        ) : (
-          <div className="flex flex-1 items-center justify-center text-slate-500">Select an agent to view and edit prompts</div>
-        )}
-      </div>
-
-      <div className="hidden xl:flex w-[280px] bg-white border rounded-lg shadow-sm flex-col shrink-0 min-h-0">
-        <div className="p-3 border-b bg-slate-50 font-semibold text-slate-800 rounded-t-lg flex items-center justify-between gap-2 shrink-0">
-          <span className="text-sm">Variable Explorer</span>
-          <span className="text-xs font-medium text-slate-600">({VAR_COUNT})</span>
+            </>
+          ) : (
+            <div className="flex flex-1 items-center justify-center text-slate-500">Select an agent to view and edit prompts</div>
+          )}
         </div>
-        <div className="flex flex-col flex-1 min-h-0">{variableExplorerInner}</div>
+
+        <div className="hidden min-h-0 w-[280px] shrink-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm xl:flex">
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2.5 font-semibold text-slate-800">
+            <span className="text-sm">Variable Explorer</span>
+            <span className="text-xs font-medium text-slate-600">({VAR_COUNT})</span>
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col">{variableExplorerInner}</div>
+        </div>
       </div>
 
       {variablesDrawerOpen && (
@@ -699,7 +799,7 @@ export default function PromptsPage() {
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="flex flex-1 flex-col min-h-0 overflow-hidden">{variableExplorerInner}</div>
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{variableExplorerInner}</div>
           </div>
         </div>
       )}
