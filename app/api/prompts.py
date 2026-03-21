@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Dict, Any
 from app.database import get_db
 from app.models.prompt import Prompt
 from app.services.llm import generate_text
+from app.services.pipeline import apply_template_vars
 
 router = APIRouter()
 
@@ -30,9 +31,16 @@ class PromptTest(BaseModel):
     presence_penalty: Optional[float] = 0.0
     top_p: Optional[float] = 1.0
 
+class PromptTestContext(BaseModel):
+    context: Dict[str, Any]
+    model: Optional[str] = None
+
 @router.get("/")
-def get_prompts(db: Session = Depends(get_db)):
-    prompts = db.query(Prompt).order_by(Prompt.agent_name, Prompt.version.desc()).all()
+def get_prompts(active_only: bool = Query(True), db: Session = Depends(get_db)):
+    query = db.query(Prompt)
+    if active_only:
+        query = query.filter(Prompt.is_active == True)
+    prompts = query.order_by(Prompt.agent_name, Prompt.version.desc()).all()
     return [{
         "id": str(p.id),
         "agent_name": p.agent_name,
@@ -94,7 +102,7 @@ def create_prompt(prompt_in: PromptCreate, db: Session = Depends(get_db)):
 @router.post("/test")
 def test_prompt(test_in: PromptTest):
     """
-    Dry run the prompt from admin UI without saving.
+    Dry run the prompt with raw text data.
     """
     try:
         text, cost, actual_model = generate_text(
@@ -107,5 +115,33 @@ def test_prompt(test_in: PromptTest):
             top_p=test_in.top_p
         )
         return {"result": text, "cost": cost, "model_used": actual_model}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{prompt_id}/test")
+def test_prompt_by_id(prompt_id: str, test_ctx: PromptTestContext, db: Session = Depends(get_db)):
+    """
+    Dry run the prompt explicitly using an existing Prompt from the database with JSON context vars.
+    """
+    prompt = db.query(Prompt).filter(Prompt.id == prompt_id).first()
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+        
+    try:
+        system_text, _ = apply_template_vars(prompt.system_prompt, test_ctx.context)
+        user_text, _ = apply_template_vars(prompt.user_prompt or "", test_ctx.context)
+        
+        target_model = test_ctx.model if test_ctx.model else prompt.model
+        
+        text, cost, actual_model = generate_text(
+            system_prompt=system_text,
+            user_prompt=user_text,
+            model=target_model,
+            temperature=prompt.temperature,
+            frequency_penalty=prompt.frequency_penalty,
+            presence_penalty=prompt.presence_penalty,
+            top_p=prompt.top_p
+        )
+        return {"output": text, "usage": {"cost": cost, "total_tokens": "?"}, "model_used": actual_model}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

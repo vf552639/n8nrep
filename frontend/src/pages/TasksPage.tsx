@@ -171,16 +171,31 @@ export default function TasksPage() {
 
 function CreateTaskModal({ onClose, sites }: { onClose: () => void, sites: any[] }) {
   const queryClient = useQueryClient();
+  const { data: authors } = useQuery({
+    queryKey: ["authors"],
+    queryFn: () => import("@/api/authors").then(m => m.authorsApi.getAll()),
+  });
+
   const [formData, setFormData] = useState({
     main_keyword: "",
+    additional_keywords: "",
+    priority: 0,
     country: "US",
     language: "en",
     target_site_id: "",
+    author_id: "",
     page_type: "article"
   });
 
   const mutation = useMutation({
-    mutationFn: (data: any) => tasksApi.create(data),
+    mutationFn: (data: any) => {
+      // transform priority to number, null author if empty
+      const payload = { ...data, priority: Number(data.priority) };
+      if (!payload.author_id) {
+          delete payload.author_id;
+      }
+      return tasksApi.create(payload);
+    },
     onSuccess: () => {
       toast.success("Task created successfully");
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
@@ -200,60 +215,101 @@ function CreateTaskModal({ onClose, sites }: { onClose: () => void, sites: any[]
 
   return (
     <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden border border-slate-200">
-        <div className="px-6 py-4 border-b flex justify-between items-center bg-slate-50/50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden border border-slate-200 flex flex-col max-h-[90vh]">
+        <div className="px-6 py-4 border-b flex justify-between items-center bg-slate-50/50 shrink-0">
           <h2 className="text-lg font-bold text-slate-800">Create New Task</h2>
           <button onClick={onClose} className="p-1 hover:bg-slate-200 rounded-md transition-colors text-slate-500 hover:text-slate-700"><X className="w-5 h-5" /></button>
         </div>
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Keyword *</label>
-            <input 
-              required
-              className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
-              value={formData.main_keyword} 
-              onChange={e => setFormData({...formData, main_keyword: e.target.value})} 
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
+        <div className="p-6 overflow-y-auto flex-1">
+          <form id="create-task-form" onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Country</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Keyword *</label>
               <input 
+                required
                 className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
-                value={formData.country} 
-                onChange={e => setFormData({...formData, country: e.target.value})} 
+                value={formData.main_keyword} 
+                onChange={e => setFormData({...formData, main_keyword: e.target.value})} 
               />
             </div>
+            
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Language</label>
-              <input 
-                className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
-                value={formData.language} 
-                onChange={e => setFormData({...formData, language: e.target.value})} 
+              <label className="block text-sm font-medium text-slate-700 mb-1">Additional Keywords</label>
+              <textarea 
+                className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none h-20" 
+                placeholder="Comma separated secondary keywords..."
+                value={formData.additional_keywords} 
+                onChange={e => setFormData({...formData, additional_keywords: e.target.value})} 
               />
             </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Target Site *</label>
-            <select 
-              required
-              className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white" 
-              value={formData.target_site_id} 
-              onChange={e => setFormData({...formData, target_site_id: e.target.value})}
-            >
-              <option value="" disabled>Select a site...</option>
-              {sites?.map((s: any) => (
-                 <option key={s.id} value={s.id}>{s.domain}</option>
-              ))}
-            </select>
-          </div>
-          <div className="pt-4 flex justify-end gap-3 border-t">
-            <button type="button" onClick={onClose} className="px-4 py-2 font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Cancel</button>
-            <button type="submit" disabled={mutation.isPending} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors shadow-sm disabled:opacity-50">
-              {mutation.isPending ? "Creating..." : "Create Task"}
-            </button>
-          </div>
-        </form>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Target Site *</label>
+                <select 
+                  required
+                  className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white" 
+                  value={formData.target_site_id} 
+                  onChange={e => setFormData({...formData, target_site_id: e.target.value})}
+                >
+                  <option value="" disabled>Select a site...</option>
+                  {sites?.map((s: any) => (
+                     <option key={s.id} value={s.id}>{s.domain}</option>
+                  ))}
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Author</label>
+                <select 
+                  className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white" 
+                  value={formData.author_id} 
+                  onChange={e => setFormData({...formData, author_id: e.target.value})}
+                >
+                  <option value="">No author (Auto)</option>
+                  {authors?.map((a: any) => (
+                     <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Country</label>
+                <input 
+                  className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
+                  value={formData.country} 
+                  onChange={e => setFormData({...formData, country: e.target.value})} 
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Language</label>
+                <input 
+                  className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
+                  value={formData.language} 
+                  onChange={e => setFormData({...formData, language: e.target.value})} 
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Priority</label>
+                <select 
+                  className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white" 
+                  value={formData.priority} 
+                  onChange={e => setFormData({...formData, priority: Number(e.target.value)})}
+                >
+                  <option value={0}>Normal (0)</option>
+                  <option value={1}>High (1)</option>
+                </select>
+              </div>
+            </div>
+          </form>
+        </div>
+        <div className="px-6 py-4 flex justify-end gap-3 border-t bg-slate-50 shrink-0">
+          <button type="button" onClick={onClose} className="px-4 py-2 font-medium text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">Cancel</button>
+          <button type="submit" form="create-task-form" disabled={mutation.isPending} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors shadow-sm disabled:opacity-50">
+            {mutation.isPending ? "Creating..." : "Create Task"}
+          </button>
+        </div>
       </div>
     </div>
   );

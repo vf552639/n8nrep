@@ -6,12 +6,30 @@ import { promptsApi } from "@/api/prompts";
 import { Prompt } from "@/types/prompt";
 import { Play, Save, Settings2, X, FileJson, Loader2 } from "lucide-react";
 
+const AGENT_MAP: Record<string, string> = {
+  "ai_structure_analysis": "AI Structure Analysis",
+  "chunk_cluster_analysis": "Chunk Cluster Analysis",
+  "competitor_structure_analysis": "Competitor Structure",
+  "final_structure_analysis": "Final Structure Analysis",
+  "structure_fact_checking": "Structure Fact-Checking",
+  "primary_generation": "Primary Generation",
+  "competitor_comparison": "Competitor Comparison",
+  "reader_opinion": "Reader Opinion",
+  "interlinking_citations": "Interlinking & Citations",
+  "improver": "Improver",
+  "final_editing": "Final Editing",
+  "content_fact_checking": "Content Fact-Checking",
+  "html_structure": "HTML Structure",
+  "meta_generation": "Meta Generation"
+};
+
 export default function PromptsPage() {
   const queryClient = useQueryClient();
   const [activePromptId, setActivePromptId] = useState<string | null>(null);
   const [editState, setEditState] = useState<Partial<Prompt> | null>(null);
   const [isTestOpen, setIsTestOpen] = useState(false);
 
+  // default query without active_only fetches the filtered list automatically via backend default
   const { data: prompts, isLoading } = useQuery({
     queryKey: ["prompts"],
     queryFn: () => promptsApi.getAll(),
@@ -51,7 +69,7 @@ export default function PromptsPage() {
                     : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                 }`}
               >
-                {prompt.agent_name.replace(/_/g, " ")}
+                {AGENT_MAP[prompt.agent_name] || prompt.agent_name.replace(/_/g, " ")}
               </button>
             ))
           )}
@@ -63,7 +81,9 @@ export default function PromptsPage() {
           <>
             <div className="p-4 border-b flex flex-wrap justify-between items-center bg-slate-50 rounded-t-lg shrink-0 gap-4">
               <div>
-                <h2 className="font-semibold text-slate-800 capitalize text-lg">{activePrompt.agent_name.replace(/_/g, " ")}</h2>
+                <h2 className="font-semibold text-slate-800 capitalize text-lg">
+                  {AGENT_MAP[activePrompt.agent_name] || activePrompt.agent_name.replace(/_/g, " ")}
+                </h2>
                 <div className="text-xs text-slate-500 mt-1 flex gap-4">
                   <span className="flex items-center gap-1">v{activePrompt.version}</span>
                 </div>
@@ -77,7 +97,7 @@ export default function PromptsPage() {
                      className="text-xs border rounded p-1"
                    >
                      <option value="gpt-4o">gpt-4o</option>
-                     <option value="gpt-4 Turbo">gpt-4 Turbo</option>
+                     <option value="gpt-4-turbo">gpt-4 Turbo</option>
                      <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
                      <option value="claude-3-5-sonnet-20240620">claude-3.5-sonnet</option>
                    </select>
@@ -211,7 +231,7 @@ function PromptTestRunner({ prompt, onClose }: { prompt: Prompt, onClose: () => 
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl p-0 flex flex-col min-h-[600px] overflow-hidden">
         <div className="px-6 py-4 border-b bg-slate-50 flex justify-between items-center shrink-0">
-           <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">Test Prompt: <span className="text-blue-600 font-mono text-base">{prompt.agent_name}</span></h2>
+           <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">Test Prompt: <span className="text-blue-600 font-mono text-base">{AGENT_MAP[prompt.agent_name] || prompt.agent_name}</span></h2>
            <button onClick={onClose} className="p-1 hover:bg-slate-200 rounded text-slate-500 transition-colors"><X className="w-5 h-5"/></button>
         </div>
         

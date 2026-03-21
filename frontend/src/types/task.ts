@@ -1,6 +1,8 @@
 export interface Task {
   id: string;
   main_keyword: string;
+  additional_keywords?: string;
+  priority?: number;
   country: string;
   language: string;
   target_site_id?: string;
@@ -17,6 +19,8 @@ export interface Task {
 
 export interface TaskCreate {
   main_keyword: string;
+  additional_keywords?: string;
+  priority?: number;
   country: string;
   language: string;
   target_site_id: string;
