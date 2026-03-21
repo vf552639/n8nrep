@@ -34,6 +34,9 @@ export interface StepResult {
   result?: any;
   error?: string;
   timestamp?: string;
+  resolved_prompts?: { system_prompt?: string; user_prompt?: string } | null;
+  variables_snapshot?: Record<string, string> | null;
+  exclude_words_violations?: Record<string, number> | string[] | null;
 }
 
 export interface TaskStepResponse {

@@ -405,64 +405,65 @@ export default function PromptsPage() {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
+    <div className="flex h-full min-h-0 flex-col gap-3 px-3">
       <h1 className="shrink-0 text-xl font-bold text-slate-900">SEO Workflow Optimizer</h1>
 
       {activePromptListInfo && editState && !isLoadingPrompt && (
-        <div className="shrink-0 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <span className="text-sm font-semibold text-slate-800">Model Settings</span>
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <span className="text-xs font-medium text-slate-600">Model</span>
-              <ModelSelector
-                className="w-[min(100%,280px)] shrink-0"
-                value={editState.model || "openai/gpt-4o"}
-                models={orModels || ["openai/gpt-4o"]}
-                onChange={(m) => setEditState((prev) => (prev ? { ...prev, model: m } : null))}
-              />
-            </div>
-
-            <div className="flex min-w-0 flex-col gap-1 sm:min-w-[160px]">
-              <label className="flex items-center gap-1.5 text-xs text-slate-700">
-                <input
-                  type="checkbox"
-                  className="rounded border-slate-300 text-blue-600"
-                  checked={paramsEnabled.temp}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setParamsEnabled((p) => ({ ...p, temp: checked }));
-                    if (!checked) setEditState((prev) => (prev ? { ...prev, temperature: 1.0 } : null));
-                  }}
+        <div className="w-full min-w-0 shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <span className="shrink-0 text-xs font-medium text-slate-600">Model</span>
+                <ModelSelector
+                  className="w-[min(100%,280px)] shrink-0"
+                  value={editState.model || "openai/gpt-4o"}
+                  models={orModels || ["openai/gpt-4o"]}
+                  onChange={(m) => setEditState((prev) => (prev ? { ...prev, model: m } : null))}
                 />
-                <span className="whitespace-nowrap">Temperature</span>
-              </label>
-              <input
-                type="range"
-                min={0}
-                max={2}
-                step={0.1}
-                disabled={!paramsEnabled.temp}
-                value={editState.temperature ?? 0.7}
-                onChange={(e) =>
-                  setEditState((prev) => (prev ? { ...prev, temperature: parseFloat(e.target.value) } : null))
-                }
-                className="h-1 w-full max-w-[140px] cursor-pointer accent-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
-              />
-              <input
-                type="number"
-                step={0.1}
-                min={0}
-                max={2}
-                disabled={!paramsEnabled.temp}
-                value={editState.temperature ?? 0.7}
-                onChange={(e) => setEditState((prev) => (prev ? { ...prev, temperature: parseFloat(e.target.value) } : null))}
-                onBlur={(e) => {
-                  const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, 0), 2);
-                  setEditState((prev) => (prev ? { ...prev, temperature: val } : null));
-                }}
-                className="w-20 rounded border border-slate-200 bg-white px-2 py-0.5 text-right font-mono text-xs disabled:opacity-40"
-              />
-            </div>
+              </div>
+
+              <div className="flex min-w-0 items-center gap-2">
+                <label className="flex items-center gap-1.5 text-xs text-slate-700 whitespace-nowrap">
+                  <input
+                    type="checkbox"
+                    className="rounded border-slate-300 text-blue-600"
+                    checked={paramsEnabled.temp}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setParamsEnabled((p) => ({ ...p, temp: checked }));
+                      if (!checked) setEditState((prev) => (prev ? { ...prev, temperature: 1.0 } : null));
+                    }}
+                  />
+                  Temperature
+                </label>
+                <input
+                  type="range"
+                  min={0}
+                  max={2}
+                  step={0.1}
+                  disabled={!paramsEnabled.temp}
+                  value={editState.temperature ?? 0.7}
+                  onChange={(e) =>
+                    setEditState((prev) => (prev ? { ...prev, temperature: parseFloat(e.target.value) } : null))
+                  }
+                  className="h-1 w-24 cursor-pointer accent-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
+                />
+                <input
+                  type="number"
+                  step={0.1}
+                  min={0}
+                  max={2}
+                  disabled={!paramsEnabled.temp}
+                  value={editState.temperature ?? 0.7}
+                  onChange={(e) =>
+                    setEditState((prev) => (prev ? { ...prev, temperature: parseFloat(e.target.value) } : null))
+                  }
+                  onBlur={(e) => {
+                    const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, 0), 2);
+                    setEditState((prev) => (prev ? { ...prev, temperature: val } : null));
+                  }}
+                  className="w-16 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-right font-mono text-xs disabled:opacity-40"
+                />
+              </div>
 
             <label className="flex items-center gap-1.5 text-xs text-slate-700">
               <input
@@ -574,11 +575,11 @@ export default function PromptsPage() {
                 {isDirty ? "Save*" : "Save"}
               </button>
             </div>
-          </div>
+            </div>
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 gap-2 xl:gap-3">
+      <div className="flex min-h-0 min-w-0 flex-1 gap-2 xl:gap-3">
         <div className="flex w-[240px] shrink-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm min-h-0">
           <div className="shrink-0 border-b border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-800">
             Available Agents

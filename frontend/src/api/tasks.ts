@@ -24,6 +24,9 @@ export const tasksApi = {
     
   startAll: () => 
     api.post("/tasks/start-all").then(res => res.data),
+
+  startSelected: (taskIds: string[]) =>
+    api.post<{ started: number; msg: string }>("/tasks/start-selected", { task_ids: taskIds }).then((res) => res.data),
     
   delete: (id: string) => 
     api.delete(`/tasks/${id}`).then(res => res.data),

@@ -71,6 +71,8 @@ def get_task(task_id: str, db: Session = Depends(get_db)):
     return {
         "id": str(task.id),
         "main_keyword": task.main_keyword,
+        "country": task.country,
+        "language": task.language,
         "status": task.status,
         "total_cost": task.total_cost or 0.0,
         "page_type": task.page_type,
@@ -78,7 +80,7 @@ def get_task(task_id: str, db: Session = Depends(get_db)):
         "serp_data": task.serp_data,
         "error_log": task.error_log,
         "created_at": task.created_at.isoformat(),
-        "logs": task.logs or []
+        "logs": task.logs or [],
     }
 
 def calculate_progress(step_results: dict) -> int:
@@ -264,6 +266,51 @@ def start_all_pending(db: Session = Depends(get_db)):
     return {
         "started": len(pending_tasks), 
         "msg": f"Запущена цепочка из {len(pending_tasks)} задач (последовательно)"
+    }
+
+class StartSelectedRequest(BaseModel):
+    task_ids: List[str]
+
+@router.post("/start-selected")
+def start_selected_tasks(payload: StartSelectedRequest, db: Session = Depends(get_db)):
+    """
+    Запускает выбранные pending-задачи в виде Celery chain (последовательно).
+    """
+    from celery import chain
+
+    if not payload.task_ids:
+        return {"started": 0, "msg": "Нет задач для запуска"}
+
+    id_list: List[uuid.UUID] = []
+    for tid in payload.task_ids:
+        try:
+            id_list.append(uuid.UUID(str(tid)))
+        except ValueError:
+            continue
+
+    if not id_list:
+        return {"started": 0, "msg": "Нет задач для запуска"}
+
+    tasks = (
+        db.query(Task)
+        .filter(
+            Task.id.in_(id_list),
+            Task.status == "pending",
+            Task.project_id.is_(None),
+        )
+        .order_by(Task.priority.desc(), Task.created_at.asc())
+        .all()
+    )
+
+    if not tasks:
+        return {"started": 0, "msg": "Нет задач для запуска"}
+
+    task_chain = chain(*[process_generation_task.si(str(t.id)) for t in tasks])
+    task_chain.apply_async()
+
+    return {
+        "started": len(tasks),
+        "msg": f"Запущена цепочка из {len(tasks)} задач",
     }
 
 @router.get("/{task_id}/serp-data")

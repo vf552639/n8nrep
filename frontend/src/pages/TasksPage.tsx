@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
@@ -17,6 +17,8 @@ export default function TasksPage() {
   const [search, setSearch] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const selectAllRef = useRef<HTMLInputElement>(null);
 
   const { data: tasks, isLoading } = useQuery({
     queryKey: ["tasks", { status: statusFilter, site: siteFilter }],
@@ -51,13 +53,92 @@ export default function TasksPage() {
     }
   };
 
-  const filteredTasks = (tasks || []).filter(t => {
-    if (siteFilter && t.target_site_id !== siteFilter) return false;
-    if (search && !t.main_keyword.toLowerCase().includes(search.toLowerCase())) return false;
-    return true;
+  const startSelectedMutation = useMutation({
+    mutationFn: (ids: string[]) => tasksApi.startSelected(ids),
+    onSuccess: (data) => {
+      toast.success(data.msg || "Started selected tasks");
+      setSelectedIds(new Set());
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    },
+    onError: () => toast.error("Failed to start selected tasks"),
   });
 
-  const columns = [
+  const filteredTasks = useMemo(() => {
+    return (tasks || []).filter((t) => {
+      if (siteFilter && t.target_site_id !== siteFilter) return false;
+      if (search && !t.main_keyword.toLowerCase().includes(search.toLowerCase())) return false;
+      return true;
+    });
+  }, [tasks, siteFilter, search]);
+
+  const pendingInView = useMemo(
+    () => filteredTasks.filter((t) => t.status === "pending"),
+    [filteredTasks]
+  );
+
+  useEffect(() => {
+    const el = selectAllRef.current;
+    if (!el) return;
+    const some = pendingInView.some((t) => selectedIds.has(t.id));
+    const all = pendingInView.length > 0 && pendingInView.every((t) => selectedIds.has(t.id));
+    el.indeterminate = some && !all;
+  }, [pendingInView, selectedIds]);
+
+  const toggleSelectAllPending = useCallback(() => {
+    const ids = pendingInView.map((t) => t.id);
+    const allSelected = ids.length > 0 && ids.every((id) => selectedIds.has(id));
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        ids.forEach((id) => next.delete(id));
+      } else {
+        ids.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  }, [pendingInView, selectedIds]);
+
+  const columns = useMemo(
+    () => [
+    {
+      id: "select",
+      header: () => (
+        <input
+          ref={selectAllRef}
+          type="checkbox"
+          className="rounded border-slate-300 text-blue-600"
+          checked={pendingInView.length > 0 && pendingInView.every((t) => selectedIds.has(t.id))}
+          onChange={toggleSelectAllPending}
+          title="Select all pending"
+          aria-label="Select all pending tasks"
+        />
+      ),
+      cell: ({ row }: any) => {
+        const t = row.original;
+        if (t.status !== "pending") {
+          return <span className="inline-block w-5" aria-hidden />;
+        }
+        return (
+          <input
+            type="checkbox"
+            className="rounded border-slate-300 text-blue-600"
+            checked={selectedIds.has(t.id)}
+            title="Select task"
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => {
+              e.stopPropagation();
+              const checked = e.target.checked;
+              setSelectedIds((prev) => {
+                const next = new Set(prev);
+                if (checked) next.add(t.id);
+                else next.delete(t.id);
+                return next;
+              });
+            }}
+          />
+        );
+      },
+    },
     { accessorKey: "main_keyword", header: "Keyword" },
     { accessorKey: "country", header: "Country" },
     { 
@@ -80,7 +161,9 @@ export default function TasksPage() {
       header: "Date",
       cell: ({ row }: any) => new Date(row.original.created_at).toLocaleString()
     },
-  ];
+  ],
+  [pendingInView, selectedIds, toggleSelectAllPending]
+  );
 
   return (
     <div className="space-y-6">
@@ -146,6 +229,14 @@ export default function TasksPage() {
           </button>
           <button onClick={handleStartAll} className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg text-sm transition-colors border border-emerald-200 font-medium">
             <Play className="w-4 h-4" /> Start All
+          </button>
+          <button
+            type="button"
+            disabled={selectedIds.size === 0 || startSelectedMutation.isPending}
+            onClick={() => startSelectedMutation.mutate(Array.from(selectedIds))}
+            className="flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-sm font-medium text-violet-800 transition-colors hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Play className="w-4 h-4" /> Start Selected ({selectedIds.size})
           </button>
           <QueueControls />
         </div>
