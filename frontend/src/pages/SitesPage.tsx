@@ -5,17 +5,29 @@ import toast from "react-hot-toast";
 import { sitesApi } from "@/api/sites";
 import { Site } from "@/types/site";
 import { ReactTable } from "@/components/common/ReactTable";
-import { Plus, Globe, X } from "lucide-react";
+import { Plus, Globe, X, Trash2 } from "lucide-react";
 
 export default function SitesPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const { data: sites, isLoading } = useQuery({
     queryKey: ["sites"],
     queryFn: async () => {
       return sitesApi.getAll();
     },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => sitesApi.delete(id),
+    onSuccess: () => {
+      toast.success("Site deleted");
+      queryClient.invalidateQueries({ queryKey: ["sites"] });
+      setDeleteId(null);
+    },
+    onError: () => toast.error("Failed to delete site"),
   });
 
   const columns = [
@@ -39,6 +51,25 @@ export default function SitesPage() {
           {row.original.is_active ? "Active" : "Inactive"}
         </span>
       ) 
+    },
+    {
+      id: "actions",
+      header: "Actions",
+      enableSorting: false,
+      meta: { tdClassName: "w-12 min-w-[3rem] text-right" },
+      cell: ({ row }: any) => (
+        <button
+          type="button"
+          title="Delete site"
+          className="p-1.5 rounded-md text-red-600 hover:bg-red-50 hover:text-red-700 transition-colors"
+          onClick={(e) => {
+            e.stopPropagation();
+            setDeleteId(row.original.id);
+          }}
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+      ),
     },
   ];
 
@@ -66,6 +97,34 @@ export default function SitesPage() {
 
       {isCreateOpen && (
         <CreateSiteModal onClose={() => setIsCreateOpen(false)} />
+      )}
+
+      {deleteId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4 border">
+            <h2 className="text-lg font-semibold text-slate-900">Delete site?</h2>
+            <p className="text-sm text-slate-600">
+              Вы уверены? Будут удалены все шаблоны этого сайта.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 rounded-lg"
+                onClick={() => setDeleteId(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:opacity-50"
+                disabled={deleteMutation.isPending}
+                onClick={() => deleteMutation.mutate(deleteId)}
+              >
+                {deleteMutation.isPending ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

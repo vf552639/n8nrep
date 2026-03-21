@@ -32,16 +32,24 @@ export default function ArticlesPage() {
       accessorKey: "fact_check_status", 
       header: "Fact Check", 
       cell: ({ row }: any) => {
-        const status = row.original.fact_check_status;
-        if (!status) return <span className="text-slate-400 text-xs">N/A</span>;
-        const color = status === 'passed' ? 'text-emerald-700 bg-emerald-50' : status === 'needs_review' ? 'text-amber-700 bg-amber-50' : 'text-red-700 bg-red-50';
-        return <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide border ${color}`}>{status.replace('_', ' ')}</span>
+        const raw = (row.original.fact_check_status || "").toString().toLowerCase();
+        if (!raw) return <span className="text-slate-400 text-xs">N/A</span>;
+        const label =
+          raw === "pass" ? "pass" : raw === "warn" ? "warn" : raw === "fail" ? "fail" : raw.replace(/_/g, " ");
+        const color =
+          raw === "pass"
+            ? "text-emerald-700 bg-emerald-50 border-emerald-100"
+            : raw === "warn"
+              ? "text-amber-700 bg-amber-50 border-amber-100"
+              : raw === "fail"
+                ? "text-red-700 bg-red-50 border-red-100"
+                : "text-slate-700 bg-slate-50 border-slate-200";
+        return (
+          <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide border ${color}`}>
+            {label}
+          </span>
+        );
       }
-    },
-    { 
-      accessorKey: "cost", 
-      header: "Cost", 
-      cell: ({ row }: any) => <span className="text-emerald-600 font-mono">${row.original.cost?.toFixed(4) || "0.0000"}</span> 
     },
     { 
       accessorKey: "created_at", 

@@ -26,10 +26,17 @@ export default function ArticleDetailPage() {
       <div className="flex justify-between items-start shrink-0">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{article.title || "Untitled Article"}</h1>
-          <div className="text-sm text-slate-500 mt-2 flex gap-4 divide-x divide-slate-300">
+          {article.main_keyword && (
+            <p className="text-sm text-slate-600 mt-1">
+              Keyword: <span className="font-medium text-slate-800">{article.main_keyword}</span>
+            </p>
+          )}
+          <div className="text-sm text-slate-500 mt-2 flex flex-wrap gap-4 divide-x divide-slate-300">
             <span className="pr-4">{article.word_count || 0} words</span>
-            <span className="px-4">{article.char_count || 0} chars</span>
-            <span className="px-4 text-emerald-600 font-mono">${article.cost?.toFixed(4) || "0.0000"}</span>
+            <span className="px-4">{article.char_count ?? 0} chars</span>
+            <span className="px-4 text-emerald-600 font-mono">
+              ${(article.total_cost ?? article.cost ?? 0).toFixed(4)}
+            </span>
             <span className="pl-4">{new Date(article.created_at).toLocaleString()}</span>
           </div>
         </div>
@@ -82,15 +89,41 @@ export default function ArticleDetailPage() {
         )}
         {activeTab === "metadata" && (
           <div className="p-8 space-y-6 max-w-4xl">
+            <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+              These values are produced by the <strong className="text-slate-800">meta_generation</strong> pipeline step
+              from your final article HTML.
+            </p>
             <div>
               <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">Meta Title</h3>
               <p className="text-lg text-slate-900 bg-slate-50 p-4 rounded-lg border shadow-sm">{article.title}</p>
-              <div className="text-sm text-slate-400 mt-2 font-mono">{article.title?.length || 0} characters</div>
+              <div className="text-sm mt-2 font-mono flex flex-wrap items-center gap-2">
+                <span
+                  className={
+                    (article.title?.length || 0) >= 50 && (article.title?.length || 0) <= 60
+                      ? "text-emerald-600"
+                      : "text-red-600"
+                  }
+                >
+                  {article.title?.length || 0} characters
+                </span>
+                <span className="text-slate-400">· recommended 50–60</span>
+              </div>
             </div>
             <div>
               <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2 mt-8">Meta Description</h3>
               <p className="text-slate-900 bg-slate-50 p-4 rounded-lg border shadow-sm leading-relaxed">{article.description}</p>
-              <div className="text-sm text-slate-400 mt-2 font-mono">{article.description?.length || 0} characters</div>
+              <div className="text-sm mt-2 font-mono flex flex-wrap items-center gap-2">
+                <span
+                  className={
+                    (article.description?.length || 0) >= 150 && (article.description?.length || 0) <= 160
+                      ? "text-emerald-600"
+                      : "text-red-600"
+                  }
+                >
+                  {article.description?.length || 0} characters
+                </span>
+                <span className="text-slate-400">· recommended 150–160</span>
+              </div>
             </div>
           </div>
         )}

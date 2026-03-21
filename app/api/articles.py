@@ -9,6 +9,7 @@ import datetime
 
 from app.database import get_db
 from app.models.article import GeneratedArticle
+from app.models.task import Task
 
 router = APIRouter()
 
@@ -31,6 +32,9 @@ def get_article(article_id: str, db: Session = Depends(get_db)):
     article = db.query(GeneratedArticle).filter(GeneratedArticle.id == article_id).first()
     if not article:
         raise HTTPException(status_code=404, detail="Article not found")
+
+    task = db.query(Task).filter(Task.id == article.task_id).first()
+    html = article.html_content or ""
         
     return {
         "id": str(article.id),
@@ -42,7 +46,10 @@ def get_article(article_id: str, db: Session = Depends(get_db)):
         "fact_check_status": article.fact_check_status,
         "fact_check_issues": article.fact_check_issues,
         "needs_review": article.needs_review,
-        "created_at": article.created_at.isoformat()
+        "created_at": article.created_at.isoformat(),
+        "total_cost": float(task.total_cost) if task and task.total_cost is not None else 0.0,
+        "char_count": len(html),
+        "main_keyword": task.main_keyword if task else "",
     }
 
 @router.post("/{article_id}/issues/{issue_index}/resolve")

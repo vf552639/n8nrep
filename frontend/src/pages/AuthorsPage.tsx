@@ -6,6 +6,12 @@ import { Author } from "@/types/author";
 import { ReactTable } from "@/components/common/ReactTable";
 import { Plus, User, X } from "lucide-react";
 
+function truncateText(s: string | undefined | null, max: number) {
+  if (!s) return "—";
+  const t = String(s);
+  return t.length > max ? `${t.slice(0, max)}…` : t;
+}
+
 export default function AuthorsPage() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
 
@@ -32,10 +38,75 @@ export default function AuthorsPage() {
       header: "Language", 
       cell: ({ row }: any) => <span className="bg-slate-100 px-2 py-0.5 rounded text-sm lowercase">{row.original.language}</span> 
     },
-    { 
-      accessorKey: "model", 
-      header: "Model", 
-      cell: ({ row }: any) => <span className="text-amber-700 bg-amber-50 px-2 py-0.5 rounded text-xs font-mono">{row.original.model}</span> 
+    {
+      accessorKey: "usage_count",
+      header: "Tasks",
+      cell: ({ row }: any) => (
+        <span className="tabular-nums font-medium text-slate-700">{row.original.usage_count ?? 0}</span>
+      ),
+    },
+    {
+      accessorKey: "bio",
+      header: "Bio",
+      cell: ({ row }: any) => {
+        const raw = row.original.bio as string | undefined;
+        const short = truncateText(raw, 100);
+        return (
+          <span className="text-xs text-slate-600 max-w-[200px] block truncate" title={raw || undefined}>
+            {short}
+          </span>
+        );
+      },
+    },
+    {
+      accessorKey: "imitation",
+      header: "Tone of Voice / Imitation",
+      cell: ({ row }: any) => (
+        <span className="text-xs text-slate-600 max-w-[160px] block truncate" title={row.original.imitation}>
+          {truncateText(row.original.imitation, 80)}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "target_audience",
+      header: "Target Audience",
+      cell: ({ row }: any) => (
+        <span className="text-xs text-slate-600 max-w-[160px] block truncate" title={row.original.target_audience}>
+          {truncateText(row.original.target_audience, 80)}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "face",
+      header: "POV (Face)",
+      cell: ({ row }: any) => (
+        <span className="text-xs text-slate-600 max-w-[120px] block truncate" title={row.original.face}>
+          {truncateText(row.original.face, 60)}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "year",
+      header: "Year",
+      cell: ({ row }: any) => <span className="text-xs text-slate-600">{row.original.year || "—"}</span>,
+    },
+    {
+      accessorKey: "rhythms_style",
+      header: "Style",
+      cell: ({ row }: any) => (
+        <span className="text-xs text-slate-600 max-w-[140px] block truncate" title={row.original.rhythms_style}>
+          {truncateText(row.original.rhythms_style, 80)}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "city",
+      header: "City",
+      cell: ({ row }: any) => (
+        <span className="text-xs text-slate-600 max-w-[100px] block truncate" title={row.original.city}>
+          {row.original.city || "—"}
+        </span>
+      ),
     },
     { 
       accessorKey: "exclude_words", 
@@ -82,7 +153,6 @@ function CreateAuthorModal({ onClose }: { onClose: () => void }) {
     author: "",
     country: "US",
     language: "en",
-    model: "gpt-4o-mini",
     exclude_words: ""
   });
 
@@ -143,16 +213,6 @@ function CreateAuthorModal({ onClose }: { onClose: () => void }) {
                   className="w-full border outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-sm lowercase" 
                 />
              </div>
-           </div>
-           <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Model</label>
-              <input 
-                type="text" 
-                value={formData.model}
-                onChange={e => setFormData({...formData, model: e.target.value})}
-                className="w-full border outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-sm font-mono" 
-                placeholder="gpt-4o-mini" 
-              />
            </div>
            <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Exclude Words (comma separated)</label>

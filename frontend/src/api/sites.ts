@@ -10,6 +10,9 @@ export const sitesApi = {
     
   create: (data: Partial<Site>) => 
     api.post<Site>("/sites", data).then(res => res.data),
+
+  delete: (id: string) =>
+    api.delete(`/sites/${id}`).then((res) => res.data),
     
   getTemplates: (id: string) => 
     api.get<SiteTemplate[]>(`/sites/${id}/templates`).then(res => res.data),

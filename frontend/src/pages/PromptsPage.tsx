@@ -38,6 +38,24 @@ const AGENT_MAP: Record<string, string> = {
   meta_generation: "Meta Generation",
 };
 
+/** Same order as pipeline LLM agents in StepMonitor (ALL_STEPS minus serp + scraping). */
+const AGENT_ORDER = [
+  "ai_structure_analysis",
+  "chunk_cluster_analysis",
+  "competitor_structure_analysis",
+  "final_structure_analysis",
+  "structure_fact_checking",
+  "primary_generation",
+  "competitor_comparison",
+  "reader_opinion",
+  "interlinking_citations",
+  "improver",
+  "final_editing",
+  "content_fact_checking",
+  "html_structure",
+  "meta_generation",
+] as const;
+
 const PROMPT_VARIABLES = [
   {
     group: "Task & Project",
@@ -187,14 +205,21 @@ export default function PromptsPage() {
   const [versionMenuOpen, setVersionMenuOpen] = useState(false);
   const versionMenuRef = useRef<HTMLDivElement>(null);
 
-  const knownAgents = Object.keys(AGENT_MAP);
-
   const { data: prompts, isLoading } = useQuery({
     queryKey: ["prompts"],
     queryFn: () => promptsApi.getAll(),
   });
 
-  const filteredPrompts = prompts?.filter((p: Prompt) => knownAgents.includes(p.agent_name));
+  const filteredPrompts = useMemo(() => {
+    if (!prompts) return undefined;
+    const orderSet = new Set<string>(AGENT_ORDER);
+    const byAgent = new Map(
+      prompts
+        .filter((p: Prompt) => orderSet.has(p.agent_name))
+        .map((p: Prompt) => [p.agent_name, p])
+    );
+    return AGENT_ORDER.map((name) => byAgent.get(name)).filter(Boolean) as Prompt[];
+  }, [prompts]);
   const activePromptListInfo = filteredPrompts?.find((p) => p.id === activePromptId) || filteredPrompts?.[0];
   const derivedActiveId = activePromptId || activePromptListInfo?.id;
 

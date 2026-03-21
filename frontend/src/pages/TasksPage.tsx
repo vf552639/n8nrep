@@ -102,6 +102,8 @@ export default function TasksPage() {
     () => [
     {
       id: "select",
+      enableSorting: false,
+      meta: { tdClassName: "w-10 min-w-[2.5rem] align-middle" },
       header: () => (
         <input
           ref={selectAllRef}

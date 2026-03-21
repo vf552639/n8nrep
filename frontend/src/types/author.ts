@@ -3,7 +3,6 @@ export interface Author {
   author: string;
   country: string;
   language: string;
-  model: string;
   year?: string;
   target_audience?: string;
   style_prompt?: string;
@@ -11,4 +10,8 @@ export interface Author {
   imitation?: string;
   rhythms_style?: string;
   exclude_words?: string;
+  bio?: string;
+  city?: string;
+  /** Number of tasks using this author */
+  usage_count?: number;
 }

@@ -93,16 +93,21 @@ export function ReactTable<TData, TValue>({
                     className={`hover:bg-slate-50/50 transition-colors group ${onRowClick ? 'cursor-pointer' : ''}`}
                     onClick={() => onRowClick && onRowClick(row.original)}
                   >
-                    {row.getVisibleCells().map((cell) => (
-                      <td key={cell.id} className="py-3 px-4 whitespace-nowrap">
+                    {row.getVisibleCells().map((cell) => {
+                      const meta = cell.column.columnDef.meta as { tdClassName?: string } | undefined
+                      return (
+                      <td
+                        key={cell.id}
+                        className={`py-3 px-4 ${meta?.tdClassName ?? "whitespace-nowrap"}`}
+                      >
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </td>
-                    ))}
+                    )})}
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={columns.length} className="h-32 text-center text-slate-500">
+                  <td colSpan={table.getAllColumns().length || columns.length} className="h-32 text-center text-slate-500">
                     No results found.
                   </td>
                 </tr>

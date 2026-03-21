@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from pydantic import BaseModel
 
 from app.database import get_db
 from app.models.author import Author
+from app.models.task import Task
 
 router = APIRouter()
 
@@ -24,6 +26,13 @@ class AuthorCreate(BaseModel):
 @router.get("/")
 def get_authors(db: Session = Depends(get_db)):
     authors = db.query(Author).all()
+    usage_rows = (
+        db.query(Author.id, func.count(Task.id))
+        .outerjoin(Task, Task.author_id == Author.id)
+        .group_by(Author.id)
+        .all()
+    )
+    usage_counts = {int(row[0]): int(row[1]) for row in usage_rows}
     return [{
         "id": str(a.id),
         "name": a.author, # Keeping 'name' key for frontend backward compatibility, or mapping to author
@@ -38,7 +47,8 @@ def get_authors(db: Session = Depends(get_db)):
         "face": a.face,
         "target_audience": a.target_audience,
         "rhythms_style": a.rhythms_style,
-        "exclude_words": a.exclude_words
+        "exclude_words": a.exclude_words,
+        "usage_count": usage_counts.get(int(a.id), 0),
     } for a in authors]
 
 @router.post("/")
