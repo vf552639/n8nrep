@@ -4,7 +4,7 @@ import Editor from "@monaco-editor/react";
 import toast from "react-hot-toast";
 import { promptsApi } from "@/api/prompts";
 import { Prompt } from "@/types/prompt";
-import { Play, Save, Settings2, X, FileJson, Loader2 } from "lucide-react";
+import { Play, Save, Settings2, X, FileJson, Loader2, ChevronDown, ChevronRight, Search, Copy } from "lucide-react";
 
 const AGENT_MAP: Record<string, string> = {
   "ai_structure_analysis": "AI Structure Analysis",
@@ -23,11 +23,83 @@ const AGENT_MAP: Record<string, string> = {
   "meta_generation": "Meta Generation"
 };
 
+const PROMPT_VARIABLES = [
+  {
+    group: "Task & Project",
+    vars: [
+      { name: "keyword", desc: "Главное ключевое слово" },
+      { name: "additional_keywords", desc: "Доп. ключевые слова (LSI)" },
+      { name: "country", desc: "Страна" },
+      { name: "language", desc: "Язык" },
+      { name: "page_type", desc: "Тип страницы (homepage, category, article)" },
+      { name: "site_name", desc: "Название целевого сайта" },
+      { name: "site_template_html", desc: "HTML-шаблон целевого сайта" },
+      { name: "site_template_name", desc: "Название шаблона сайта" },
+    ]
+  },
+  {
+    group: "Author & Style",
+    vars: [
+      { name: "author", desc: "Имя автора" },
+      { name: "author_style", desc: "Биография / описание автора" },
+      { name: "imitation", desc: "Подражание (Mimicry)" },
+      { name: "target_audience", desc: "Целевая аудитория" },
+      { name: "face", desc: "Лицо повествования (POV)" },
+      { name: "year", desc: "Год" },
+      { name: "rhythms_style", desc: "Ритм и стиль" },
+      { name: "exclude_words", desc: "Слова-исключения (глобальные)" },
+    ]
+  },
+  {
+    group: "Competitors & SERP",
+    vars: [
+      { name: "competitors_headers", desc: "Структура h1-h6 конкурентов (JSON)" },
+      { name: "merged_markdown", desc: "Объединённый текст конкурентов" },
+      { name: "avg_word_count", desc: "Среднее кол-во слов у конкурентов" },
+      { name: "competitor_titles", desc: "Titles конкурентов из SERP (JSON)" },
+      { name: "competitor_descriptions", desc: "Descriptions конкурентов (JSON)" },
+      { name: "highlighted_keywords", desc: "Выделенные слова в сниппетах (JSON)" },
+      { name: "paa_with_answers", desc: "People Also Ask с ответами" },
+      { name: "featured_snippet", desc: "Featured Snippet (JSON)" },
+      { name: "knowledge_graph", desc: "Knowledge Graph (JSON)" },
+      { name: "ai_overview", desc: "Google AI Overview текст" },
+      { name: "answer_box", desc: "Answer Box текст" },
+      { name: "serp_features", desc: "SERP-элементы на странице (JSON)" },
+      { name: "search_intent_signals", desc: "Сигналы поискового интента (JSON)" },
+      { name: "related_searches", desc: "Related Searches от Google (JSON)" },
+    ]
+  },
+  {
+    group: "Pipeline Results",
+    vars: [
+      { name: "result_ai_structure_analysis", desc: "AI анализ структуры" },
+      { name: "intent", desc: "└ Поисковый интент" },
+      { name: "Taxonomy", desc: "└ Таксономия запроса" },
+      { name: "Attention", desc: "└ На что обратить внимание" },
+      { name: "structura", desc: "└ Рекомендованная структура" },
+      { name: "result_chunk_cluster_analysis", desc: "Анализ кластера (Чанки)" },
+      { name: "result_competitor_structure_analysis", desc: "Анализ конкурентов" },
+      { name: "result_final_structure_analysis", desc: "Финальный анализ структуры (JSON)" },
+      { name: "structure_fact_checking", desc: "Фактический анализ структуры (Отчет)" },
+      { name: "result_primary_generation", desc: "Первичная генерация (HTML)" },
+      { name: "result_competitor_comparison", desc: "Сравнение с конкурентами" },
+      { name: "result_reader_opinion", desc: "Мнение читателя" },
+      { name: "result_interlinking_citations", desc: "Перелинковка и цитаты" },
+      { name: "result_improver", desc: "Улучшайзер" },
+      { name: "result_final_editing", desc: "Финальная редактура" },
+      { name: "result_html_structure", desc: "Структура HTML" },
+      { name: "result_meta_generation", desc: "Генерация мета-тегов" },
+    ]
+  }
+];
+
 export default function PromptsPage() {
   const queryClient = useQueryClient();
   const [activePromptId, setActivePromptId] = useState<string | null>(null);
   const [editState, setEditState] = useState<Partial<Prompt> | null>(null);
   const [isTestOpen, setIsTestOpen] = useState(false);
+  const [isVariablesOpen, setIsVariablesOpen] = useState(false);
+  const [variablesQuery, setVariablesQuery] = useState("");
 
   // default query without active_only fetches the filtered list automatically via backend default
   const { data: prompts, isLoading } = useQuery({
@@ -147,18 +219,88 @@ export default function PromptsPage() {
               </div>
             </div>
             
-            <div className="p-3 bg-slate-100 border-b text-xs flex gap-4 overflow-x-auto whitespace-nowrap scrollbar-hide items-center">
-               <span className="font-semibold text-slate-600 flex items-center gap-1"><Settings2 className="w-4 h-4"/> Variables:</span>
-               {['{{main_keyword}}', '{{language}}', '{{country}}', '{{competitors_headers}}', '{{avg_word_count}}', '{{merged_markdown}}', '{{related_searches}}', '{{intent}}', '{{structura}}'].map(v => (
-                 <button 
-                   key={v} 
-                   onClick={() => { navigator.clipboard.writeText(v); toast.success(`Copied ${v}`); }}
-                   className="font-mono text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200 hover:bg-blue-100 transition-colors cursor-copy"
-                   title="Click to copy"
-                 >
-                   {v}
-                 </button>
-               ))}
+            <div className="bg-slate-50 border-b flex flex-col">
+              <button 
+                onClick={() => setIsVariablesOpen(!isVariablesOpen)}
+                className="flex items-center justify-between p-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition-colors w-full"
+              >
+                <div className="flex items-center gap-2">
+                  <Settings2 className="w-4 h-4 text-slate-500" /> 
+                  Available Variables ({PROMPT_VARIABLES.reduce((acc, g) => acc + g.vars.length, 0)})
+                </div>
+                {isVariablesOpen ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
+              </button>
+              
+              {isVariablesOpen && (
+                <div className="p-4 pt-0 border-t border-slate-200">
+                  <div className="relative mt-3 mb-4 max-w-md">
+                    <Search className="absolute left-2.5 top-2 h-4 w-4 text-slate-400" />
+                    <input 
+                      type="text"
+                      placeholder="Search variables by name or description..."
+                      value={variablesQuery}
+                      onChange={(e) => setVariablesQuery(e.target.value)}
+                      className="w-full pl-9 pr-4 py-1.5 text-sm border rounded bg-white shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                    {variablesQuery && (
+                      <button 
+                        onClick={() => setVariablesQuery("")}
+                        className="absolute right-2.5 top-2 h-4 w-4 text-slate-400 hover:text-slate-600"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    {PROMPT_VARIABLES.map(group => {
+                      const filteredVars = group.vars.filter(v => 
+                        v.name.toLowerCase().includes(variablesQuery.toLowerCase()) || 
+                        v.desc.toLowerCase().includes(variablesQuery.toLowerCase())
+                      );
+                      
+                      if (filteredVars.length === 0) return null;
+                      
+                      return (
+                        <div key={group.group} className="space-y-2">
+                          <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2 border-b pb-1">
+                            {group.group}
+                          </h4>
+                          <div className="space-y-1.5">
+                            {filteredVars.map(v => (
+                              <div key={v.name} className="flex flex-col text-xs group/var">
+                                <button 
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(`{{${v.name}}}`);
+                                    toast.success(`Copied {{${v.name}}}`);
+                                  }}
+                                  className="flex items-center justify-between font-mono text-blue-700 bg-blue-50 px-2 py-1 rounded border border-blue-100 hover:bg-blue-100 transition-colors cursor-pointer text-left w-full relative"
+                                  title="Click to copy"
+                                >
+                                  <span>{`{{${v.name}}}`}</span>
+                                  <Copy className="w-3 h-3 text-blue-400 opacity-0 group-hover/var:opacity-100 transition-opacity" />
+                                </button>
+                                <span className="text-slate-500 mt-0.5 px-1 truncate" title={v.desc}>{v.desc}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  
+                  {PROMPT_VARIABLES.every(g => 
+                    g.vars.filter(v => 
+                      v.name.toLowerCase().includes(variablesQuery.toLowerCase()) || 
+                      v.desc.toLowerCase().includes(variablesQuery.toLowerCase())
+                    ).length === 0
+                  ) && (
+                    <div className="text-sm text-slate-500 text-center py-4">
+                      No variables found matching "{variablesQuery}"
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             
             <div className="flex-1 flex flex-col xl:flex-row divide-y xl:divide-y-0 xl:divide-x overflow-hidden">

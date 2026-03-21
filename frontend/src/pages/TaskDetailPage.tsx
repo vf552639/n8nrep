@@ -6,7 +6,6 @@ import { tasksApi } from "@/api/tasks";
 import StatusBadge from "@/components/common/StatusBadge";
 import StepMonitor from "@/components/tasks/StepMonitor";
 import SerpViewer from "@/components/tasks/SerpViewer";
-import JsonViewer from "@/components/common/JsonViewer";
 
 export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -105,7 +104,99 @@ export default function TaskDetailPage() {
               <div className="text-sm text-slate-500 bg-slate-50 p-4 rounded-lg border mb-4">
                 This tab shows the resolved prompt templates and agent trajectories for the task.
               </div>
-              <JsonViewer data={{ note: "Full prompts payload not available yet in task model", outline: task.outline }} />
+              
+              <div className="space-y-4">
+                {[
+                  { id: "serp_research", label: "SERP Research" },
+                  { id: "competitor_scraping", label: "Competitor Scraping" },
+                  { id: "ai_structure_analysis", label: "AI Structure Analysis" },
+                  { id: "chunk_cluster_analysis", label: "Chunk Cluster Analysis" },
+                  { id: "competitor_structure_analysis", label: "Competitor Structure Analysis" },
+                  { id: "final_structure_analysis", label: "Final Structure Analysis" },
+                  { id: "structure_fact_checking", label: "Structure Fact-Checking" },
+                  { id: "primary_generation", label: "Primary Generation" },
+                  { id: "competitor_comparison", label: "Competitor Comparison" },
+                  { id: "reader_opinion", label: "Reader Opinion" },
+                  { id: "interlinking_citations", label: "Interlinking & Citations" },
+                  { id: "improver", label: "Improver" },
+                  { id: "final_editing", label: "Final Editing" },
+                  { id: "content_fact_checking", label: "Content Fact-Checking" },
+                  { id: "html_structure", label: "HTML Structure" },
+                  { id: "meta_generation", label: "Meta Generation" }
+                ].map(step => {
+                  const stepData = task.step_results?.[step.id];
+                  const resolvedPrompts = stepData?.resolved_prompts;
+                  
+                  return (
+                    <details key={step.id} className="group border rounded-lg bg-white overflow-hidden">
+                      <summary className="flex items-center justify-between p-4 cursor-pointer bg-slate-50 hover:bg-slate-100 transition-colors select-none font-medium text-slate-800">
+                        <div className="flex items-center gap-3">
+                           <span>{step.label}</span>
+                           {!resolvedPrompts && (
+                             <span className="px-2 py-0.5 rounded text-xs bg-slate-200 text-slate-500 font-normal">
+                               Промпты не сохранены
+                             </span>
+                           )}
+                           {resolvedPrompts && (
+                             <span className="px-2 py-0.5 rounded text-xs bg-emerald-100 text-emerald-700 font-normal">
+                               {stepData?.model || "Resolved"}
+                             </span>
+                           )}
+                        </div>
+                        <div className="text-slate-400 group-open:rotate-180 transition-transform">▼</div>
+                      </summary>
+                      
+                      {resolvedPrompts && (
+                        <div className="p-4 border-t border-slate-100 space-y-6 bg-[#fffffe]">
+                          <div>
+                            <div className="flex justify-between items-center mb-2">
+                               <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wider">System Prompt</h4>
+                               <button 
+                                 onClick={(e) => {
+                                   e.preventDefault();
+                                   navigator.clipboard.writeText(resolvedPrompts.system_prompt || "");
+                                   toast.success("System prompt copied");
+                                 }}
+                                 className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
+                               >
+                                 Copy
+                               </button>
+                            </div>
+                            <pre className="bg-slate-50 p-4 rounded-lg text-sm text-slate-800 font-mono whitespace-pre-wrap border overflow-x-auto max-h-[300px] overflow-y-auto">
+                              {resolvedPrompts.system_prompt || "Empty"}
+                            </pre>
+                          </div>
+                          
+                          <div>
+                            <div className="flex justify-between items-center mb-2">
+                               <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wider">User Prompt</h4>
+                               <button 
+                                 onClick={(e) => {
+                                   e.preventDefault();
+                                   navigator.clipboard.writeText(resolvedPrompts.user_prompt || "");
+                                   toast.success("User prompt copied");
+                                 }}
+                                 className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
+                               >
+                                 Copy
+                               </button>
+                            </div>
+                            <pre className="bg-slate-50 p-4 rounded-lg text-sm text-slate-800 font-mono whitespace-pre-wrap border overflow-x-auto max-h-[300px] overflow-y-auto">
+                              {resolvedPrompts.user_prompt || "Empty"}
+                            </pre>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {!resolvedPrompts && (
+                        <div className="p-4 border-t border-slate-100 text-sm text-slate-500 italic bg-[#fafafa]">
+                          Нет данных о промптах для этого шага. Возможно, шаг был пропущен или выполнялся старой версией системы.
+                        </div>
+                      )}
+                    </details>
+                  );
+                })}
+              </div>
             </div>
           )}
 

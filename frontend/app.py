@@ -899,80 +899,75 @@ div[data-testid="stHorizontalBlock"] {
 </style>
 """, unsafe_allow_html=True)
                 
-                st.markdown("**Данные задачи и автора:**")
-                
-                task_vars = [
-                    ("keyword", "Главное ключевое слово"),
-                    ("additional_keywords", "Доп. ключевые слова (LSI)"),
-                    ("country", "Страна"),
-                    ("language", "Язык"),
-                    ("page_type", "Тип страницы (homepage, category, article)"),
-                    ("competitors_headers", "Структура h1-h6 конкурентов (JSON)"),
-                    ("merged_markdown", "Объединённый текст конкурентов (внимание: большой объём!)"),
-                    ("avg_word_count", "Среднее кол-во слов у конкурентов"),
-                    ("author", "Имя автора"),
-                    ("author_style", "Биография / описание автора (из поля bio)"),
-                    ("imitation", "Подражание (Mimicry)"),
-                    ("target_audience", "Целевая аудитория"),
-                    ("face", "Лицо повествования (POV)"),
-                    ("year", "Год"),
-                    ("rhythms_style", "Ритм и стиль"),
-                    ("exclude_words", "Слова-исключения (глобальные)"),
-                    ("site_name", "Название целевого сайта"),
-                    ("site_template_html", "HTML-шаблон целевого сайта (из site_templates)"),
-                    ("site_template_name", "Название шаблона сайта"),
-                    ("competitor_titles", "Titles конкурентов из SERP (JSON-список)"),
-                    ("competitor_descriptions", "Descriptions/сниппеты конкурентов (JSON-список)"),
-                    ("highlighted_keywords", "Слова, выделенные Google в сниппетах (JSON-список)"),
-                    ("paa_with_answers", "People Also Ask с ответами (Q: ... A: ...)"),
-                    ("featured_snippet", "Featured Snippet (JSON: title, description, type, domain)"),
-                    ("knowledge_graph", "Knowledge Graph (JSON: title, description, facts)"),
-                    ("ai_overview", "Google AI Overview текст (если есть)"),
-                    ("answer_box", "Answer Box текст (если есть)"),
-                    ("serp_features", "Список SERP-элементов на странице (JSON)"),
-                    ("search_intent_signals", "Сигналы поискового интента (JSON)"),
-                    ("related_searches", "Related Searches от Google (JSON-список запросов)"),
+                groups = [
+                    ("Данные задачи и проекта", [
+                        ("keyword", "Главное ключевое слово"),
+                        ("additional_keywords", "Доп. ключевые слова (LSI)"),
+                        ("country", "Страна"),
+                        ("language", "Язык"),
+                        ("page_type", "Тип страницы (homepage, category, article)"),
+                        ("site_name", "Название целевого сайта"),
+                        ("site_template_html", "HTML-шаблон целевого сайта"),
+                        ("site_template_name", "Название шаблона сайта"),
+                    ]),
+                    ("Автор и Стилистика", [
+                        ("author", "Имя автора"),
+                        ("author_style", "Биография / описание автора (из поля bio)"),
+                        ("imitation", "Подражание (Mimicry)"),
+                        ("target_audience", "Целевая аудитория"),
+                        ("face", "Лицо повествования (POV)"),
+                        ("year", "Год"),
+                        ("rhythms_style", "Ритм и стиль"),
+                        ("exclude_words", "Слова-исключения (глобальные)"),
+                    ]),
+                    ("Конкуренты и SERP", [
+                        ("competitors_headers", "Структура h1-h6 конкурентов (JSON)"),
+                        ("merged_markdown", "Объединённый текст конкурентов (внимание: большой объём!)"),
+                        ("avg_word_count", "Среднее кол-во слов у конкурентов"),
+                        ("competitor_titles", "Titles конкурентов из SERP (JSON-список)"),
+                        ("competitor_descriptions", "Descriptions/сниппеты конкурентов (JSON-список)"),
+                        ("highlighted_keywords", "Слова, выделенные Google в сниппетах (JSON-список)"),
+                        ("paa_with_answers", "People Also Ask с ответами (Q: ... A: ...)"),
+                        ("featured_snippet", "Featured Snippet (JSON: title, description, type, domain)"),
+                        ("knowledge_graph", "Knowledge Graph (JSON: title, description, facts)"),
+                        ("ai_overview", "Google AI Overview текст (если есть)"),
+                        ("answer_box", "Answer Box текст (если есть)"),
+                        ("serp_features", "Список SERP-элементов на странице (JSON)"),
+                        ("search_intent_signals", "Сигналы поискового интента (JSON)"),
+                        ("related_searches", "Related Searches от Google (JSON-список запросов)"),
+                    ]),
+                    ("Результаты предыдущих этапов", [
+                        ("result_ai_structure_analysis", "AI анализ структуры"),
+                        ("intent", "└ Поисковый интент (из AI анализа)"),
+                        ("Taxonomy", "└ Таксономия запроса (из AI анализа)"),
+                        ("Attention", "└ На что обратить внимание (из AI анализа)"),
+                        ("structura", "└ Рекомендованная структура (из AI анализа)"),
+                        ("result_chunk_cluster_analysis", "Анализ кластера (Чанки)"),
+                        ("result_competitor_structure_analysis", "Анализ конкурентов"),
+                        ("result_final_structure_analysis", "Финальный анализ структуры (JSON)"),
+                        ("structure_fact_checking", "Фактический анализ структуры (Отчет)"),
+                        ("result_primary_generation", "Первичная генерация (HTML)"),
+                        ("result_competitor_comparison", "Сравнение с конкурентами"),
+                        ("result_reader_opinion", "Мнение читателя"),
+                        ("result_interlinking_citations", "Перелинковка и цитаты"),
+                        ("result_improver", "Улучшайзер"),
+                        ("result_final_editing", "Финальная редактура"),
+                        ("result_html_structure", "Структура HTML"),
+                        ("result_meta_generation", "Генерация мета-тегов"),
+                    ])
                 ]
                 
-                col1, col2 = st.columns([1, 2])
-                with col1: st.write("**Переменная (нажми иконку чтобы скопировать)**")
-                with col2: st.write("**Описание**")
-                
-                for v, d in task_vars:
-                    c1, c2 = st.columns([1, 2])
-                    with c1: st.code(f"{{{{{v}}}}}", language=None)
-                    with c2: st.markdown(f"<div style='padding-top:14px'>{d}</div>", unsafe_allow_html=True)
-                
-                st.markdown("---")
-                st.markdown("**Результаты предыдущих этапов:**")
-                
-                result_vars = [
-                    ("result_ai_structure_analysis", "AI анализ структуры"),
-                    ("intent", "└ Поисковый интент (из AI анализа)"),
-                    ("Taxonomy", "└ Таксономия запроса (из AI анализа)"),
-                    ("Attention", "└ На что обратить внимание (из AI анализа)"),
-                    ("structura", "└ Рекомендованная структура (из AI анализа)"),
-                    ("result_chunk_cluster_analysis", "Анализ кластера (Чанки)"),
-                    ("result_competitor_structure_analysis", "Анализ конкурентов"),
-                    ("result_final_structure_analysis", "Финальный анализ структуры (JSON)"),
-                    ("structure_fact_checking", "Фактический анализ структуры (Отчет)"),
-                    ("result_primary_generation", "Первичная генерация (HTML)"),
-                    ("result_competitor_comparison", "Сравнение с конкурентами"),
-                    ("result_reader_opinion", "Мнение читателя"),
-                    ("result_interlinking_citations", "Перелинковка и цитаты"),
-                    ("result_improver", "Улучшайзер"),
-                    ("result_final_editing", "Финальная редактура"),
-                    ("result_html_structure", "Структура HTML"),
-                ]
-                
-                col1, col2 = st.columns([1, 2])
-                with col1: st.write("**Переменная (нажми иконку чтобы скопировать)**")
-                with col2: st.write("**Описание**")
-                
-                for v, d in result_vars:
-                    c1, c2 = st.columns([1, 2])
-                    with c1: st.code(f"{{{{{v}}}}}", language=None)
-                    with c2: st.markdown(f"<div style='padding-top:14px'>{d}</div>", unsafe_allow_html=True)
+                for group_name, vars_list in groups:
+                    st.markdown(f"**{group_name}:**")
+                    col1, col2 = st.columns([1, 2])
+                    with col1: st.write("**Переменная (нажми иконку чтобы скопировать)**")
+                    with col2: st.write("**Описание**")
+                    
+                    for v, d in vars_list:
+                        c1, c2 = st.columns([1, 2])
+                        with c1: st.code(f"{{{{{v}}}}}", language=None)
+                        with c2: st.markdown(f"<div style='padding-top:14px'>{d}</div>", unsafe_allow_html=True)
+                    st.markdown("---")
             
             if agent in ["ai_structure_analysis", "final_structure_analysis"]:
                 st.info("💡 **Внимание:** Этот агент парсит ответ как JSON. Обязательно добавьте в конец System Message явную структуру ожидаемого JSON и попросите модель отдавать только чистый JSON без markdown-обёртки.")

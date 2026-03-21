@@ -13,6 +13,7 @@ export interface Task {
   total_cost?: number;
   outline?: any;
   serp_data?: any;
+  step_results?: any;
   logs?: any[];
 }
 
