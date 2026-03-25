@@ -645,9 +645,20 @@ def phase_serp(ctx: PipelineContext):
 
 def phase_scraping(ctx: PipelineContext):
     if not ctx.task.competitors_text:
-        urls = ctx.task.serp_data.get("urls", [])
+        urls = ctx.task.serp_data.get("urls", []) if isinstance(ctx.task.serp_data, dict) else []
         if not urls:
-            raise Exception("No URLs found in SERP data")
+            add_log(ctx.db, ctx.task, "⚠️ No organic URLs found in SERP data — skipping competitor scraping.", level="warn", step=STEP_SCRAPING)
+            ctx.task.competitors_text = ""
+            ctx.task.outline = {
+                "scrape_info": {
+                    "avg_words": 800,
+                    "headers": []
+                }
+            }
+            ctx.db.commit()
+            ctx.outline_data = ctx.task.outline
+            save_step_result(ctx.db, ctx.task, STEP_SCRAPING, result=json.dumps({"skipped": True, "reason": "No organic URLs in SERP data"}), status="completed")
+            return
         
         add_log(ctx.db, ctx.task, f"Scraping {len(urls)} competitors...", step=STEP_SCRAPING)
         save_step_result(ctx.db, ctx.task, STEP_SCRAPING, result=None, status="running")

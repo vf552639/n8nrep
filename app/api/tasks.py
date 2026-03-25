@@ -604,6 +604,24 @@ def rerun_task_step(task_id: str, payload: RerunStepRequest, db: Session = Depen
     else:
         invalidated_steps.append(payload.step_name)
         del step_results[payload.step_name]
+    
+    # --- Clear cached data so pipeline phases re-fetch ---
+    try:
+        serp_idx = ALL_STEPS.index("serp_research")
+        scraping_idx = ALL_STEPS.index("competitor_scraping")
+        rerun_idx = ALL_STEPS.index(payload.step_name)
+    except ValueError:
+        rerun_idx = -1
+        serp_idx = -1
+        scraping_idx = -1
+
+    if rerun_idx <= serp_idx:
+        task.serp_data = None
+        task.competitors_text = None
+        task.outline = None
+    elif rerun_idx <= scraping_idx:
+        task.competitors_text = None
+        task.outline = None
         
     # Save feedback
     step_results["_rerun_feedback"] = {

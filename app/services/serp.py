@@ -440,18 +440,32 @@ def _parse_serpapi_response(serp_data: dict) -> dict:
 
 def fetch_serp_data(keyword: str, country_code: str, language_code: str) -> Dict[str, Any]:
     """
-    Tries DataForSEO first. If it fails, falls back to SerpAPI.
-    Returns structurally rich dictionary parsing URLs, PAA, elements, Knowledge graphs etc.
+    Tries DataForSEO first. If it fails or returns no usable organic URLs,
+    falls back to SerpAPI. If both fail to return organic URLs but DataForSEO
+    had partial data (PAA, features), returns that partial data instead of crashing.
     """
+    dfs_parsed = None
+
     # Try DataForSEO
     dfs_data = call_dataforseo(keyword, country_code, language_code)
     if dfs_data and dfs_data.get("items"):
-        return _parse_dataforseo_response(dfs_data)
-        
+        dfs_parsed = _parse_dataforseo_response(dfs_data)
+        if dfs_parsed["urls"]:
+            return dfs_parsed
+        # DataForSEO returned items but no usable organic URLs (all filtered)
+        print(f"DataForSEO returned {len(dfs_data['items'])} items but 0 usable organic URLs. Trying SerpAPI...")
+
     # Fallback to SerpAPI
-    print("DataForSEO failed or returned empty. Falling back to SerpAPI...")
+    if not dfs_data or not dfs_data.get("items"):
+        print("DataForSEO failed or returned empty. Falling back to SerpAPI...")
+
     serp_data = call_serpapi(keyword, country_code, language_code)
     if serp_data and serp_data.get("organic_results"):
         return _parse_serpapi_response(serp_data)
-        
+
+    # Both providers failed to return organic — return partial DataForSEO data if available
+    if dfs_parsed:
+        print("SerpAPI also returned no organic results. Returning partial DataForSEO data (PAA, features, etc.).")
+        return dfs_parsed
+
     raise Exception("Both SERP providers failed to return results.")
