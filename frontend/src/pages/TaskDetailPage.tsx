@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { tasksApi } from "@/api/tasks";
 import StatusBadge from "@/components/common/StatusBadge";
@@ -18,6 +18,7 @@ export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("pipeline");
+  const [reviewView, setReviewView] = useState<"preview" | "source">("preview");
 
   const { data: task, isLoading } = useQuery({
     queryKey: ["task", id],
@@ -25,6 +26,33 @@ export default function TaskDetailPage() {
     enabled: !!id,
     refetchInterval: (query) => (query.state.data?.status === "processing" ? 5000 : false),
   });
+
+  const approveMutation = useMutation({
+    mutationFn: () => tasksApi.approve(id!),
+    onSuccess: () => {
+      toast.success("Approved! Pipeline resumed.");
+      queryClient.invalidateQueries({ queryKey: ["task", id] });
+      queryClient.invalidateQueries({ queryKey: ["task-steps", id] });
+      setActiveTab("pipeline");
+    },
+    onError: (e: any) => {
+      toast.error(e?.response?.data?.detail || "Failed to approve");
+    },
+  });
+
+  const isWaiting = task?.step_results?.waiting_for_approval === true;
+  const hasDraft = task?.step_results?.primary_generation?.status === "completed";
+  const draftHtml: string = task?.step_results?.primary_generation?.result || "";
+  const wordCount = draftHtml
+    ? draftHtml.replace(/<[^>]*>/g, " ").split(/\s+/).filter(Boolean).length
+    : 0;
+
+  // Auto-switch to review tab when waiting for approval
+  useEffect(() => {
+    if (isWaiting && activeTab !== "review") {
+      setActiveTab("review");
+    }
+  }, [isWaiting]);
 
   const handleForceAction = async (action: "complete" | "fail") => {
     try {
@@ -46,6 +74,7 @@ export default function TaskDetailPage() {
 
   const tabs = [
     { id: "pipeline", label: "Pipeline Execution" },
+    ...(hasDraft || isWaiting ? [{ id: "review", label: "📝 Article Review" }] : []),
     { id: "logs", label: "Execution Logs" },
   ];
 
@@ -102,6 +131,83 @@ export default function TaskDetailPage() {
           {activeTab === "pipeline" && (
             <div className="animate-in fade-in slide-in-from-bottom-2 rounded-xl border bg-white p-6 shadow-sm duration-300">
               <StepMonitor taskId={task.id} isActive={task.status === "processing"} />
+            </div>
+          )}
+
+          {activeTab === "review" && (
+            <div className="animate-in fade-in slide-in-from-bottom-2 rounded-xl border bg-white shadow-sm duration-300 flex flex-col">
+              {/* Approval Banner */}
+              {isWaiting && (
+                <div className="flex items-center gap-3 px-5 py-3 bg-amber-50 border-b border-amber-200">
+                  <span className="text-lg">🛑</span>
+                  <div>
+                    <p className="font-semibold text-amber-900 text-sm">TEST MODE: Pipeline paused</p>
+                    <p className="text-amber-700 text-xs">Waiting for manual approval after Primary Generation</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Preview / Source toggle */}
+              <div className="flex gap-1 border-b px-5 pt-3">
+                {(["preview", "source"] as const).map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => setReviewView(v)}
+                    className={`pb-2 px-3 text-sm font-medium capitalize transition-colors border-b-2 ${
+                      reviewView === v
+                        ? "border-blue-600 text-blue-600"
+                        : "border-transparent text-slate-500 hover:text-slate-800"
+                    }`}
+                  >
+                    {v}
+                  </button>
+                ))}
+              </div>
+
+              {/* Content area */}
+              {draftHtml ? (
+                reviewView === "preview" ? (
+                  <iframe
+                    srcDoc={draftHtml}
+                    className="w-full border-none flex-1 min-h-[600px] bg-white"
+                    sandbox="allow-same-origin"
+                  />
+                ) : (
+                  <div className="overflow-auto flex-1 bg-slate-900 min-h-[600px] font-mono text-sm p-6">
+                    <pre className="whitespace-pre-wrap text-emerald-400">{draftHtml}</pre>
+                  </div>
+                )
+              ) : (
+                <div className="flex items-center justify-center min-h-[300px] text-slate-400 text-sm italic">
+                  No draft content available yet
+                </div>
+              )}
+
+              {/* Footer with approve button */}
+              {isWaiting && (
+                <div className="flex items-center justify-between px-5 py-4 border-t bg-slate-50">
+                  <span className="text-sm text-slate-500">
+                    ~<span className="font-mono font-medium text-slate-700">{wordCount}</span> words
+                  </span>
+                  <button
+                    onClick={() => approveMutation.mutate()}
+                    disabled={approveMutation.isPending}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white font-medium text-sm rounded-lg transition-colors shadow-sm"
+                  >
+                    {approveMutation.isPending ? (
+                      <>
+                        <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                        Approving…
+                      </>
+                    ) : (
+                      <>✅ Approve & Continue Pipeline</>
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
