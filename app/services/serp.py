@@ -76,14 +76,27 @@ def call_dataforseo(keyword: str, location_code: str, language_code: str) -> Opt
         "os": "android"
     }]
     
+    print(f"[DataForSEO REQUEST] keyword='{keyword}', "
+          f"raw_location='{location_code}' → mapped={dfs_loc}, "
+          f"raw_language='{language_code}' → mapped='{dfs_lang}', "
+          f"payload={json.dumps(payload, ensure_ascii=False)}")
+    
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=30)
         response.raise_for_status()
         data = response.json()
         if data and isinstance(data, dict) and data.get("tasks") and len(data["tasks"]) > 0:
-            task_result = data["tasks"][0].get("result", [])
+            task0 = data["tasks"][0]
+            task_result = task0.get("result", [])
+            items_count = len(task_result[0].get("items", [])) if task_result else 0
+            print(f"[DataForSEO RESPONSE] status_code={response.status_code}, "
+                  f"task_status_code={task0.get('status_code')}, "
+                  f"task_status_message='{task0.get('status_message')}', "
+                  f"result_count={len(task_result)}, items_count={items_count}")
             if task_result and len(task_result) > 0:
                 return task_result[0]
+        else:
+            print(f"[DataForSEO RESPONSE] Unexpected structure: tasks={len(data.get('tasks', []))}")
         return None
     except Exception as e:
         print(f"DataForSEO error: {e}")
@@ -133,10 +146,16 @@ def call_serpapi(keyword: str, location: str, language: str) -> Optional[Dict[st
         "num": 10,
         "api_key": settings.SERPAPI_KEY
     }
+    print(f"[SerpAPI REQUEST] keyword='{keyword}', "
+          f"raw_location='{location}' → gl='{params['gl']}', "
+          f"raw_language='{language}' → hl='{params['hl']}'")
     try:
         response = requests.get(url, params=params, timeout=30)
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        print(f"[SerpAPI RESPONSE] status_code={response.status_code}, "
+              f"organic_count={len(data.get('organic_results', []))}")
+        return data
     except requests.exceptions.HTTPError as e:
         print(f"SerpAPI HTTP error: {e} - Response: {e.response.text if e.response else 'Unknown'}")
         return None
@@ -176,6 +195,7 @@ def _parse_organic(item: dict, result: dict):
     if not url:
         return
     if _is_excluded_domain(url):
+        print(f"[SERP] Excluded domain filtered: {url}")
         return
         
     result["urls"].append(url)
@@ -444,6 +464,9 @@ def fetch_serp_data(keyword: str, country_code: str, language_code: str) -> Dict
     falls back to SerpAPI. If both fail to return organic URLs but DataForSEO
     had partial data (PAA, features), returns that partial data instead of crashing.
     """
+    print(f"[SERP] fetch_serp_data called: keyword='{keyword}', "
+          f"country='{country_code}', language='{language_code}'")
+    
     dfs_parsed = None
 
     # Try DataForSEO

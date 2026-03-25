@@ -645,20 +645,18 @@ def phase_serp(ctx: PipelineContext):
 
 def phase_scraping(ctx: PipelineContext):
     if not ctx.task.competitors_text:
-        urls = ctx.task.serp_data.get("urls", []) if isinstance(ctx.task.serp_data, dict) else []
+        serp_data = ctx.task.serp_data if isinstance(ctx.task.serp_data, dict) else {}
+        urls = serp_data.get("urls", [])
         if not urls:
-            add_log(ctx.db, ctx.task, "⚠️ No organic URLs found in SERP data — skipping competitor scraping.", level="warn", step=STEP_SCRAPING)
-            ctx.task.competitors_text = ""
-            ctx.task.outline = {
-                "scrape_info": {
-                    "avg_words": 800,
-                    "headers": []
-                }
-            }
-            ctx.db.commit()
-            ctx.outline_data = ctx.task.outline
-            save_step_result(ctx.db, ctx.task, STEP_SCRAPING, result=json.dumps({"skipped": True, "reason": "No organic URLs in SERP data"}), status="completed")
-            return
+            serp_source = serp_data.get("source", "unknown")
+            add_log(ctx.db, ctx.task, 
+                    f"❌ No organic URLs in SERP data (source={serp_source}) — pipeline stopped. "
+                    "Check SERP step logs for debug info.", 
+                    level="error", step=STEP_SCRAPING)
+            save_step_result(ctx.db, ctx.task, STEP_SCRAPING, 
+                             result=json.dumps({"error": "No organic URLs", "serp_source": serp_source}), 
+                             status="failed")
+            raise Exception(f"Pipeline stopped: SERP returned 0 organic URLs (source={serp_source}). Cannot proceed without competitor data.")
         
         add_log(ctx.db, ctx.task, f"Scraping {len(urls)} competitors...", step=STEP_SCRAPING)
         save_step_result(ctx.db, ctx.task, STEP_SCRAPING, result=None, status="running")
