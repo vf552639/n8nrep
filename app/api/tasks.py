@@ -78,6 +78,7 @@ def get_task(task_id: str, db: Session = Depends(get_db)):
         "page_type": task.page_type,
         "outline": task.outline,
         "serp_data": task.serp_data,
+        "step_results": task.step_results or {},
         "error_log": task.error_log,
         "created_at": task.created_at.isoformat(),
         "logs": task.logs or [],
