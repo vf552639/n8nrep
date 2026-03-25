@@ -454,6 +454,7 @@ def setup_vars(ctx: PipelineContext):
             "serp_features": json.dumps(serp_features),
             "search_intent_signals": json.dumps(intent_signals),
             "related_searches": json.dumps(related, ensure_ascii=False),
+            "people_also_search": json.dumps(_safe_list(serp.get("people_also_search")), ensure_ascii=False),
         }
 
         # Restore results from previous pipeline phases (setup_vars recreates analysis_vars from scratch)
@@ -596,6 +597,7 @@ def setup_template_vars(ctx: PipelineContext):
         "serp_features": ctx.analysis_vars.get("serp_features", ""),
         "search_intent_signals": ctx.analysis_vars.get("search_intent_signals", ""),
         "related_searches": ctx.analysis_vars.get("related_searches", ""),
+        "people_also_search": ctx.analysis_vars.get("people_also_search", ""),
         "structure_fact_checking": ""
     }
 
@@ -620,7 +622,8 @@ def phase_serp(ctx: PipelineContext):
     if not ctx.task.serp_data:
         add_log(ctx.db, ctx.task, "Fetching SERP data...", step=STEP_SERP)
         save_step_result(ctx.db, ctx.task, STEP_SERP, result=None, status="running")
-        serp_data = fetch_serp_data(ctx.task.main_keyword, ctx.task.country, ctx.task.language)
+        serp_data = fetch_serp_data(ctx.task.main_keyword, ctx.task.country, ctx.task.language,
+                                    serp_config=ctx.task.serp_config)
         ctx.task.serp_data = serp_data
         ctx.db.commit()
         add_log(ctx.db, ctx.task, f"SERP Research completed.", step=STEP_SERP)
@@ -638,9 +641,15 @@ def phase_serp(ctx: PipelineContext):
             "has_knowledge_graph": serp_data.get("knowledge_graph") is not None if isinstance(serp_data, dict) else False,
             "has_ai_overview": serp_data.get("ai_overview") is not None if isinstance(serp_data, dict) else False,
             "has_answer_box": serp_data.get("answer_box") is not None if isinstance(serp_data, dict) else False,
+            "ads_count": serp_data.get("search_intent_signals", {}).get("ads_count", 0) if isinstance(serp_data, dict) else 0,
+            "people_also_search_count": _safe_len(serp_data.get("people_also_search")) if isinstance(serp_data, dict) else 0,
+            "people_also_search": _safe_list(serp_data.get("people_also_search")) if isinstance(serp_data, dict) else [],
             "serp_features": _safe_list(serp_data.get("serp_features")) if isinstance(serp_data, dict) else [],
             "urls": _safe_list(serp_data.get("urls")) if isinstance(serp_data, dict) else [],
         }
+        if isinstance(serp_data, dict) and serp_data.get("source") == "google+bing":
+            serp_summary["google_data"] = serp_data.get("google_data")
+            serp_summary["bing_data"] = serp_data.get("bing_data")
         save_step_result(ctx.db, ctx.task, STEP_SERP, result=json.dumps(serp_summary, ensure_ascii=False), status="completed")
 
 def phase_scraping(ctx: PipelineContext):

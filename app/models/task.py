@@ -26,6 +26,7 @@ class Task(Base):
     priority = Column(Integer, default=0)
     retry_count = Column(Integer, default=0)
     step_results = Column(JSONB, nullable=True, default={})
+    serp_config = Column(JSONB, nullable=True, default={})
     logs = Column(JSONB, nullable=True, default=[])
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

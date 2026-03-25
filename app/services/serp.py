@@ -57,7 +57,8 @@ def _map_language_dataforseo(lang: str) -> str:
     }
     return mapping.get(lang, "en") # Default to english
 
-def call_dataforseo(keyword: str, location_code: str, language_code: str) -> Optional[Dict[str, Any]]:
+def call_dataforseo(keyword: str, location_code: str, language_code: str,
+                    depth: int = 10, device: str = "mobile", os_type: str = "android") -> Optional[Dict[str, Any]]:
     url = "https://api.dataforseo.com/v3/serp/google/organic/live/advanced"
     headers = {
         'Authorization': _get_dataforseo_auth_header(),
@@ -71,15 +72,15 @@ def call_dataforseo(keyword: str, location_code: str, language_code: str) -> Opt
         "keyword": keyword,
         "location_code": dfs_loc,
         "language_code": dfs_lang,
-        "depth": 10,
-        "device": "mobile",
-        "os": "android"
+        "depth": depth,
+        "device": device,
+        "os": os_type
     }]
     
-    print(f"[DataForSEO REQUEST] keyword='{keyword}', "
+    print(f"[DataForSEO REQUEST] engine=google, keyword='{keyword}', "
           f"raw_location='{location_code}' → mapped={dfs_loc}, "
           f"raw_language='{language_code}' → mapped='{dfs_lang}', "
-          f"payload={json.dumps(payload, ensure_ascii=False)}")
+          f"depth={depth}, device={device}, os={os_type}")
     
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=30)
@@ -100,6 +101,52 @@ def call_dataforseo(keyword: str, location_code: str, language_code: str) -> Opt
         return None
     except Exception as e:
         print(f"DataForSEO error: {e}")
+        return None
+
+def call_dataforseo_bing(keyword: str, location_code: str, language_code: str,
+                        depth: int = 10, device: str = "mobile", os_type: str = "android") -> Optional[Dict[str, Any]]:
+    url = "https://api.dataforseo.com/v3/serp/bing/organic/live/advanced"
+    headers = {
+        'Authorization': _get_dataforseo_auth_header(),
+        'Content-Type': 'application/json'
+    }
+    
+    dfs_loc = _map_location_dataforseo(location_code)
+    dfs_lang = _map_language_dataforseo(language_code)
+    
+    payload = [{
+        "keyword": keyword,
+        "location_code": dfs_loc,
+        "language_code": dfs_lang,
+        "depth": depth,
+        "device": device,
+        "os": os_type
+    }]
+    
+    print(f"[DataForSEO REQUEST] engine=bing, keyword='{keyword}', "
+          f"raw_location='{location_code}' → mapped={dfs_loc}, "
+          f"raw_language='{language_code}' → mapped='{dfs_lang}', "
+          f"depth={depth}, device={device}, os={os_type}")
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        if data and isinstance(data, dict) and data.get("tasks") and len(data["tasks"]) > 0:
+            task0 = data["tasks"][0]
+            task_result = task0.get("result", [])
+            items_count = len(task_result[0].get("items", [])) if task_result else 0
+            print(f"[DataForSEO Bing RESPONSE] status_code={response.status_code}, "
+                  f"task_status_code={task0.get('status_code')}, "
+                  f"task_status_message='{task0.get('status_message')}', "
+                  f"result_count={len(task_result)}, items_count={items_count}")
+            if task_result and len(task_result) > 0:
+                return task_result[0]
+        else:
+            print(f"[DataForSEO Bing RESPONSE] Unexpected structure: tasks={len(data.get('tasks', []))}")
+        return None
+    except Exception as e:
+        print(f"DataForSEO Bing error: {e}")
         return None
 
 def _map_location_serpapi(location: str) -> str:
@@ -172,6 +219,8 @@ def _empty_serp_result() -> Dict[str, Any]:
         "paa_full": [],
         "related_searches": [],
         "related_searches_full": [],
+        "people_also_search": [],
+        "people_also_search_full": [],
         "featured_snippet": None,
         "knowledge_graph": None,
         "ai_overview": None,
@@ -293,6 +342,48 @@ def _parse_answer_box(item: dict, result: dict):
             "url": item.get("url"),
         }
 
+def _parse_people_also_search(item: dict, result: dict):
+    """Parse 'people_also_search' items from DataForSEO."""
+    for pas_item in (item.get("items") or []):
+        if isinstance(pas_item, dict):
+            query = pas_item.get("title") or pas_item.get("query") or ""
+            if query:
+                result["people_also_search"].append(query)
+                result["people_also_search_full"].append({
+                    "query": query,
+                    "highlighted": pas_item.get("highlighted", []),
+                })
+        elif isinstance(pas_item, str) and pas_item.strip():
+            result["people_also_search"].append(pas_item.strip())
+
+def _deduplicate_by_domain(result: dict, max_per_domain: int = 3) -> dict:
+    """Limit URLs per single domain to avoid Bing-style duplicates."""
+    domain_count = {}
+    filtered_urls = []
+    filtered_organic = []
+
+    for i, url in enumerate(result["urls"]):
+        domain = urlparse(url).netloc.lower()
+        if domain.startswith("www."):
+            domain = domain[4:]
+
+        domain_count[domain] = domain_count.get(domain, 0) + 1
+
+        if domain_count[domain] <= max_per_domain:
+            filtered_urls.append(url)
+            if i < len(result["organic_results"]):
+                filtered_organic.append(result["organic_results"][i])
+        else:
+            print(f"[SERP dedup] Skipping duplicate domain ({domain_count[domain]}x): {url}")
+
+    removed = len(result["urls"]) - len(filtered_urls)
+    if removed > 0:
+        print(f"[SERP dedup] Removed {removed} duplicate-domain URLs (max {max_per_domain}/domain)")
+
+    result["urls"] = filtered_urls
+    result["organic_results"] = filtered_organic
+    return result
+
 def _parse_dataforseo_response(dfs_data: dict) -> dict:
     """
     Парсит полный ответ DataForSEO в обогащённую структуру.
@@ -326,6 +417,8 @@ def _parse_dataforseo_response(dfs_data: dict) -> dict:
             _parse_ai_overview(item, result)
         elif item_type == "answer_box":
             _parse_answer_box(item, result)
+        elif item_type == "people_also_search":
+            _parse_people_also_search(item, result)
         elif item_type in ("paid", "shopping"):
             ads_count += 1
             
@@ -341,6 +434,7 @@ def _parse_dataforseo_response(dfs_data: dict) -> dict:
         "ads_count": ads_count
     }
     
+    result = _deduplicate_by_domain(result)
     return result
 
 def _parse_serpapi_response(serp_data: dict) -> dict:
@@ -456,29 +550,119 @@ def _parse_serpapi_response(serp_data: dict) -> dict:
         "ads_count": ads_count
     }
     
+    result = _deduplicate_by_domain(result)
     return result
 
-def fetch_serp_data(keyword: str, country_code: str, language_code: str) -> Dict[str, Any]:
-    """
-    Tries DataForSEO first. If it fails or returns no usable organic URLs,
-    falls back to SerpAPI. If both fail to return organic URLs but DataForSEO
-    had partial data (PAA, features), returns that partial data instead of crashing.
-    """
-    print(f"[SERP] fetch_serp_data called: keyword='{keyword}', "
-          f"country='{country_code}', language='{language_code}'")
-    
-    dfs_parsed = None
+from urllib.parse import urlparse
 
-    # Try DataForSEO
-    dfs_data = call_dataforseo(keyword, country_code, language_code)
+def _merge_serp_results(google_result: dict, bing_result: dict) -> dict:
+    """Google — primary, Bing supplements with new domains."""
+    merged = dict(google_result)
+    merged["source"] = "google+bing"
+
+    google_domains = {urlparse(u).netloc for u in merged.get("urls", [])}
+    for url in bing_result.get("urls", []):
+        if urlparse(url).netloc not in google_domains:
+            merged["urls"].append(url)
+            for org in bing_result.get("organic_results", []):
+                if org.get("url") == url:
+                    merged["organic_results"].append(org)
+                    break
+
+    existing_paa = set(merged.get("paa", []))
+    for q in bing_result.get("paa", []):
+        if q not in existing_paa:
+            merged["paa"].append(q)
+
+    existing_rs = set(merged.get("related_searches", []))
+    for rs in bing_result.get("related_searches", []):
+        if rs not in existing_rs:
+            merged["related_searches"].append(rs)
+
+    merged["serp_features"] = sorted(
+        set(merged.get("serp_features", [])) |
+        set(bing_result.get("serp_features", []))
+    )
+
+    # Save split data for UI tabs
+    def _extract_engine_data(r: dict) -> dict:
+        return {
+            "organic_results": r.get("organic_results", []),
+            "urls": r.get("urls", []),
+            "paa": r.get("paa", []),
+            "paa_full": r.get("paa_full", []),
+            "related_searches": r.get("related_searches", []),
+            "serp_features": r.get("serp_features", []),
+            "ads_count": r.get("search_intent_signals", {}).get("ads_count", 0),
+            "people_also_search": r.get("people_also_search", []),
+        }
+
+    merged["google_data"] = _extract_engine_data(google_result)
+    merged["bing_data"] = _extract_engine_data(bing_result)
+
+    return merged
+
+def fetch_serp_data(keyword: str, country_code: str, language_code: str,
+                    serp_config: dict = None) -> Dict[str, Any]:
+    """
+    Routes SERP fetching based on serp_config:
+    - google (default): DataForSEO Google → fallback SerpAPI
+    - bing: DataForSEO Bing
+    - google+bing: both, merged
+    """
+    cfg = serp_config or {}
+    engine = cfg.get("search_engine", "google")
+    depth = cfg.get("depth", 10)
+    device = cfg.get("device", "mobile")
+    os_type = cfg.get("os", "android")
+
+    print(f"[SERP] fetch_serp_data called: keyword='{keyword}', "
+          f"country='{country_code}', language='{language_code}', "
+          f"engine='{engine}', depth={depth}, device='{device}', os='{os_type}'")
+
+    if engine == "bing":
+        dfs_data = call_dataforseo_bing(keyword, country_code, language_code,
+                                        depth, device, os_type)
+        if dfs_data and dfs_data.get("items"):
+            parsed = _parse_dataforseo_response(dfs_data)
+            parsed["source"] = "bing"
+            if parsed["urls"]:
+                return parsed
+        raise Exception("Bing SERP: DataForSEO returned no usable results.")
+
+    elif engine == "google+bing":
+        google_result = None
+        bing_result = None
+
+        dfs_google = call_dataforseo(keyword, country_code, language_code,
+                                     depth, device, os_type)
+        if dfs_google and dfs_google.get("items"):
+            google_result = _parse_dataforseo_response(dfs_google)
+
+        dfs_bing = call_dataforseo_bing(keyword, country_code, language_code,
+                                        depth, device, os_type)
+        if dfs_bing and dfs_bing.get("items"):
+            bing_result = _parse_dataforseo_response(dfs_bing)
+            bing_result["source"] = "bing"
+
+        if google_result and bing_result:
+            return _merge_serp_results(google_result, bing_result)
+        elif google_result:
+            return google_result
+        elif bing_result:
+            return bing_result
+        raise Exception("Google+Bing SERP: both engines failed.")
+
+    # Default: google with SerpAPI fallback
+    dfs_parsed = None
+    dfs_data = call_dataforseo(keyword, country_code, language_code,
+                               depth, device, os_type)
     if dfs_data and dfs_data.get("items"):
         dfs_parsed = _parse_dataforseo_response(dfs_data)
         if dfs_parsed["urls"]:
             return dfs_parsed
-        # DataForSEO returned items but no usable organic URLs (all filtered)
         print(f"DataForSEO returned {len(dfs_data['items'])} items but 0 usable organic URLs. Trying SerpAPI...")
 
-    # Fallback to SerpAPI
     if not dfs_data or not dfs_data.get("items"):
         print("DataForSEO failed or returned empty. Falling back to SerpAPI...")
 
@@ -486,9 +670,9 @@ def fetch_serp_data(keyword: str, country_code: str, language_code: str) -> Dict
     if serp_data and serp_data.get("organic_results"):
         return _parse_serpapi_response(serp_data)
 
-    # Both providers failed to return organic — return partial DataForSEO data if available
     if dfs_parsed:
-        print("SerpAPI also returned no organic results. Returning partial DataForSEO data (PAA, features, etc.).")
+        print("SerpAPI also returned no organic results. Returning partial DataForSEO data.")
         return dfs_parsed
 
     raise Exception("Both SERP providers failed to return results.")
+

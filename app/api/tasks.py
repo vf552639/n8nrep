@@ -20,6 +20,25 @@ from datetime import datetime
 
 router = APIRouter()
 
+from typing import Literal
+from pydantic import field_validator
+
+class SerpConfig(BaseModel):
+    search_engine: Literal["google", "bing", "google+bing"] = "google"
+    depth: Literal[10, 20, 30, 50, 100] = 10
+    device: Literal["mobile", "desktop"] = "mobile"
+    os: Literal["android", "ios", "windows", "macos"] = "android"
+
+    @field_validator("os")
+    @classmethod
+    def validate_os_device_combo(cls, v, info):
+        device = info.data.get("device", "mobile")
+        if device == "mobile" and v not in ("android", "ios"):
+            raise ValueError(f"Mobile device supports only android/ios, got {v}")
+        if device == "desktop" and v not in ("windows", "macos"):
+            raise ValueError(f"Desktop device supports only windows/macos, got {v}")
+        return v
+
 class TaskCreate(BaseModel):
     main_keyword: str
     country: str
@@ -29,6 +48,7 @@ class TaskCreate(BaseModel):
     additional_keywords: Optional[str] = None
     priority: int = 0
     page_type: str = 'article'
+    serp_config: Optional[SerpConfig] = None
 
 class TaskResponse(BaseModel):
     id: str
@@ -59,6 +79,7 @@ def get_tasks(skip: int = 0, limit: int = 50, status: Optional[str] = None, db: 
         "total_cost": t.total_cost or 0.0,
         "target_site_id": str(t.target_site_id),
         "created_at": t.created_at.isoformat(),
+        "serp_config": t.serp_config or {},
         "error_log": t.error_log
     } for t in tasks]
 
@@ -79,6 +100,7 @@ def get_task(task_id: str, db: Session = Depends(get_db)):
         "outline": task.outline,
         "serp_data": task.serp_data,
         "step_results": task.step_results or {},
+        "serp_config": task.serp_config or {},
         "error_log": task.error_log,
         "created_at": task.created_at.isoformat(),
         "logs": task.logs or [],
@@ -153,7 +175,8 @@ def create_task(task_in: TaskCreate, db: Session = Depends(get_db)):
         target_site_id=site.id,
         author_id=final_author_id,
         additional_keywords=task_in.additional_keywords,
-        priority=task_in.priority
+        priority=task_in.priority,
+        serp_config=task_in.serp_config.model_dump() if task_in.serp_config else None
     )
     db.add(new_task)
     db.commit()

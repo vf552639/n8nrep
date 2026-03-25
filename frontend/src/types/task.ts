@@ -14,7 +14,15 @@ export interface Task {
   outline?: any;
   serp_data?: any;
   step_results?: any;
+  serp_config?: SerpConfig;
   logs?: any[];
+}
+
+export interface SerpConfig {
+  search_engine: "google" | "bing" | "google+bing";
+  depth: 10 | 20 | 30 | 50 | 100;
+  device: "mobile" | "desktop";
+  os: "android" | "ios" | "windows" | "macos";
 }
 
 export interface TaskCreate {
@@ -25,6 +33,7 @@ export interface TaskCreate {
   target_site: string;
   author_id?: string | null;
   page_type?: string;
+  serp_config?: SerpConfig;
 }
 
 export interface StepResult {

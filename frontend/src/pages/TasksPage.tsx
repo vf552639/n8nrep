@@ -9,7 +9,7 @@ import StatusBadge from "@/components/common/StatusBadge";
 import { Plus, Upload, Play, X, Search, Filter, Trash2, RotateCcw } from "lucide-react";
 import QueueControls from "@/components/tasks/QueueControls";
 import { sitesApi } from "@/api/sites";
-import type { Task, TaskCreate } from "@/types/task";
+import type { Task, TaskCreate, SerpConfig } from "@/types/task";
 
 export default function TasksPage() {
   const navigate = useNavigate();
@@ -343,6 +343,11 @@ function CreateTaskModal({ onClose }: { onClose: () => void }) {
     page_type: "article",
   });
 
+  const [serpOpen, setSerpOpen] = useState(false);
+  const [serpEngine, setSerpEngine] = useState<"google" | "bing" | "google+bing">("google");
+  const [serpDepth, setSerpDepth] = useState<number>(10);
+  const [serpDeviceOs, setSerpDeviceOs] = useState("mobile:android");
+
   const countries = Array.from(
     new Set((authors || []).map((a: { country: string }) => a.country).filter(Boolean))
   ).sort();
@@ -371,6 +376,10 @@ function CreateTaskModal({ onClose }: { onClose: () => void }) {
       toast.error("Please fill required fields: Keyword, Site, Country, Language");
       return;
     }
+
+    const [device, os] = serpDeviceOs.split(":") as [string, string];
+    const isDefault = serpEngine === "google" && serpDepth === 10 && device === "mobile" && os === "android";
+
     const payload: TaskCreate = {
       main_keyword: formData.main_keyword,
       additional_keywords: formData.additional_keywords || undefined,
@@ -379,8 +388,23 @@ function CreateTaskModal({ onClose }: { onClose: () => void }) {
       target_site: formData.target_site,
       author_id: formData.author_id || null,
       page_type: formData.page_type,
+      ...(!isDefault && {
+        serp_config: {
+          search_engine: serpEngine,
+          depth: serpDepth as SerpConfig["depth"],
+          device: device as SerpConfig["device"],
+          os: os as SerpConfig["os"],
+        },
+      }),
     };
     mutation.mutate(payload);
+  };
+
+  const deviceOsLabel: Record<string, string> = {
+    "mobile:android": "📱 Mobile (Android)",
+    "mobile:ios": "📱 Mobile (iOS)",
+    "desktop:windows": "🖥 Desktop (Windows)",
+    "desktop:macos": "🖥 Desktop (macOS)",
   };
 
   return (
@@ -501,6 +525,67 @@ function CreateTaskModal({ onClose }: { onClose: () => void }) {
                 <option value="homepage">Homepage</option>
                 <option value="category">Category</option>
               </select>
+            </div>
+
+            {/* SERP Settings */}
+            <div className="border rounded-lg overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setSerpOpen(!serpOpen)}
+                className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 transition-colors"
+              >
+                <span>🔍 SERP Settings</span>
+                <span className="text-xs text-slate-400">
+                  {serpOpen ? "▲" : `▼ ${serpEngine === "google" ? "Google" : serpEngine === "bing" ? "Bing" : "Google+Bing"} · ${serpDepth} results · ${deviceOsLabel[serpDeviceOs]?.split(" ")[0]}`}
+                </span>
+              </button>
+              {serpOpen && (
+                <div className="p-4 space-y-3 border-t bg-white">
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-500 mb-1">Search Engine</label>
+                      <select
+                        className="w-full px-2.5 py-2 border rounded-lg text-sm bg-white focus:ring-1 focus:ring-blue-500 outline-none"
+                        value={serpEngine}
+                        onChange={(e) => setSerpEngine(e.target.value as any)}
+                      >
+                        <option value="google">Google</option>
+                        <option value="bing">Bing</option>
+                        <option value="google+bing">Google + Bing</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-500 mb-1">Depth</label>
+                      <select
+                        className="w-full px-2.5 py-2 border rounded-lg text-sm bg-white focus:ring-1 focus:ring-blue-500 outline-none"
+                        value={serpDepth}
+                        onChange={(e) => setSerpDepth(Number(e.target.value))}
+                      >
+                        {[10, 20, 30, 50, 100].map((d) => (
+                          <option key={d} value={d}>{d} results</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-500 mb-1">Device & OS</label>
+                      <select
+                        className="w-full px-2.5 py-2 border rounded-lg text-sm bg-white focus:ring-1 focus:ring-blue-500 outline-none"
+                        value={serpDeviceOs}
+                        onChange={(e) => setSerpDeviceOs(e.target.value)}
+                      >
+                        {Object.entries(deviceOsLabel).map(([val, label]) => (
+                          <option key={val} value={val}>{label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  {serpEngine === "google+bing" && (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-1.5">
+                      ⚠️ Google + Bing uses 2 API calls — double DataForSEO cost
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           </form>
         </div>
