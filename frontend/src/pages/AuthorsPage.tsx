@@ -1,132 +1,300 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import toast from "react-hot-toast";
 import { authorsApi } from "@/api/authors";
-import { Author } from "@/types/author";
+import { Author, AuthorFormPayload } from "@/types/author";
 import { ReactTable } from "@/components/common/ReactTable";
 import { Plus, User, X } from "lucide-react";
 
-function truncateText(s: string | undefined | null, max: number) {
-  if (!s) return "—";
-  const t = String(s);
-  return t.length > max ? `${t.slice(0, max)}…` : t;
+const EMPTY_FORM: AuthorFormPayload = {
+  author: "",
+  country: "",
+  language: "",
+  bio: "",
+  co_short: "",
+  city: "",
+  imitation: "",
+  year: "",
+  face: "",
+  target_audience: "",
+  rhythms_style: "",
+  exclude_words: "",
+};
+
+function authorToForm(a: Author): AuthorFormPayload {
+  return {
+    author: a.author ?? "",
+    country: a.country ?? "",
+    language: a.language ?? "",
+    bio: a.bio ?? "",
+    co_short: a.co_short ?? "",
+    city: a.city ?? "",
+    imitation: a.imitation ?? "",
+    year: a.year != null ? formatYearCell(a.year) : "",
+    face: a.face ?? "",
+    target_audience: a.target_audience ?? "",
+    rhythms_style: a.rhythms_style ?? "",
+    exclude_words: a.exclude_words ?? "",
+  };
+}
+
+/** Renders year without trailing `.0` from float-like values */
+function formatYearCell(v: unknown): string {
+  if (v === null || v === undefined) return "—";
+  const s = String(v).trim();
+  if (s === "") return "—";
+  const num = Number(s);
+  if (Number.isFinite(num)) {
+    return String(Math.round(num));
+  }
+  return s;
+}
+
+function AuthorFormFields({
+  formData,
+  setFormData,
+}: {
+  formData: AuthorFormPayload;
+  setFormData: React.Dispatch<React.SetStateAction<AuthorFormPayload>>;
+}) {
+  const field = (key: keyof AuthorFormPayload) => ({
+    value: formData[key],
+    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+      setFormData((prev) => ({ ...prev, [key]: e.target.value })),
+  });
+
+  return (
+    <div className="space-y-6 max-h-[70vh] overflow-y-auto pr-1">
+      <div>
+        <h3 className="text-sm font-semibold text-slate-800 border-b pb-2 mb-3">Основные данные</h3>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Имя автора *</label>
+            <input
+              required
+              type="text"
+              className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500"
+              {...field("author")}
+            />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Страна *</label>
+              <input
+                required
+                type="text"
+                placeholder="e.g. Australia"
+                className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500"
+                {...field("country")}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Язык *</label>
+              <input
+                required
+                type="text"
+                placeholder="e.g. English"
+                className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500"
+                {...field("language")}
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Код страны</label>
+              <input
+                type="text"
+                placeholder="e.g. AU, DE"
+                className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500"
+                {...field("co_short")}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Город</label>
+              <input
+                type="text"
+                className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500"
+                {...field("city")}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Биография / описание</label>
+            <textarea
+              rows={3}
+              className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
+              {...field("bio")}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="text-sm font-semibold text-slate-800 border-b pb-2 mb-3">Стилистика (Tone of Voice)</h3>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Imitation (Mimicry)</label>
+            <p className="text-xs text-slate-500 mb-1">Кого подражать</p>
+            <input
+              type="text"
+              className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500"
+              {...field("imitation")}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Год / эпоха стиля</label>
+            <input
+              type="text"
+              placeholder="e.g. 2024"
+              className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500"
+              {...field("year")}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Face / лицо</label>
+            <input
+              type="text"
+              placeholder="e.g. Friendly, Expert"
+              className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500"
+              {...field("face")}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Целевая аудитория</label>
+            <input
+              type="text"
+              className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500"
+              {...field("target_audience")}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Ритм и стиль</label>
+            <input
+              type="text"
+              className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500"
+              {...field("rhythms_style")}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Exclude words</label>
+            <textarea
+              rows={2}
+              className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
+              placeholder="word1, word2"
+              {...field("exclude_words")}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function AuthorsPage() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [editAuthor, setEditAuthor] = useState<Author | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["authors"],
-    queryFn: async () => {
-      return authorsApi.getAll({ limit: 1000 });
-    },
+    queryFn: async () => authorsApi.getAll({ limit: 1000 }),
   });
 
-  const columns = [
-    { 
-      accessorKey: "author", 
-      header: "Author Name", 
-      cell: ({ row }: any) => <div className="font-semibold text-slate-800 flex items-center gap-2"><User className="w-4 h-4 text-slate-400"/> {row.original.author}</div> 
-    },
-    { 
-      accessorKey: "country", 
-      header: "Country", 
-      cell: ({ row }: any) => <span className="bg-slate-100 px-2 py-0.5 rounded text-sm uppercase">{row.original.country}</span> 
-    },
-    { 
-      accessorKey: "language", 
-      header: "Language", 
-      cell: ({ row }: any) => <span className="bg-slate-100 px-2 py-0.5 rounded text-sm lowercase">{row.original.language}</span> 
-    },
-    {
-      accessorKey: "usage_count",
-      header: "Tasks",
-      cell: ({ row }: any) => (
-        <span className="tabular-nums font-medium text-slate-700">{row.original.usage_count ?? 0}</span>
-      ),
-    },
-    {
-      accessorKey: "bio",
-      header: "Bio",
-      cell: ({ row }: any) => {
-        const raw = row.original.bio as string | undefined;
-        const short = truncateText(raw, 100);
-        return (
-          <span className="text-xs text-slate-600 max-w-[200px] block truncate" title={raw || undefined}>
-            {short}
-          </span>
-        );
+  const columns = useMemo(
+    () => [
+      {
+        accessorKey: "author",
+        header: "Author",
+        cell: ({ row }: { row: { original: Author } }) => (
+          <div className="font-semibold text-slate-800 flex items-center gap-2">
+            <User className="w-4 h-4 text-slate-400" /> {row.original.author}
+          </div>
+        ),
       },
-    },
-    {
-      accessorKey: "imitation",
-      header: "Tone of Voice / Imitation",
-      cell: ({ row }: any) => (
-        <span className="text-xs text-slate-600 max-w-[160px] block truncate" title={row.original.imitation}>
-          {truncateText(row.original.imitation, 80)}
-        </span>
-      ),
-    },
-    {
-      accessorKey: "target_audience",
-      header: "Target Audience",
-      cell: ({ row }: any) => (
-        <span className="text-xs text-slate-600 max-w-[160px] block truncate" title={row.original.target_audience}>
-          {truncateText(row.original.target_audience, 80)}
-        </span>
-      ),
-    },
-    {
-      accessorKey: "face",
-      header: "POV (Face)",
-      cell: ({ row }: any) => (
-        <span className="text-xs text-slate-600 max-w-[120px] block truncate" title={row.original.face}>
-          {truncateText(row.original.face, 60)}
-        </span>
-      ),
-    },
-    {
-      accessorKey: "year",
-      header: "Year",
-      cell: ({ row }: any) => <span className="text-xs text-slate-600">{row.original.year || "—"}</span>,
-    },
-    {
-      accessorKey: "rhythms_style",
-      header: "Style",
-      cell: ({ row }: any) => (
-        <span className="text-xs text-slate-600 max-w-[140px] block truncate" title={row.original.rhythms_style}>
-          {truncateText(row.original.rhythms_style, 80)}
-        </span>
-      ),
-    },
-    {
-      accessorKey: "city",
-      header: "City",
-      cell: ({ row }: any) => (
-        <span className="text-xs text-slate-600 max-w-[100px] block truncate" title={row.original.city}>
-          {row.original.city || "—"}
-        </span>
-      ),
-    },
-    { 
-      accessorKey: "exclude_words", 
-      header: "Exclude Words", 
-      cell: ({ row }: any) => (
-        <span className="text-xs text-slate-500 max-w-xs truncate block" title={row.original.exclude_words}>
-          {row.original.exclude_words || "None"}
-        </span>
-      )
-    },
-  ];
+      {
+        accessorKey: "country",
+        header: "Country",
+        cell: ({ row }: { row: { original: Author } }) => (
+          <span className="bg-slate-100 px-2 py-0.5 rounded text-sm uppercase">{row.original.country}</span>
+        ),
+      },
+      {
+        accessorKey: "language",
+        header: "Language",
+        cell: ({ row }: { row: { original: Author } }) => (
+          <span className="bg-slate-100 px-2 py-0.5 rounded text-sm lowercase">{row.original.language}</span>
+        ),
+      },
+      {
+        accessorKey: "city",
+        header: "City",
+        cell: ({ row }: { row: { original: Author } }) => (
+          <span className="text-xs text-slate-600 max-w-[120px] truncate block" title={row.original.city}>
+            {row.original.city || "—"}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "imitation",
+        header: "Imitation",
+        cell: ({ row }: { row: { original: Author } }) => (
+          <span className="text-xs text-slate-600 max-w-[140px] truncate" title={row.original.imitation}>
+            {row.original.imitation || "—"}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "year",
+        header: "Year",
+        cell: ({ row }: { row: { original: Author } }) => (
+          <span className="text-xs text-slate-600">{formatYearCell(row.original.year)}</span>
+        ),
+      },
+      {
+        accessorKey: "face",
+        header: "Face",
+        cell: ({ row }: { row: { original: Author } }) => (
+          <span className="text-xs text-slate-600 max-w-[100px] truncate" title={row.original.face}>
+            {row.original.face || "—"}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "target_audience",
+        header: "Target audience",
+        cell: ({ row }: { row: { original: Author } }) => (
+          <span className="text-xs text-slate-600 max-w-[140px] truncate" title={row.original.target_audience}>
+            {row.original.target_audience || "—"}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "rhythms_style",
+        header: "Style",
+        cell: ({ row }: { row: { original: Author } }) => (
+          <span className="text-xs text-slate-600 max-w-[140px] truncate" title={row.original.rhythms_style}>
+            {row.original.rhythms_style || "—"}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "usage_count",
+        header: "Tasks",
+        cell: ({ row }: { row: { original: Author } }) => (
+          <span className="tabular-nums font-medium text-slate-700">{row.original.usage_count ?? 0}</span>
+        ),
+      },
+    ],
+    []
+  );
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-5 rounded-xl border shadow-sm">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 border-l-4 border-indigo-500 pl-3">Virtual Authors</h1>
-          <p className="text-sm text-slate-500 mt-1 pl-4">Manage author personas and their specific generation settings.</p>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900 border-l-4 border-indigo-500 pl-3">Authors</h1>
+          <p className="text-sm text-slate-500 mt-1 pl-4">Авторы и стилистика генерации.</p>
         </div>
-        <button 
+        <button
           onClick={() => setIsCreateOpen(true)}
           className="flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg transition-colors text-sm font-medium shadow-sm w-full sm:w-auto"
         >
@@ -134,42 +302,37 @@ export default function AuthorsPage() {
         </button>
       </div>
 
-      <ReactTable 
-        columns={columns as any} 
-        data={data || []} 
-        isLoading={isLoading} 
+      <ReactTable
+        columns={columns as any}
+        data={data || []}
+        isLoading={isLoading}
+        onRowClick={(a: Author) => setEditAuthor(a)}
       />
 
-      {isCreateOpen && (
-        <CreateAuthorModal onClose={() => setIsCreateOpen(false)} />
-      )}
+      {isCreateOpen && <CreateAuthorModal onClose={() => setIsCreateOpen(false)} />}
+      {editAuthor && <EditAuthorModal author={editAuthor} onClose={() => setEditAuthor(null)} />}
     </div>
   );
 }
 
 function CreateAuthorModal({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
-  const [formData, setFormData] = useState({
-    author: "",
-    country: "US",
-    language: "en",
-    exclude_words: ""
-  });
+  const [formData, setFormData] = useState<AuthorFormPayload>({ ...EMPTY_FORM });
 
   const mutation = useMutation({
-    mutationFn: (data: Partial<Author>) => authorsApi.create(data),
+    mutationFn: (data: AuthorFormPayload) => authorsApi.create(data),
     onSuccess: () => {
       toast.success("Author created successfully");
       queryClient.invalidateQueries({ queryKey: ["authors"] });
       onClose();
     },
-    onError: () => toast.error("Failed to create author")
+    onError: () => toast.error("Failed to create author"),
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.author) {
-      toast.error("Author Name is required");
+      toast.error("Author name is required");
       return;
     }
     mutation.mutate(formData);
@@ -177,69 +340,83 @@ function CreateAuthorModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden">
-        <div className="px-6 py-4 border-b bg-slate-50 flex justify-between items-center">
-            <h2 className="text-lg font-bold text-slate-900">Add New Author</h2>
-            <button onClick={onClose} className="p-1 hover:bg-slate-200 rounded text-slate-500"><X className="w-5 h-5"/></button>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[95vh]">
+        <div className="px-6 py-4 border-b bg-slate-50 flex justify-between items-center shrink-0">
+          <h2 className="text-lg font-bold text-slate-900">Add New Author</h2>
+          <button type="button" onClick={onClose} className="p-1 hover:bg-slate-200 rounded text-slate-500">
+            <X className="w-5 h-5" />
+          </button>
         </div>
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-           <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Author Name *</label>
-              <input 
-                required
-                type="text" 
-                value={formData.author}
-                onChange={e => setFormData({...formData, author: e.target.value})}
-                className="w-full border outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-sm" 
-                placeholder="e.g. John Doe, Editor" 
-              />
-           </div>
-           <div className="grid grid-cols-2 gap-4">
-             <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Country</label>
-                <input 
-                  type="text" 
-                  value={formData.country}
-                  onChange={e => setFormData({...formData, country: e.target.value})}
-                  className="w-full border outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-sm uppercase" 
-                />
-             </div>
-             <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Language</label>
-                <input 
-                  type="text" 
-                  value={formData.language}
-                  onChange={e => setFormData({...formData, language: e.target.value})}
-                  className="w-full border outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-sm lowercase" 
-                />
-             </div>
-           </div>
-           <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Exclude Words (comma separated)</label>
-              <textarea 
-                rows={3} 
-                value={formData.exclude_words}
-                onChange={e => setFormData({...formData, exclude_words: e.target.value})}
-                className="w-full border outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-sm max-h-32" 
-                placeholder="word1, word2, phrase 3"
-              />
-           </div>
-           <div className="flex justify-end gap-3 mt-8 pt-4 border-t">
-             <button 
-               type="button"
-               onClick={onClose}
-               className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-sm font-medium transition-colors"
-             >
-               Cancel
-             </button>
-             <button 
-               type="submit"
-               disabled={mutation.isPending}
-               className="px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 text-sm font-medium transition-colors shadow-sm disabled:opacity-50"
-             >
-               {mutation.isPending ? "Saving..." : "Save Author"}
-             </button>
-           </div>
+        <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
+          <div className="p-6 overflow-y-auto flex-1">
+            <AuthorFormFields formData={formData} setFormData={setFormData} />
+          </div>
+          <div className="flex justify-end gap-3 px-6 py-4 border-t bg-slate-50 shrink-0">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-sm font-medium">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={mutation.isPending}
+              className="px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 text-sm font-medium disabled:opacity-50"
+            >
+              {mutation.isPending ? "Saving..." : "Save Author"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function EditAuthorModal({ author, onClose }: { author: Author; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [formData, setFormData] = useState<AuthorFormPayload>(() => authorToForm(author));
+
+  const mutation = useMutation({
+    mutationFn: (data: AuthorFormPayload) => authorsApi.update(author.id, data),
+    onSuccess: () => {
+      toast.success("Author updated");
+      queryClient.invalidateQueries({ queryKey: ["authors"] });
+      onClose();
+    },
+    onError: () => toast.error("Failed to update author"),
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.author) {
+      toast.error("Author name is required");
+      return;
+    }
+    mutation.mutate(formData);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[95vh]">
+        <div className="px-6 py-4 border-b bg-slate-50 flex justify-between items-center shrink-0">
+          <h2 className="text-lg font-bold text-slate-900">Edit Author</h2>
+          <button type="button" onClick={onClose} className="p-1 hover:bg-slate-200 rounded text-slate-500">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
+          <div className="p-6 overflow-y-auto flex-1">
+            <AuthorFormFields formData={formData} setFormData={setFormData} />
+          </div>
+          <div className="flex justify-end gap-3 px-6 py-4 border-t bg-slate-50 shrink-0">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-sm font-medium">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={mutation.isPending}
+              className="px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 text-sm font-medium disabled:opacity-50"
+            >
+              {mutation.isPending ? "Saving..." : "Save changes"}
+            </button>
+          </div>
         </form>
       </div>
     </div>

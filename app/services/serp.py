@@ -71,7 +71,9 @@ def call_dataforseo(keyword: str, location_code: str, language_code: str) -> Opt
         "keyword": keyword,
         "location_code": dfs_loc,
         "language_code": dfs_lang,
-        "depth": 10
+        "depth": 10,
+        "device": "mobile",
+        "os": "android"
     }]
     
     try:

@@ -7,7 +7,7 @@ export interface Task {
   target_site_id?: string;
   author_id?: string;
   page_type: string;
-  status: "pending" | "processing" | "completed" | "failed";
+  status: "pending" | "processing" | "completed" | "failed" | "stale";
   error_log?: string | null;
   created_at: string;
   total_cost?: number;

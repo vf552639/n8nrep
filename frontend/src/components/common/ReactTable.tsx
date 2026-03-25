@@ -6,6 +6,8 @@ import {
   getPaginationRowModel,
   getSortedRowModel,
   SortingState,
+  RowSelectionState,
+  OnChangeFn,
 } from "@tanstack/react-table"
 import { useState } from "react"
 import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Loader2 } from "lucide-react"
@@ -15,15 +17,31 @@ interface ReactTableProps<TData, TValue> {
   data: TData[]
   isLoading?: boolean
   onRowClick?: (item: TData) => void
+  /** Row selection (TanStack Table). When set with onRowSelectionChange, selection is controlled by parent. */
+  rowSelection?: RowSelectionState
+  onRowSelectionChange?: OnChangeFn<RowSelectionState>
+  getRowId?: (row: TData) => string
+  enableRowSelection?: boolean
 }
 
 export function ReactTable<TData, TValue>({
   columns,
   data,
   isLoading,
-  onRowClick
+  onRowClick,
+  rowSelection: controlledRowSelection,
+  onRowSelectionChange,
+  getRowId,
+  enableRowSelection = false,
 }: ReactTableProps<TData, TValue>) {
   const [sorting, setSorting] = useState<SortingState>([])
+  const [internalRowSelection, setInternalRowSelection] = useState<RowSelectionState>({})
+
+  const rowSelection = controlledRowSelection !== undefined ? controlledRowSelection : internalRowSelection
+  const setRowSelection: OnChangeFn<RowSelectionState> =
+    onRowSelectionChange ?? ((updater) => {
+      setInternalRowSelection((prev) => (typeof updater === "function" ? updater(prev) : updater))
+    })
 
   const table = useReactTable({
     data,
@@ -32,8 +50,16 @@ export function ReactTable<TData, TValue>({
     getPaginationRowModel: getPaginationRowModel(),
     onSortingChange: setSorting,
     getSortedRowModel: getSortedRowModel(),
+    enableRowSelection,
+    ...(enableRowSelection
+      ? {
+          onRowSelectionChange: setRowSelection,
+          getRowId: getRowId ?? ((row: TData) => String((row as { id?: string }).id ?? "")),
+        }
+      : {}),
     state: {
       sorting,
+      ...(enableRowSelection ? { rowSelection } : {}),
     },
     initialState: {
         pagination: {

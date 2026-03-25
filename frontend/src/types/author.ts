@@ -3,15 +3,29 @@ export interface Author {
   author: string;
   country: string;
   language: string;
-  year?: string;
-  target_audience?: string;
-  style_prompt?: string;
-  face?: string;
+  bio?: string;
+  co_short?: string;
+  city?: string;
   imitation?: string;
+  year?: string;
+  face?: string;
+  target_audience?: string;
   rhythms_style?: string;
   exclude_words?: string;
-  bio?: string;
-  city?: string;
-  /** Number of tasks using this author */
   usage_count?: number;
 }
+
+export type AuthorFormPayload = {
+  author: string;
+  country: string;
+  language: string;
+  bio: string;
+  co_short: string;
+  city: string;
+  imitation: string;
+  year: string;
+  face: string;
+  target_audience: string;
+  rhythms_style: string;
+  exclude_words: string;
+};

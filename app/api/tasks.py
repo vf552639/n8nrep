@@ -313,6 +313,33 @@ def start_selected_tasks(payload: StartSelectedRequest, db: Session = Depends(ge
         "msg": f"Запущена цепочка из {len(tasks)} задач",
     }
 
+
+@router.post("/delete-selected")
+def delete_selected_tasks(payload: StartSelectedRequest, db: Session = Depends(get_db)):
+    """Удаляет выбранные задачи и связанные статьи."""
+    if not payload.task_ids:
+        return {"deleted": 0}
+
+    id_list: List[uuid.UUID] = []
+    for tid in payload.task_ids:
+        try:
+            id_list.append(uuid.UUID(str(tid)))
+        except ValueError:
+            continue
+
+    deleted = 0
+    for uid in id_list:
+        task = db.query(Task).filter(Task.id == uid).first()
+        if not task:
+            continue
+        db.query(GeneratedArticle).filter(GeneratedArticle.task_id == task.id).delete(synchronize_session=False)
+        db.delete(task)
+        deleted += 1
+
+    db.commit()
+    return {"deleted": deleted}
+
+
 @router.get("/{task_id}/serp-data")
 def get_task_serp_data(task_id: str, db: Session = Depends(get_db)):
     """Возвращает структурированные SERP-данные задачи для отображения в UI."""

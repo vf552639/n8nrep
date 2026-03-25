@@ -1,5 +1,5 @@
 import api from "./client";
-import { Author } from "@/types/author";
+import { Author, AuthorFormPayload } from "@/types/author";
 
 export const authorsApi = {
   getAll: (params?: { skip?: number; limit?: number }) => 
@@ -7,7 +7,10 @@ export const authorsApi = {
     
   getOne: (id: string) => 
     api.get<Author>(`/authors/${id}`).then(res => res.data),
-    
-  create: (data: Partial<Author>) => 
-    api.post<Author>("/authors", data).then(res => res.data),
+
+  create: (data: AuthorFormPayload) => 
+    api.post<{ id: string }>("/authors", data).then(res => res.data),
+
+  update: (id: string, data: AuthorFormPayload) =>
+    api.put<{ id: string; status: string }>(`/authors/${id}`, data).then((res) => res.data),
 };

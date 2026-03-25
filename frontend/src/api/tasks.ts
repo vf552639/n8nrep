@@ -27,6 +27,11 @@ export const tasksApi = {
 
   startSelected: (taskIds: string[]) =>
     api.post<{ started: number; msg: string }>("/tasks/start-selected", { task_ids: taskIds }).then((res) => res.data),
+
+  deleteSelected: (taskIds: string[]) =>
+    api.post<{ deleted: number }>("/tasks/delete-selected", { task_ids: taskIds }).then((res) => res.data),
+
+  retry: (id: string) => api.post<{ msg: string }>(`/tasks/${id}/retry`).then((res) => res.data),
     
   delete: (id: string) => 
     api.delete(`/tasks/${id}`).then(res => res.data),
