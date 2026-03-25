@@ -34,7 +34,7 @@ class Settings(BaseSettings):
 
     # Content
     EXCLUDE_WORDS: str = ""
-    EXCLUDED_DOMAINS: str = "facebook.com,instagram.com,trustpilot.com,tripadvisor.com,tripadvisor.co.uk,tripadvisor.de,twitter.com,x.com,youtube.com,linkedin.com,pinterest.com,reddit.com,tiktok.com"
+    EXCLUDED_DOMAINS: str = ""
 
     # Celery
     CELERY_CONCURRENCY: int = 2
