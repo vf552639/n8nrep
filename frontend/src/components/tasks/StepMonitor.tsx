@@ -16,7 +16,6 @@ const ALL_STEPS = [
   "competitor_structure_analysis",
   "final_structure_analysis",
   "structure_fact_checking",
-  "image_prompt_generation",
   "image_generation",
   "primary_generation",
   "competitor_comparison",

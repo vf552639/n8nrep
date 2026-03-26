@@ -24,7 +24,7 @@ const AGENT_MAP: Record<string, string> = {
   competitor_structure_analysis: "Competitor Structure",
   final_structure_analysis: "Final Structure Analysis",
   structure_fact_checking: "Structure Fact-Checking",
-  image_prompt_generation: "Image Prompt Generation",
+  image_prompt_generation: "Image Generation",
   primary_generation: "Primary Generation",
   competitor_comparison: "Competitor Comparison",
   reader_opinion: "Reader Opinion",
