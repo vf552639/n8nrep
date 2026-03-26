@@ -16,6 +16,8 @@ const ALL_STEPS = [
   "competitor_structure_analysis",
   "final_structure_analysis",
   "structure_fact_checking",
+  "image_prompt_generation",
+  "image_generation",
   "primary_generation",
   "competitor_comparison",
   "reader_opinion",
@@ -24,6 +26,7 @@ const ALL_STEPS = [
   "final_editing",
   "content_fact_checking",
   "html_structure",
+  "image_inject",
   "meta_generation"
 ];
 
@@ -39,6 +42,7 @@ export default function StepMonitor({ taskId, isActive }: Props) {
 
   const results = stepResp.step_results || {};
   const isWaiting = (results as any).waiting_for_approval === true;
+  const isImagePaused = (results as any)._pipeline_pause?.active && (results as any)._pipeline_pause?.reason === "image_review";
 
   return (
     <div className="space-y-4">
@@ -47,6 +51,9 @@ export default function StepMonitor({ taskId, isActive }: Props) {
          <div className="flex items-center gap-3">
            {isWaiting && (
              <span className="text-amber-600 text-xs font-medium">⏸ Paused — see Article Review tab</span>
+           )}
+           {isImagePaused && (
+             <span className="text-purple-600 text-xs font-medium">🖼️ Paused — see Image Review tab</span>
            )}
            <span className="text-slate-500">Cost: <span className="font-mono text-emerald-600">${stepResp.total_cost?.toFixed(4) || "0.0000"}</span></span>
            <span className="font-bold text-blue-700">{stepResp.progress || 0}%</span>

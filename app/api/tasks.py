@@ -628,6 +628,21 @@ def rerun_task_step(task_id: str, payload: RerunStepRequest, db: Session = Depen
     else:
         invalidated_steps.append(payload.step_name)
         del step_results[payload.step_name]
+        
+        # Image chain special-casing:
+        # - image_prompt_generation -> affects image_generation -> image_inject
+        # - image_generation -> affects image_inject
+        # - Do NOT invalidate primary_generation or later steps here (no cascade),
+        #   only re-run the minimal dependent steps inside the image chain.
+        if payload.step_name == "image_prompt_generation":
+            for s in ("image_generation", "image_inject"):
+                if s in step_results:
+                    invalidated_steps.append(s)
+                    del step_results[s]
+        elif payload.step_name == "image_generation":
+            if "image_inject" in step_results:
+                invalidated_steps.append("image_inject")
+                del step_results["image_inject"]
     
     # --- Clear cached data so pipeline phases re-fetch ---
     try:
@@ -687,3 +702,167 @@ def rerun_task_step(task_id: str, payload: RerunStepRequest, db: Session = Depen
         "msg": f"Step '{payload.step_name}' queued for re-run",
         "invalidated_steps": invalidated_steps
     }
+
+# ========================
+# IMAGE REVIEW ENDPOINTS
+# ========================
+
+@router.get("/{task_id}/images")
+def get_task_images(task_id: str, db: Session = Depends(get_db)):
+    """Get generated images for review."""
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    step_results = task.step_results or {}
+    image_gen_result = step_results.get("image_generation", {}).get("result", "")
+    
+    if not image_gen_result:
+        return {"images": [], "summary": {}, "paused": False}
+
+    import json as _json
+    try:
+        data = _json.loads(image_gen_result) if isinstance(image_gen_result, str) else image_gen_result
+    except Exception:
+        data = {"images": []}
+
+    pause_state = step_results.get("_pipeline_pause", {})
+    is_paused = isinstance(pause_state, dict) and pause_state.get("active") and pause_state.get("reason") == "image_review"
+
+    return {
+        "images": data.get("images", []),
+        "summary": data.get("summary", {}),
+        "paused": is_paused,
+    }
+
+
+class ApproveImagesRequest(BaseModel):
+    approved_ids: list  # List of image IDs to approve
+    skipped_ids: list = []  # List of image IDs to skip
+
+
+@router.post("/{task_id}/approve-images")
+def approve_images(task_id: str, payload: ApproveImagesRequest, db: Session = Depends(get_db)):
+    """Approve/skip images and resume pipeline."""
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    step_results = dict(task.step_results or {})
+    image_gen_result = step_results.get("image_generation", {}).get("result", "")
+
+    if not image_gen_result:
+        raise HTTPException(status_code=400, detail="No image generation data found")
+
+    import json as _json
+    try:
+        data = _json.loads(image_gen_result) if isinstance(image_gen_result, str) else image_gen_result
+    except Exception:
+        raise HTTPException(status_code=400, detail="Could not parse image data")
+
+    images = data.get("images", [])
+    approved_set = set(payload.approved_ids)
+    skipped_set = set(payload.skipped_ids)
+
+    for img in images:
+        if img["id"] in approved_set:
+            img["approved"] = True
+        elif img["id"] in skipped_set:
+            img["approved"] = False
+
+    # Save updated image data
+    step_data = dict(step_results.get("image_generation", {}))
+    step_data["result"] = _json.dumps(data, ensure_ascii=False)
+    step_results["image_generation"] = step_data
+
+    # Clear the pause
+    step_results["_pipeline_pause"] = {"active": False, "reason": "image_review"}
+    step_results["_images_approved"] = True
+    task.step_results = step_results
+    task.status = "pending"
+    db.commit()
+
+    # Resume pipeline
+    process_generation_task.delay(str(task.id))
+
+    return {
+        "msg": f"Images reviewed: {len(approved_set)} approved, {len(skipped_set)} skipped. Pipeline resumed.",
+        "approved_count": len(approved_set),
+        "skipped_count": len(skipped_set),
+    }
+
+
+class RegenerateImageRequest(BaseModel):
+    image_id: str
+    new_prompt: str = ""  # Optional prompt override
+
+
+@router.post("/{task_id}/regenerate-image")
+def regenerate_image(task_id: str, payload: RegenerateImageRequest, db: Session = Depends(get_db)):
+    """Regenerate a specific image (while pipeline is paused)."""
+    from app.services.image_generator import GoApiMidjourneyGenerator
+    from app.services.image_hosting import ImgBBUploader
+
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    step_results = dict(task.step_results or {})
+    image_gen_result = step_results.get("image_generation", {}).get("result", "")
+
+    if not image_gen_result:
+        raise HTTPException(status_code=400, detail="No image generation data found")
+
+    import json as _json
+    try:
+        data = _json.loads(image_gen_result) if isinstance(image_gen_result, str) else image_gen_result
+    except Exception:
+        raise HTTPException(status_code=400, detail="Could not parse image data")
+
+    images = data.get("images", [])
+    target_img = next((img for img in images if img["id"] == payload.image_id), None)
+    if not target_img:
+        raise HTTPException(status_code=404, detail=f"Image '{payload.image_id}' not found")
+
+    prompt = payload.new_prompt or target_img.get("midjourney_prompt", "")
+    if not prompt:
+        raise HTTPException(status_code=400, detail="No prompt available for regeneration")
+
+    try:
+        generator = GoApiMidjourneyGenerator(
+            api_key=settings.GOAPI_API_KEY, base_url=settings.GOAPI_BASE_URL,
+            poll_interval=settings.IMAGE_POLL_INTERVAL, poll_timeout=settings.IMAGE_POLL_TIMEOUT,
+        )
+        result = generator.generate_and_wait(
+            prompt=prompt,
+            aspect_ratio=target_img.get("aspect_ratio", "16:9"),
+        )
+
+        if result.status == "completed" and result.image_url:
+            uploader = ImgBBUploader(api_key=settings.IMGBB_API_KEY)
+            keyword_slug = task.main_keyword.lower().replace(" ", "-")[:30]
+            filename = f"regen_{keyword_slug}_{payload.image_id}"
+            hosted = uploader.upload_from_url(result.image_url, filename)
+
+            target_img["status"] = "completed"
+            target_img["original_url"] = result.image_url
+            target_img["hosted_url"] = hosted.get("url", "")
+            target_img["error"] = None
+            if payload.new_prompt:
+                target_img["midjourney_prompt"] = payload.new_prompt
+        else:
+            target_img["status"] = "failed"
+            target_img["error"] = result.error or "Regeneration failed"
+
+    except Exception as e:
+        target_img["status"] = "failed"
+        target_img["error"] = str(e)
+
+    step_data = dict(step_results.get("image_generation", {}))
+    step_data["result"] = _json.dumps(data, ensure_ascii=False)
+    step_results["image_generation"] = step_data
+    task.step_results = step_results
+    db.commit()
+
+    return {"image": target_img}
+

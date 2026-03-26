@@ -22,6 +22,10 @@ class SettingsUpdate(BaseModel):
     EXCLUDE_WORDS: str = None
     EXCLUDED_DOMAINS: str = None
     SEQUENTIAL_MODE: str = None
+    MIDJOURNEY_API_KEY: str = None
+    GOAPI_API_KEY: str = None
+    IMGBB_API_KEY: str = None
+    IMAGE_GEN_ENABLED: str = None
 
 @router.get("/")
 def get_settings() -> Dict[str, Any]:

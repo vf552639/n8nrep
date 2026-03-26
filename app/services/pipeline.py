@@ -808,6 +808,220 @@ def phase_structure_fact_check(ctx: PipelineContext):
     add_log(ctx.db, ctx.task, f"Structure Fact-Checking completed ({len(fact_check_report)} chars)", step=STEP_STRUCTURE_FACT_CHECK)
     save_step_result(ctx.db, ctx.task, STEP_STRUCTURE_FACT_CHECK, result=fact_check_report, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
 
+def phase_image_prompt_gen(ctx: PipelineContext):
+    """LLM agent extracts MULTIMEDIA blocks from outline and generates Midjourney prompts."""
+    if not settings.IMAGE_GEN_ENABLED:
+        add_log(ctx.db, ctx.task, "Image generation disabled globally — skipping", step=STEP_IMAGE_PROMPT_GEN)
+        save_step_result(ctx.db, ctx.task, STEP_IMAGE_PROMPT_GEN, result=json.dumps({"images": [], "skipped": True}), status="completed")
+        return
+
+    from app.services.image_utils import extract_multimedia_blocks
+
+    outline_raw = ctx.task.step_results.get(STEP_FINAL_ANALYSIS, {}).get("result", "")
+    if not outline_raw:
+        add_log(ctx.db, ctx.task, "No final structure found — skipping image prompt gen", step=STEP_IMAGE_PROMPT_GEN)
+        save_step_result(ctx.db, ctx.task, STEP_IMAGE_PROMPT_GEN, result=json.dumps({"images": []}), status="completed")
+        return
+
+    outline_json = clean_and_parse_json(outline_raw)
+    multimedia_blocks = extract_multimedia_blocks(outline_json)
+
+    if not multimedia_blocks:
+        add_log(ctx.db, ctx.task, "No MULTIMEDIA blocks found in outline — skipping", step=STEP_IMAGE_PROMPT_GEN)
+        save_step_result(ctx.db, ctx.task, STEP_IMAGE_PROMPT_GEN, result=json.dumps({"images": []}), status="completed")
+        return
+
+    add_log(ctx.db, ctx.task, f"Found {len(multimedia_blocks)} MULTIMEDIA blocks. Generating prompts...", step=STEP_IMAGE_PROMPT_GEN)
+    save_step_result(ctx.db, ctx.task, STEP_IMAGE_PROMPT_GEN, result=None, status="running")
+
+    context = (
+        f"Keyword: {ctx.task.main_keyword}\n"
+        f"Language: {ctx.task.language}\n\n"
+        f"MULTIMEDIA blocks extracted from article outline:\n"
+        f"{json.dumps(multimedia_blocks, ensure_ascii=False, indent=2)}"
+    )
+
+    setup_template_vars(ctx)
+    result_json, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
+        ctx, "image_prompt_generation", context,
+        response_format={"type": "json_object"}, variables=ctx.template_vars
+    )
+    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
+
+    add_log(ctx.db, ctx.task, f"Image prompt generation completed", step=STEP_IMAGE_PROMPT_GEN)
+    save_step_result(ctx.db, ctx.task, STEP_IMAGE_PROMPT_GEN, result=result_json, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
+
+
+def phase_image_gen(ctx: PipelineContext):
+    """Service step: sends prompts to Midjourney (parallel), uploads results to ImgBB."""
+    import time as _time
+    from app.services.image_generator import GoApiMidjourneyGenerator
+    from app.services.image_hosting import ImgBBUploader
+
+    if not settings.IMAGE_GEN_ENABLED:
+        add_log(ctx.db, ctx.task, "Image generation disabled — skipping", step=STEP_IMAGE_GEN)
+        save_step_result(ctx.db, ctx.task, STEP_IMAGE_GEN, result=json.dumps({"images": [], "skipped": True}), status="completed")
+        return
+
+    prompt_data_raw = ctx.task.step_results.get(STEP_IMAGE_PROMPT_GEN, {}).get("result", "")
+    prompt_data = clean_and_parse_json(prompt_data_raw) if prompt_data_raw else {}
+    images_to_gen = prompt_data.get("images", []) if isinstance(prompt_data, dict) else []
+
+    if not images_to_gen or (isinstance(prompt_data, dict) and prompt_data.get("skipped")):
+        add_log(ctx.db, ctx.task, "No image prompts to process — skipping", step=STEP_IMAGE_GEN)
+        save_step_result(ctx.db, ctx.task, STEP_IMAGE_GEN, result=json.dumps({"images": []}), status="completed")
+        return
+
+    add_log(ctx.db, ctx.task, f"Starting image generation for {len(images_to_gen)} images (parallel)...", step=STEP_IMAGE_GEN)
+    save_step_result(ctx.db, ctx.task, STEP_IMAGE_GEN, result=None, status="running")
+
+    generator = GoApiMidjourneyGenerator(
+        api_key=settings.GOAPI_API_KEY, base_url=settings.GOAPI_BASE_URL,
+        poll_interval=settings.IMAGE_POLL_INTERVAL, poll_timeout=settings.IMAGE_POLL_TIMEOUT,
+    )
+    uploader = ImgBBUploader(api_key=settings.IMGBB_API_KEY)
+
+    # Submit ALL prompts first
+    tasks_map = {}
+    for img in images_to_gen:
+        try:
+            task_id = generator.generate(prompt=img["midjourney_prompt"], aspect_ratio=img.get("aspect_ratio", "16:9"))
+            tasks_map[task_id] = {
+                "id": img["id"], "section": img.get("section", ""),
+                "midjourney_prompt": img["midjourney_prompt"], "alt_text": img.get("alt_text", ""),
+                "provider_task_id": task_id, "status": "pending",
+                "original_url": None, "hosted_url": None, "approved": None, "error": None,
+            }
+            add_log(ctx.db, ctx.task, f"Submitted {img['id']} → task {task_id}", step=STEP_IMAGE_GEN)
+        except Exception as e:
+            tasks_map[f"failed_{img['id']}"] = {
+                "id": img["id"], "section": img.get("section", ""),
+                "midjourney_prompt": img["midjourney_prompt"], "alt_text": img.get("alt_text", ""),
+                "provider_task_id": "", "status": "failed",
+                "original_url": None, "hosted_url": None, "approved": None, "error": str(e),
+            }
+            add_log(ctx.db, ctx.task, f"Submit failed for {img['id']}: {e}", level="warn", step=STEP_IMAGE_GEN)
+
+    # Poll all pending tasks in a single loop
+    elapsed = 0
+    while elapsed < settings.IMAGE_POLL_TIMEOUT:
+        pending = [tid for tid, data in tasks_map.items() if data["status"] == "pending"]
+        if not pending:
+            break
+        _time.sleep(settings.IMAGE_POLL_INTERVAL)
+        elapsed += settings.IMAGE_POLL_INTERVAL
+
+        for tid in pending:
+            try:
+                result = generator.get_status(tid)
+                if result.status == "completed":
+                    tasks_map[tid]["status"] = "completed"
+                    tasks_map[tid]["original_url"] = result.image_url
+                    keyword_slug = ctx.task.main_keyword.lower().replace(" ", "-")[:30]
+                    site_slug = ctx.site_name.lower().replace(" ", "-")[:20]
+                    filename = f"{site_slug}_{keyword_slug}_{tasks_map[tid]['id']}"
+                    hosted = uploader.upload_from_url(result.image_url, filename)
+                    tasks_map[tid]["hosted_url"] = hosted.get("url", "")
+                    add_log(ctx.db, ctx.task, f"✅ {tasks_map[tid]['id']} completed → {hosted.get('url', '')[:60]}", step=STEP_IMAGE_GEN)
+                elif result.status == "failed":
+                    tasks_map[tid]["status"] = "failed"
+                    tasks_map[tid]["error"] = result.error
+                    add_log(ctx.db, ctx.task, f"❌ {tasks_map[tid]['id']} failed: {result.error}", level="warn", step=STEP_IMAGE_GEN)
+            except Exception as e:
+                add_log(ctx.db, ctx.task, f"Poll error for {tid}: {e}", level="warn", step=STEP_IMAGE_GEN)
+
+    # Timeout remaining pending
+    for tid, data in tasks_map.items():
+        if data["status"] == "pending":
+            data["status"] = "failed"
+            data["error"] = f"Timeout after {settings.IMAGE_POLL_TIMEOUT}s"
+
+    images_result = list(tasks_map.values())
+    completed_count = sum(1 for img in images_result if img["status"] == "completed")
+    failed_count = sum(1 for img in images_result if img["status"] == "failed")
+
+    result_payload = {
+        "images": images_result,
+        "summary": {"total": len(images_result), "completed": completed_count, "failed": failed_count}
+    }
+    save_step_result(ctx.db, ctx.task, STEP_IMAGE_GEN, result=json.dumps(result_payload, ensure_ascii=False), status="completed")
+
+    # Pause for review if any images were generated
+    if completed_count > 0 or failed_count > 0:
+        step_results = dict(ctx.task.step_results or {})
+        step_results["_pipeline_pause"] = {"active": True, "reason": "image_review", "message": "Waiting for image review"}
+        ctx.task.step_results = step_results
+        ctx.task.status = "processing"
+        ctx.db.commit()
+        add_log(ctx.db, ctx.task, f"🖼️ Image generation done: {completed_count} ok, {failed_count} failed. Waiting for review.", step=STEP_IMAGE_GEN)
+    else:
+        add_log(ctx.db, ctx.task, "No images generated — continuing pipeline", step=STEP_IMAGE_GEN)
+
+
+def phase_image_inject(ctx: PipelineContext):
+    """Service step: injects approved images into final HTML after html_structure."""
+    html_result = ctx.task.step_results.get(STEP_HTML_STRUCT, {}).get("result", "")
+    if not html_result:
+        add_log(ctx.db, ctx.task, "No HTML structure found — skipping image inject", step=STEP_IMAGE_INJECT)
+        save_step_result(ctx.db, ctx.task, STEP_IMAGE_INJECT, result="", status="completed")
+        return
+
+    image_data_raw = ctx.task.step_results.get(STEP_IMAGE_GEN, {}).get("result", "")
+    if not image_data_raw:
+        add_log(ctx.db, ctx.task, "No image data — passing HTML through unchanged", step=STEP_IMAGE_INJECT)
+        save_step_result(ctx.db, ctx.task, STEP_IMAGE_INJECT, result=html_result, status="completed")
+        return
+
+    image_data = clean_and_parse_json(image_data_raw) if isinstance(image_data_raw, str) else image_data_raw
+    if not isinstance(image_data, dict):
+        save_step_result(ctx.db, ctx.task, STEP_IMAGE_INJECT, result=html_result, status="completed")
+        return
+
+    approved_images = [img for img in image_data.get("images", []) if img.get("approved") is True and img.get("hosted_url")]
+
+    if not approved_images:
+        add_log(ctx.db, ctx.task, "No approved images — cleaning MULTIMEDIA markers", step=STEP_IMAGE_INJECT)
+        cleaned = re.sub(r'\[MULTIMEDIA[^\]]*\]', '', html_result, flags=re.IGNORECASE)
+        save_step_result(ctx.db, ctx.task, STEP_IMAGE_INJECT, result=cleaned, status="completed")
+        return
+
+    add_log(ctx.db, ctx.task, f"Injecting {len(approved_images)} approved images into HTML...", step=STEP_IMAGE_INJECT)
+    save_step_result(ctx.db, ctx.task, STEP_IMAGE_INJECT, result=None, status="running")
+
+    soup = BeautifulSoup(html_result, 'html.parser')
+    injected_count = 0
+
+    for img in approved_images:
+        section_name = img.get("section", "")
+        hosted_url = img["hosted_url"]
+        alt_text = img.get("alt_text", "")
+        figure_html = f'<figure class="article-image"><img src="{hosted_url}" alt="{alt_text}" width="800" loading="lazy"><figcaption>{alt_text}</figcaption></figure>'
+        figure_tag = BeautifulSoup(figure_html, 'html.parser')
+
+        inserted = False
+        section_keywords = section_name.lower().replace("_", " ").split()
+        for heading in soup.find_all(['h2', 'h3']):
+            heading_text = heading.get_text(strip=True).lower()
+            if any(kw in heading_text for kw in section_keywords if len(kw) > 3):
+                next_p = heading.find_next('p')
+                if next_p:
+                    next_p.insert_after(figure_tag)
+                    inserted = True
+                    injected_count += 1
+                    break
+        if not inserted:
+            all_h2 = soup.find_all('h2')
+            if all_h2:
+                all_h2[-1].insert_before(figure_tag)
+                injected_count += 1
+
+    result_html = str(soup)
+    result_html = re.sub(r'\[MULTIMEDIA[^\]]*\]', '', result_html, flags=re.IGNORECASE)
+
+    add_log(ctx.db, ctx.task, f"Image injection completed: {injected_count}/{len(approved_images)} inserted", step=STEP_IMAGE_INJECT)
+    save_step_result(ctx.db, ctx.task, STEP_IMAGE_INJECT, result=result_html, status="completed")
+
+
 def phase_primary_gen(ctx: PipelineContext):
     setup_template_vars(ctx)
     outline_json = ctx.task.outline.get("final_outline", {})
@@ -1031,6 +1245,24 @@ def run_pipeline(db: Session, task_id: str):
     add_log(db, ctx.task, "🚀 Pipeline started / resumed", step=None)
 
     try:
+        # --- Check for active pause (on pipeline resume) ---
+        step_results = ctx.task.step_results or {}
+        pause_state = step_results.get("_pipeline_pause", {})
+        if isinstance(pause_state, dict) and pause_state.get("active"):
+            reason = pause_state.get("reason", "unknown")
+            if reason == "image_review" and not step_results.get("_images_approved"):
+                add_log(db, ctx.task, "⏸️ Pipeline paused: waiting for image review", step=None)
+                return
+            elif reason == "test_mode" and not step_results.get("test_mode_approved"):
+                add_log(db, ctx.task, "⏸️ Pipeline paused: waiting for test mode approval", step=None)
+                return
+            else:
+                # Pause was resolved — clear it
+                updated = dict(step_results)
+                updated["_pipeline_pause"] = {"active": False, "reason": reason}
+                ctx.task.step_results = updated
+                db.commit()
+
         if ctx.use_serp:
             run_phase(db, ctx.task, STEP_SERP, phase_serp, ctx)
             run_phase(db, ctx.task, STEP_SCRAPING, phase_scraping, ctx)
@@ -1047,6 +1279,17 @@ def run_pipeline(db: Session, task_id: str):
                 ctx.outline_data = ctx.task.outline
                 db.commit()
 
+        # --- IMAGE GENERATION (optional) ---
+        run_phase(db, ctx.task, STEP_IMAGE_PROMPT_GEN, phase_image_prompt_gen, ctx)
+        run_phase(db, ctx.task, STEP_IMAGE_GEN, phase_image_gen, ctx)
+
+        # Check pause after image_gen
+        step_results = dict(ctx.task.step_results or {})
+        pause_state = step_results.get("_pipeline_pause", {})
+        if isinstance(pause_state, dict) and pause_state.get("active") and pause_state.get("reason") == "image_review":
+            if not step_results.get("_images_approved"):
+                return  # Early exit — resume via /approve-images
+
         run_phase(db, ctx.task, STEP_PRIMARY_GEN, phase_primary_gen, ctx)
 
         # TEST MODE BREAKPOINT
@@ -1057,10 +1300,11 @@ def run_pipeline(db: Session, task_id: str):
                 
                 updated = dict(step_results)
                 updated["waiting_for_approval"] = True
+                updated["_pipeline_pause"] = {"active": True, "reason": "test_mode", "message": "Test mode: review primary generation"}
                 ctx.task.step_results = updated
-                ctx.task.status = "processing" # Keep it processing or pending
+                ctx.task.status = "processing"
                 db.commit()
-                return # Early exit! Pipeline will be re-triggered by the /approve endpoint
+                return
 
         if ctx.use_serp:
             run_phase(db, ctx.task, STEP_COMP_COMPARISON, phase_competitor_comparison, ctx)
@@ -1074,12 +1318,17 @@ def run_pipeline(db: Session, task_id: str):
             run_phase(db, ctx.task, STEP_CONTENT_FACT_CHECK, phase_content_fact_check, ctx)
             
         run_phase(db, ctx.task, STEP_HTML_STRUCT, phase_html_structure, ctx)
+
+        # --- IMAGE INJECTION (optional) ---
+        run_phase(db, ctx.task, STEP_IMAGE_INJECT, phase_image_inject, ctx)
+
         run_phase(db, ctx.task, STEP_META_GEN, phase_meta_generation, ctx)
 
         # Assemble and SAVE
         try:
             add_log(db, ctx.task, "Starting article assembly and saving...", step=None)
-            structured_html = ctx.task.step_results.get(STEP_HTML_STRUCT, {}).get("result", "")
+            # Use image_inject result if available, otherwise fall back to html_structure
+            structured_html = ctx.task.step_results.get(STEP_IMAGE_INJECT, {}).get("result") or ctx.task.step_results.get(STEP_HTML_STRUCT, {}).get("result", "")
             meta_json_str = ctx.task.step_results.get(STEP_META_GEN, {}).get("result", "{}")
             meta_data = clean_and_parse_json(meta_json_str)
             

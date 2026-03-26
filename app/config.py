@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     FACT_CHECK_MODE: str = "soft" # "soft" or "strict"
     FACT_CHECK_FAIL_THRESHOLD: int = 1
 
+    # Image Generation (optional)
+    IMAGE_GEN_ENABLED: bool = False
+    GOAPI_API_KEY: str = ""
+    GOAPI_BASE_URL: str = "https://api.goapi.ai"
+    IMGBB_API_KEY: str = ""
+    IMAGE_POLL_INTERVAL: int = 10
+    IMAGE_POLL_TIMEOUT: int = 300
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

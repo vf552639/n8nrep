@@ -272,6 +272,35 @@ Generate an optimized `title` and `description` for this page. Output pure JSON:
 }
 
 Respond with pure JSON only, without markdown wrapping.""",
+    },
+    {
+        "agent_name": "image_prompt_generation",
+        "model": "openai/gpt-4o",
+        "temperature": 0.7,
+        "system_prompt": "You are a Midjourney prompt engineer. You receive MULTIMEDIA block descriptors extracted from an article outline and transform each one into an optimized Midjourney v6 prompt.\nOutput ONLY a valid JSON object with an 'images' array.",
+        "user_prompt": """Keyword: {{keyword}}
+Language: {{language}}
+
+Below are the MULTIMEDIA blocks extracted from the article outline. Each has an 'id', 'section', 'section_content', and a 'multimedia' object with Type, Description, etc.
+
+[CONTEXT]
+
+For each MULTIMEDIA block, generate a JSON array entry with:
+- "id": same as block id
+- "section": same section name
+- "midjourney_prompt": optimized Midjourney v6 prompt (English, detailed, photorealistic or matching the Type). Include style keywords: --style raw, lighting, composition. Do NOT include --ar or --v flags (those are added automatically).
+- "alt_text": SEO-friendly alt text in {{language}}
+- "aspect_ratio": recommended ratio (e.g. "16:9", "4:3", "1:1")
+
+Output JSON:
+{
+  "images": [
+    {"id": "img_1", "section": "...", "midjourney_prompt": "...", "alt_text": "...", "aspect_ratio": "16:9"},
+    ...
+  ]
+}
+
+Respond with pure JSON only, without markdown wrapping.""",
     }
 ]
 

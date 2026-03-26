@@ -148,6 +148,46 @@ export default function SettingsPage() {
                        placeholder="sk-..."
                      />
                  </div>
+
+                 <div className="pt-2">
+                   <h3 className="text-sm font-semibold text-slate-800 mb-2">Image Generation</h3>
+
+                   <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer mb-3">
+                     <input
+                       type="checkbox"
+                       className="rounded border-slate-300 w-4 h-4"
+                       checked={settings.IMAGE_GEN_ENABLED === "true"}
+                       onChange={(e) => setSettings({ ...settings, IMAGE_GEN_ENABLED: e.target.checked ? "true" : "false" })}
+                     />
+                     Enable Image Generation in Pipeline
+                   </label>
+
+                   <div className="space-y-4">
+                     <div>
+                       <label className="block text-sm font-medium text-slate-700 mb-1">GoAPI Key (Midjourney proxy)</label>
+                       <input
+                         type="password"
+                         value={settings.GOAPI_API_KEY || ""}
+                         onChange={(e) => setSettings({ ...settings, GOAPI_API_KEY: e.target.value })}
+                         className="w-full border p-2.5 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                         placeholder="goapi-..."
+                       />
+                       <p className="text-xs text-slate-400 mt-1">GoAPI provides Midjourney access via REST API.</p>
+                     </div>
+
+                     <div>
+                       <label className="block text-sm font-medium text-slate-700 mb-1">ImgBB API Key</label>
+                       <input
+                         type="password"
+                         value={settings.IMGBB_API_KEY || ""}
+                         onChange={(e) => setSettings({ ...settings, IMGBB_API_KEY: e.target.value })}
+                         className="w-full border p-2.5 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                         placeholder="imgbb-..."
+                       />
+                       <p className="text-xs text-slate-400 mt-1">ImgBB is used for permanent image hosting.</p>
+                     </div>
+                   </div>
+                 </div>
              </div>
           </div>
         )}

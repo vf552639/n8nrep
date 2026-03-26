@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Editor from "@monaco-editor/react";
 import toast from "react-hot-toast";
@@ -13,11 +13,8 @@ import {
   X,
   FileJson,
   Loader2,
-  ChevronDown,
   Search,
   PanelRightOpen,
-  History,
-  RotateCcw,
   Copy,
 } from "lucide-react";
 
@@ -27,6 +24,7 @@ const AGENT_MAP: Record<string, string> = {
   competitor_structure_analysis: "Competitor Structure",
   final_structure_analysis: "Final Structure Analysis",
   structure_fact_checking: "Structure Fact-Checking",
+  image_prompt_generation: "Image Prompt Generation",
   primary_generation: "Primary Generation",
   competitor_comparison: "Competitor Comparison",
   reader_opinion: "Reader Opinion",
@@ -45,6 +43,7 @@ const AGENT_ORDER = [
   "competitor_structure_analysis",
   "final_structure_analysis",
   "structure_fact_checking",
+  "image_prompt_generation",
   "primary_generation",
   "competitor_comparison",
   "reader_opinion",
@@ -114,6 +113,8 @@ const PROMPT_VARIABLES = [
       { name: "result_competitor_structure_analysis", desc: "Анализ конкурентов" },
       { name: "result_final_structure_analysis", desc: "Финальный анализ структуры (JSON)" },
       { name: "structure_fact_checking", desc: "Фактический анализ структуры (Отчет)" },
+      { name: "result_image_prompt_generation", desc: "Промпты для картинок (JSON)" },
+      { name: "result_image_generation", desc: "Сгенерированные картинки (JSON)" },
       { name: "result_primary_generation", desc: "Первичная генерация (HTML)" },
       { name: "result_competitor_comparison", desc: "Сравнение с конкурентами" },
       { name: "result_reader_opinion", desc: "Мнение читателя" },
@@ -202,8 +203,7 @@ export default function PromptsPage() {
   const [variablesQuery, setVariablesQuery] = useState("");
   const [paramsEnabled, setParamsEnabled] = useState({ temp: true, freq: false, pres: false, top: false });
   const [variablesDrawerOpen, setVariablesDrawerOpen] = useState(false);
-  const [versionMenuOpen, setVersionMenuOpen] = useState(false);
-  const versionMenuRef = useRef<HTMLDivElement>(null);
+
 
   const { data: prompts, isLoading } = useQuery({
     queryKey: ["prompts"],
@@ -238,11 +238,7 @@ export default function PromptsPage() {
     enabled: !!derivedActiveId,
   });
 
-  const { data: versionRows } = useQuery({
-    queryKey: ["prompt-versions", derivedActiveId],
-    queryFn: () => (derivedActiveId ? promptsApi.getVersions(derivedActiveId) : Promise.resolve([])),
-    enabled: !!derivedActiveId,
-  });
+
 
   useEffect(() => {
     if (!activePromptId && derivedActiveId) {
@@ -273,15 +269,7 @@ export default function PromptsPage() {
     [editState, fullPrompt, paramsEnabled]
   );
 
-  useEffect(() => {
-    const onDoc = (e: MouseEvent) => {
-      if (versionMenuRef.current && !versionMenuRef.current.contains(e.target as Node)) {
-        setVersionMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, []);
+
 
   const saveMutation = useMutation({
     mutationFn: (data: Partial<Prompt>) => {
@@ -303,19 +291,7 @@ export default function PromptsPage() {
     onError: () => toast.error("Failed to save prompt"),
   });
 
-  const restoreMutation = useMutation({
-    mutationFn: ({ baseId, sourceId }: { baseId: string; sourceId: string }) =>
-      promptsApi.restoreVersion(baseId, sourceId),
-    onSuccess: (data: { id: string; version: number }) => {
-      toast.success(`Restored as v${data.version}`);
-      setVersionMenuOpen(false);
-      setActivePromptId(data.id);
-      queryClient.invalidateQueries({ queryKey: ["prompts"] });
-      queryClient.invalidateQueries({ queryKey: ["prompt", data.id] });
-      queryClient.invalidateQueries({ queryKey: ["prompt-versions", data.id] });
-    },
-    onError: () => toast.error("Failed to restore version"),
-  });
+
 
   const requestSelectAgent = (nextId: string) => {
     if (nextId === activePromptId) return;
@@ -648,57 +624,7 @@ export default function PromptsPage() {
                 <h2 className="min-w-0 flex-1 text-lg font-semibold capitalize text-slate-800 truncate">
                   {AGENT_MAP[activePromptListInfo.agent_name] || activePromptListInfo.agent_name.replace(/_/g, " ")}
                 </h2>
-                <div className="relative shrink-0" ref={versionMenuRef}>
-                  <button
-                    type="button"
-                    onClick={() => setVersionMenuOpen((o) => !o)}
-                    className="inline-flex items-center gap-0.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
-                  >
-                    v{activePromptListInfo.version}
-                    <ChevronDown className="h-3 w-3 opacity-70" />
-                  </button>
-                  {versionMenuOpen && versionRows && versionRows.length > 0 && (
-                    <div className="absolute left-0 z-50 mt-1 w-72 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
-                      <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2 text-xs font-semibold text-slate-600">
-                        <History className="h-3.5 w-3.5" />
-                        Version history
-                      </div>
-                      <div className="max-h-64 overflow-auto">
-                        {versionRows.map((row) => (
-                          <div
-                            key={row.id}
-                            className="flex items-center justify-between gap-2 px-3 py-2 text-sm hover:bg-slate-50"
-                          >
-                            <div className="min-w-0">
-                              <span className="font-mono font-medium">v{row.version}</span>
-                              {row.is_active && (
-                                <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800">
-                                  current
-                                </span>
-                              )}
-                              {row.updated_at && (
-                                <div className="truncate text-[11px] text-slate-400">{row.updated_at}</div>
-                              )}
-                            </div>
-                            {!row.is_active && derivedActiveId && (
-                              <button
-                                type="button"
-                                disabled={restoreMutation.isPending}
-                                onClick={() =>
-                                  restoreMutation.mutate({ baseId: derivedActiveId, sourceId: row.id })
-                                }
-                                className="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
-                              >
-                                <RotateCcw className="h-3.5 w-3.5" />
-                                Restore
-                              </button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
+
                 <button
                   type="button"
                   onClick={() => setVariablesDrawerOpen(true)}

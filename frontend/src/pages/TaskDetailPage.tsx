@@ -5,6 +5,7 @@ import toast from "react-hot-toast";
 import { tasksApi } from "@/api/tasks";
 import StatusBadge from "@/components/common/StatusBadge";
 import StepMonitor from "@/components/tasks/StepMonitor";
+import ImageReviewPanel from "@/components/tasks/ImageReviewPanel";
 import { Info, XCircle } from "lucide-react";
 
 type LogEntry = {
@@ -41,18 +42,29 @@ export default function TaskDetailPage() {
   });
 
   const isWaiting = task?.step_results?.waiting_for_approval === true;
+  const isImagePaused = task?.step_results?._pipeline_pause?.active && task?.step_results?._pipeline_pause?.reason === "image_review";
   const hasDraft = task?.step_results?.primary_generation?.status === "completed";
+  const hasImages = task?.step_results?.image_generation?.status === "completed";
   const draftHtml: string = task?.step_results?.primary_generation?.result || "";
   const wordCount = draftHtml
     ? draftHtml.replace(/<[^>]*>/g, " ").split(/\s+/).filter(Boolean).length
     : 0;
+
+  const { data: imageData, refetch: refetchImages } = useQuery({
+    queryKey: ["task-images", id],
+    queryFn: () => tasksApi.getImages(id!),
+    enabled: !!id && !!hasImages,
+  });
 
   // Auto-switch to review tab when waiting for approval
   useEffect(() => {
     if (isWaiting && activeTab !== "review") {
       setActiveTab("review");
     }
-  }, [isWaiting]);
+    if (isImagePaused && activeTab !== "images") {
+      setActiveTab("images");
+    }
+  }, [isWaiting, isImagePaused]);
 
   const handleForceAction = async (action: "complete" | "fail") => {
     try {
@@ -74,6 +86,7 @@ export default function TaskDetailPage() {
 
   const tabs = [
     { id: "pipeline", label: "Pipeline Execution" },
+    ...(hasImages || isImagePaused ? [{ id: "images", label: "🖼️ Image Review" }] : []),
     ...(hasDraft || isWaiting ? [{ id: "review", label: "📝 Article Review" }] : []),
     { id: "logs", label: "Execution Logs" },
   ];
@@ -131,6 +144,24 @@ export default function TaskDetailPage() {
           {activeTab === "pipeline" && (
             <div className="animate-in fade-in slide-in-from-bottom-2 rounded-xl border bg-white p-6 shadow-sm duration-300">
               <StepMonitor taskId={task.id} isActive={task.status === "processing"} />
+            </div>
+          )}
+
+          {activeTab === "images" && (
+            <div className="animate-in fade-in slide-in-from-bottom-2 rounded-xl border bg-white p-6 shadow-sm duration-300">
+              <h2 className="mb-4 text-lg font-semibold text-slate-800">Image Review</h2>
+              {imageData && imageData.images.length > 0 ? (
+                <ImageReviewPanel
+                  taskId={task.id}
+                  images={imageData.images}
+                  paused={imageData.paused}
+                  onRefresh={refetchImages}
+                />
+              ) : (
+                <div className="text-sm text-slate-400 italic text-center py-8">
+                  No images generated for this task.
+                </div>
+              )}
             </div>
           )}
 

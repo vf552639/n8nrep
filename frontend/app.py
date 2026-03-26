@@ -351,6 +351,52 @@ def render_task_step_monitor(task_id: str, task_status: str, task_keyword: str, 
                 st.success("Одобрено! Задача возвращена в работу.")
                 st.rerun()
         else:
+            # Image review pause (simplified Streamlit version)
+            pause_state = steps.get("_pipeline_pause", {})
+            if pause_state.get("active") and pause_state.get("reason") == "image_review":
+                st.warning("🖼️ Задача приостановлена — ожидается ревью картинок")
+
+                image_data_raw = steps.get("image_generation", {}).get("result")
+                images = []
+                if image_data_raw:
+                    try:
+                        images = json.loads(image_data_raw).get("images", [])
+                    except Exception:
+                        images = []
+
+                for img in images:
+                    col1, col2 = st.columns([1, 2])
+                    with col1:
+                        if img.get("hosted_url") and img.get("status") == "completed":
+                            st.image(img["hosted_url"], width=300)
+                        else:
+                            st.error(f"Failed: {img.get('error', 'Unknown')}")
+                    with col2:
+                        st.text(f"Section: {img.get('section', 'N/A')}")
+                        st.text(f"Prompt: {(img.get('midjourney_prompt') or '')[:200]}")
+                        st.text(f"Alt: {img.get('alt_text')}")
+
+                if st.button(
+                    "✅ Одобрить все картинки и продолжить",
+                    key=f"{key_prefix}_approve_all_images_{task_id}",
+                    type="primary",
+                    use_container_width=True,
+                ):
+                    approved_ids = []
+                    skipped_ids = []
+                    for img in images:
+                        if img.get("status") == "completed":
+                            approved_ids.append(img["id"])
+                        else:
+                            skipped_ids.append(img["id"])
+
+                    # React UI uses approved_ids/skipped_ids; keep the same contract here.
+                    post_data(
+                        f"tasks/{task_id}/approve-images",
+                        {"approved_ids": approved_ids, "skipped_ids": skipped_ids},
+                    )
+                    st.rerun()
+
             clamped = max(0.0, min(progress / 100, 1.0))
             st.progress(clamped, text=f"{min(progress, 100)}% — {current or 'выполнение...'}")
             
@@ -385,6 +431,8 @@ def render_task_step_monitor(task_id: str, task_status: str, task_keyword: str, 
         ("competitor_structure_analysis", "🏗️ Анализ конкурентов"),
         ("final_structure_analysis", "📐 Финальная структура"),
         ("structure_fact_checking", "🔍 Фактический анализ структуры"),
+        ("image_prompt_generation", "🖼️ Image Prompt Generation"),
+        ("image_generation", "🎨 Image Generation"),
         ("primary_generation", "✍️ Первичная генерация"),
         ("competitor_comparison", "⚖️ Сравнение с конкурентами"),
         ("reader_opinion", "👤 Мнение читателя"),
@@ -393,6 +441,7 @@ def render_task_step_monitor(task_id: str, task_status: str, task_keyword: str, 
         ("final_editing", "✅ Финальная редактура"),
         ("content_fact_checking", "🔍 Факт-чекинг контента"),
         ("html_structure", "🏷️ Структура HTML"),
+        ("image_inject", "🧷 Image Inject"),
         ("meta_generation", "🏷️ Мета-теги"),
     ]
     
@@ -860,6 +909,7 @@ def render_prompts():
         "competitor_structure_analysis": "Анализ конкурентов",
         "final_structure_analysis": "Финальный анализ структуры",
         "structure_fact_checking": "Фактический анализ структуры",
+        "image_prompt_generation": "Генерация промптов для картинок",
         "primary_generation": "Первичная генерация",
         "competitor_comparison": "Сравнение с конкурентами",
         "reader_opinion": "Мнение читателя",

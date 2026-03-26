@@ -44,4 +44,18 @@ export const tasksApi = {
 
   approve: (id: string) =>
     api.post<{msg: string}>(`/tasks/${id}/approve`).then(res => res.data),
+
+  getImages: (id: string) =>
+    api.get<{ images: any[]; summary: any; paused: boolean }>(`/tasks/${id}/images`).then(res => res.data),
+
+  approveImages: (id: string, approvedIds: string[], skippedIds: string[]) =>
+    api.post<{ msg: string; approved_count: number; skipped_count: number }>(
+      `/tasks/${id}/approve-images`, { approved_ids: approvedIds, skipped_ids: skippedIds }
+    ).then(res => res.data),
+
+  regenerateImage: (id: string, imageId: string, newPrompt?: string) =>
+    api.post<{ image: any }>(
+      `/tasks/${id}/regenerate-image`, { image_id: imageId, new_prompt: newPrompt || "" }
+    ).then(res => res.data),
 };
+
