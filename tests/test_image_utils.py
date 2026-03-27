@@ -115,3 +115,18 @@ def test_extract_multimedia_blocks_lowercase_key():
     assert blocks[0]["section"] == "Intro"
     assert blocks[0]["multimedia"]["Type"] == "Image"
 
+
+def test_extract_multimedia_blocks_empty_type_defaults_to_image():
+    outline = {
+        "Section": {
+            "Content": "Body text",
+            "MULTIMEDIA": {
+                "Description": "Hero visual without explicit type",
+                "Purpose": "Illustrate section",
+            },
+        }
+    }
+    blocks = extract_multimedia_blocks(outline)
+    assert len(blocks) == 1
+    assert blocks[0]["multimedia"]["Type"] == "Image"
+

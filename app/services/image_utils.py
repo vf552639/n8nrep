@@ -2,6 +2,18 @@
 Utility to extract MULTIMEDIA blocks from Final Structure Analysis JSON outline.
 """
 
+
+def _ensure_default_multimedia_type(multimedia):
+    """If Type/type is missing or blank, default to Image so pipeline does not skip blocks."""
+    if not isinstance(multimedia, dict):
+        return multimedia
+    mm = dict(multimedia)
+    t = (mm.get("Type") or mm.get("type") or "").strip()
+    if not t:
+        mm["Type"] = "Image"
+    return mm
+
+
 def extract_multimedia_blocks(outline_json) -> list:
     """
     Recursively walks the JSON outline (result of final_structure_analysis)
@@ -37,7 +49,7 @@ def extract_multimedia_blocks(outline_json) -> list:
                     "id": f"img_{counter}",
                     "section": parent_key,
                     "section_content": str(obj.get("Content", "") or obj.get("content", ""))[:300],
-                    "multimedia": obj[mm_key]
+                    "multimedia": _ensure_default_multimedia_type(obj[mm_key]),
                 })
             for key, value in obj.items():
                 key_up = str(key).upper()

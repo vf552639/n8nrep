@@ -873,15 +873,51 @@ def phase_image_prompt_gen(ctx: PipelineContext):
         t_clean = str(t).strip().lower()
         return TYPE_NORMALIZE_MAP.get(t_clean, "")
 
+    def _extract_prompt_fallback(data) -> str:
+        """Extract a Midjourney prompt from LLM JSON (known keys, long strings, or nested dicts)."""
+        if not isinstance(data, dict):
+            return ""
+        for key in (
+            "midjourney_prompt",
+            "prompt",
+            "image_prompt",
+            "mj_prompt",
+            "visual_prompt",
+            "description",
+        ):
+            val = data.get(key)
+            if val and isinstance(val, str) and len(val.strip()) > 20:
+                return val.strip()
+        for _, val in data.items():
+            if isinstance(val, str) and len(val.strip()) > 50:
+                return val.strip()
+        for _, val in data.items():
+            if isinstance(val, list):
+                for item in val:
+                    if isinstance(item, dict):
+                        nested = _extract_prompt_fallback(item)
+                        if nested:
+                            return nested
+        for _, val in data.items():
+            if isinstance(val, dict):
+                nested = _extract_prompt_fallback(val)
+                if nested:
+                    return nested
+        return ""
+
     generatable_types = {"Image", "Infographic"}
-    eligible_blocks = [b for b in multimedia_blocks if _norm_mm_type(b) in generatable_types]
+    normalized_types = [(_norm_mm_type(b) or "Image") for b in multimedia_blocks]
+    eligible_blocks = [
+        b for b in multimedia_blocks
+        if (_norm_mm_type(b) or "Image") in generatable_types
+    ]
     skipped_count = len(multimedia_blocks) - len(eligible_blocks)
     add_log(
         ctx.db,
         ctx.task,
         f"Outline parsed. Total MULTIMEDIA blocks found: {len(multimedia_blocks)}. "
         f"Eligible (Image/Infographic): {len(eligible_blocks)}, skipped (other types): {skipped_count}. "
-        f"Types found: {[_norm_mm_type(b) for b in multimedia_blocks]}",
+        f"Types found: {normalized_types}",
         step=STEP_IMAGE_PROMPT_GEN,
     )
     if not eligible_blocks:
@@ -950,13 +986,16 @@ def phase_image_prompt_gen(ctx: PipelineContext):
             if not isinstance(parsed, dict):
                 parsed = {}
 
-            midjourney_prompt = (
-                parsed.get("midjourney_prompt")
-                or parsed.get("prompt")
-                or parsed.get("image_prompt")
-                or ""
-            )
+            midjourney_prompt = _extract_prompt_fallback(parsed)
             if not midjourney_prompt:
+                raw_snip = str(block_result_json)[:500]
+                add_log(
+                    ctx.db,
+                    ctx.task,
+                    f"[DEBUG] Image prompt raw response for {block.get('id', f'img_{idx}')}: {raw_snip}",
+                    level="warn",
+                    step=STEP_IMAGE_PROMPT_GEN,
+                )
                 add_log(
                     ctx.db,
                     ctx.task,
@@ -987,6 +1026,79 @@ def phase_image_prompt_gen(ctx: PipelineContext):
                 level="error",
                 step=STEP_IMAGE_PROMPT_GEN,
             )
+
+    if len(images) == 0 and len(eligible_blocks) > 0:
+        add_log(
+            ctx.db,
+            ctx.task,
+            "No prompts built in primary pass. Running simplified fallback prompt extraction...",
+            level="warn",
+            step=STEP_IMAGE_PROMPT_GEN,
+        )
+        for idx, block in enumerate(eligible_blocks, start=1):
+            mm = block.get("multimedia", {}) if isinstance(block, dict) else {}
+            mm_type = _norm_mm_type(block) or "Image"
+            description = str(mm.get("Description") or mm.get("description") or "").strip()
+            parent_title = str(block.get("section") or "").strip() or "Untitled Section"
+            purpose = str(mm.get("Purpose") or mm.get("purpose") or "").strip()
+            location = str(mm.get("Location") or mm.get("location") or "").strip() or f"image_{idx}"
+            if not description:
+                description = f"{mm_type} for section '{parent_title}'"
+
+            fallback_context = (
+                f"Create a Midjourney image prompt for: {description}. "
+                "Respond ONLY with JSON: "
+                '{"midjourney_prompt": "<detailed English prompt>", '
+                '"alt_text": "<short alt text>", "aspect_ratio": "16:9"}'
+            )
+            try:
+                fallback_json, fb_cost, fb_model, fb_resolved_prompts, fb_variables_snapshot = call_agent(
+                    ctx,
+                    "image_prompt_generation",
+                    fallback_context,
+                    response_format={"type": "json_object"},
+                    variables=ctx.template_vars,
+                )
+                total_cost += fb_cost
+                actual_model = fb_model
+                last_resolved_prompts = fb_resolved_prompts
+                last_variables_snapshot = fb_variables_snapshot
+
+                parsed_fb = clean_and_parse_json(fallback_json)
+                if not isinstance(parsed_fb, dict):
+                    parsed_fb = {}
+                fallback_prompt = _extract_prompt_fallback(parsed_fb)
+                if not fallback_prompt:
+                    add_log(
+                        ctx.db,
+                        ctx.task,
+                        f"Fallback empty prompt for block {block.get('id', f'img_{idx}')}. Raw: {str(fallback_json)[:500]}",
+                        level="warn",
+                        step=STEP_IMAGE_PROMPT_GEN,
+                    )
+                    continue
+
+                images.append(
+                    {
+                        "id": block.get("id", f"img_{idx}"),
+                        "section": parent_title,
+                        "location": location,
+                        "type": mm_type,
+                        "description": description,
+                        "purpose": purpose,
+                        "midjourney_prompt": str(fallback_prompt).strip(),
+                        "alt_text": str(parsed_fb.get("alt_text") or f"{mm_type} for {parent_title}").strip(),
+                        "aspect_ratio": str(parsed_fb.get("aspect_ratio") or "16:9").strip(),
+                    }
+                )
+            except Exception as e:
+                add_log(
+                    ctx.db,
+                    ctx.task,
+                    f"Fallback image prompt generation failed for block {block.get('id', f'img_{idx}')}: {e}",
+                    level="error",
+                    step=STEP_IMAGE_PROMPT_GEN,
+                )
 
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + total_cost
     result_json = json.dumps({"images": images}, ensure_ascii=False)

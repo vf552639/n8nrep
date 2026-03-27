@@ -322,7 +322,18 @@ WHAT TO AVOID:
 QUALITY:
 - Render at highest available resolution
 - Sharp edges, no artifacts
-- Consistent lighting and shadow direction""",
+- Consistent lighting and shadow direction
+
+RESPONSE FORMAT (STRICT):
+You MUST respond with a valid JSON object containing EXACTLY these keys and no others:
+{
+  "midjourney_prompt": "your detailed visual prompt here",
+  "alt_text": "short description for img alt attribute",
+  "aspect_ratio": "16:9"
+}
+
+Do not include any text outside the JSON object.
+The "midjourney_prompt" value must be a detailed English visual description for Midjourney image generation, minimum 30 words.""",
         "user_prompt": """Create a {{type}} for a web article section.
 
 Section title: "{{parent_title}}"
@@ -343,6 +354,7 @@ def seed():
     db = SessionLocal()
     try:
         inserted = 0
+        updated = 0
         skipped = 0
         for pdata in PROMPTS_DATA:
             existing = db.query(Prompt).filter(Prompt.agent_name == pdata["agent_name"], Prompt.is_active == True).first()
@@ -359,12 +371,19 @@ def seed():
                 db.add(db_prompt)
                 inserted += 1
                 print(f"Created prompt for: {pdata['agent_name']}")
+            elif pdata["agent_name"] == "image_prompt_generation":
+                existing.system_prompt = pdata["system_prompt"]
+                existing.user_prompt = pdata["user_prompt"]
+                existing.model = pdata["model"]
+                existing.temperature = pdata["temperature"]
+                updated += 1
+                print(f"Updated prompt for: {pdata['agent_name']}")
             else:
                 skipped += 1
                 print(f"Skipped existing prompt for: {pdata['agent_name']}")
         
         db.commit()
-        print(f"Done. Inserted: {inserted}. Skipped: {skipped}.")
+        print(f"Done. Inserted: {inserted}. Updated: {updated}. Skipped: {skipped}.")
     except Exception as e:
         db.rollback()
         print(f"Error seeding prompts: {e}")
