@@ -25,7 +25,10 @@ export default function TaskDetailPage() {
     queryKey: ["task", id],
     queryFn: () => tasksApi.getOne(id!),
     enabled: !!id,
-    refetchInterval: (query) => (query.state.data?.status === "processing" ? 5000 : false),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "processing" || status === "pending" ? 3000 : false;
+    },
   });
 
   const approveMutation = useMutation({
@@ -34,6 +37,8 @@ export default function TaskDetailPage() {
       toast.success("Approved! Pipeline resumed.");
       queryClient.invalidateQueries({ queryKey: ["task", id] });
       queryClient.invalidateQueries({ queryKey: ["task-steps", id] });
+      queryClient.refetchQueries({ queryKey: ["task", id] });
+      queryClient.refetchQueries({ queryKey: ["task-steps", id] });
       setActiveTab("pipeline");
     },
     onError: (e: any) => {
@@ -142,7 +147,34 @@ export default function TaskDetailPage() {
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <div className="space-y-6 xl:col-span-2">
           {activeTab === "pipeline" && (
-            <div className="animate-in fade-in slide-in-from-bottom-2 rounded-xl border bg-white p-6 shadow-sm duration-300">
+            <div className="animate-in fade-in slide-in-from-bottom-2 space-y-4 rounded-xl border bg-white p-6 shadow-sm duration-300">
+              {(() => {
+                const pause = (task.step_results as any)?._pipeline_pause;
+                const approved = (task.step_results as any)?._images_approved;
+                if (pause?.active && pause?.reason === "image_review" && !approved) {
+                  return (
+                    <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <span className="text-2xl">🖼️</span>
+                        <div>
+                          <p className="font-semibold text-amber-800">Pipeline paused — Images ready for review</p>
+                          <p className="text-sm text-amber-600">
+                            Midjourney finished generating images. Review and approve them to continue.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab("images")}
+                        className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap"
+                      >
+                        Review Images →
+                      </button>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
               <StepMonitor taskId={task.id} isActive={task.status === "processing"} />
             </div>
           )}

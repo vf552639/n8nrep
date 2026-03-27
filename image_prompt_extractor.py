@@ -60,11 +60,35 @@ QUALITY:
 
 GENERATABLE_TYPES = {"Image", "Infographic"}
 
+TYPE_NORMALIZE_MAP = {
+    # French variants
+    "infographie": "Infographic",
+    "infographie procedurale": "Infographic",
+    "infographie procédurale": "Infographic",
+    "tableau html": "Image",
+    "tableau de donnees": "Image",
+    "tableau de données": "Image",
+    "tableau recapitulatif": "Image",
+    "tableau récapitulatif": "Image",
+    "tableau comparatif": "Image",
+    "bouton d'action": "Image",
+    "bouton d'action (cta)": "Image",
+    "schema de processus": "Infographic",
+    "schéma de processus": "Infographic",
+    # English variants
+    "infographic": "Infographic",
+    "image": "Image",
+    "chart": "Image",
+    "table": "Image",
+    "diagram": "Infographic",
+}
+
 
 def _normalize_type(value: Any) -> str:
     if value is None:
         return ""
-    return str(value).strip()
+    t_clean = str(value).strip().lower()
+    return TYPE_NORMALIZE_MAP.get(t_clean, "")
 
 
 def _safe_filename_part(value: str) -> str:
@@ -95,14 +119,17 @@ def extract_multimedia_blocks(article_json: dict[str, Any]) -> list[dict[str, st
             if isinstance(title_candidate, str) and title_candidate.strip():
                 parent_title = title_candidate.strip()
 
-            if "multimedia" in node and isinstance(node["multimedia"], dict):
-                mm = node["multimedia"]
+            mm_keys = [k for k in node.keys() if isinstance(k, str) and (k.lower() == "multimedia" or k.lower().startswith("multimedia_"))]
+            for mm_key in mm_keys:
+                mm_raw = node.get(mm_key)
+                if not isinstance(mm_raw, dict):
+                    continue
                 blocks.append(
                     {
-                        "type": _normalize_type(mm.get("type") or mm.get("Type")),
-                        "description": str(mm.get("description") or mm.get("Description") or "").strip(),
-                        "purpose": str(mm.get("purpose") or mm.get("Purpose") or "").strip(),
-                        "location": str(mm.get("location") or mm.get("Location") or "").strip(),
+                        "type": _normalize_type(mm_raw.get("type") or mm_raw.get("Type")),
+                        "description": str(mm_raw.get("description") or mm_raw.get("Description") or "").strip(),
+                        "purpose": str(mm_raw.get("purpose") or mm_raw.get("Purpose") or "").strip(),
+                        "location": str(mm_raw.get("location") or mm_raw.get("Location") or "").strip(),
                         "parent_title": parent_title,
                     }
                 )

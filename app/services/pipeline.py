@@ -827,18 +827,60 @@ def phase_image_prompt_gen(ctx: PipelineContext):
     multimedia_blocks = extract_multimedia_blocks(outline_json)
 
     if not multimedia_blocks:
+        add_log(
+            ctx.db,
+            ctx.task,
+            "⚠️ No MULTIMEDIA blocks in outline. Возможные причины: "
+            "1) промпт final_structure_analysis не генерирует поле MULTIMEDIA/multimedia в секциях; "
+            "2) несоответствие регистра ключа в JSON. "
+            "Проверь step_results['final_structure_analysis'] вручную.",
+            level="warn",
+            step=STEP_IMAGE_PROMPT_GEN,
+        )
         add_log(ctx.db, ctx.task, "No MULTIMEDIA blocks found in outline — skipping", step=STEP_IMAGE_PROMPT_GEN)
         save_step_result(ctx.db, ctx.task, STEP_IMAGE_PROMPT_GEN, result=json.dumps({"images": []}), status="completed")
         return
 
+    TYPE_NORMALIZE_MAP = {
+        # French variants
+        "infographie": "Infographic",
+        "infographie procedurale": "Infographic",
+        "infographie procédurale": "Infographic",
+        "tableau html": "Image",
+        "tableau de donnees": "Image",
+        "tableau de données": "Image",
+        "tableau recapitulatif": "Image",
+        "tableau récapitulatif": "Image",
+        "tableau comparatif": "Image",
+        "bouton d'action": "Image",
+        "bouton d'action (cta)": "Image",
+        "schema de processus": "Infographic",
+        "schéma de processus": "Infographic",
+        # English variants
+        "infographic": "Infographic",
+        "image": "Image",
+        "chart": "Image",
+        "table": "Image",
+        "diagram": "Infographic",
+    }
+
     def _norm_mm_type(block: dict) -> str:
         mm = block.get("multimedia", {}) if isinstance(block, dict) else {}
         t = mm.get("Type") or mm.get("type") or ""
-        return str(t).strip()
+        t_clean = str(t).strip().lower()
+        return TYPE_NORMALIZE_MAP.get(t_clean, "")
 
     generatable_types = {"Image", "Infographic"}
     eligible_blocks = [b for b in multimedia_blocks if _norm_mm_type(b) in generatable_types]
     skipped_count = len(multimedia_blocks) - len(eligible_blocks)
+    add_log(
+        ctx.db,
+        ctx.task,
+        f"Outline parsed. Total MULTIMEDIA blocks found: {len(multimedia_blocks)}. "
+        f"Eligible (Image/Infographic): {len(eligible_blocks)}, skipped (other types): {skipped_count}. "
+        f"Types found: {[_norm_mm_type(b) for b in multimedia_blocks]}",
+        step=STEP_IMAGE_PROMPT_GEN,
+    )
     if not eligible_blocks:
         add_log(
             ctx.db,
@@ -969,6 +1011,38 @@ def phase_image_gen(ctx: PipelineContext):
     if not settings.IMAGE_GEN_ENABLED:
         add_log(ctx.db, ctx.task, "Image generation disabled — skipping", step=STEP_IMAGE_GEN)
         save_step_result(ctx.db, ctx.task, STEP_IMAGE_GEN, result=json.dumps({"images": [], "skipped": True}), status="completed")
+        return
+    if not settings.GOAPI_API_KEY:
+        add_log(
+            ctx.db,
+            ctx.task,
+            "❌ GOAPI_API_KEY не задан — image generation невозможна. Заполни в Settings.",
+            level="error",
+            step=STEP_IMAGE_GEN,
+        )
+        save_step_result(
+            ctx.db,
+            ctx.task,
+            STEP_IMAGE_GEN,
+            result=json.dumps({"images": [], "error": "GOAPI_API_KEY missing"}),
+            status="failed",
+        )
+        return
+    if not settings.IMGBB_API_KEY:
+        add_log(
+            ctx.db,
+            ctx.task,
+            "❌ IMGBB_API_KEY не задан — загрузка изображений невозможна. Заполни в Settings.",
+            level="error",
+            step=STEP_IMAGE_GEN,
+        )
+        save_step_result(
+            ctx.db,
+            ctx.task,
+            STEP_IMAGE_GEN,
+            result=json.dumps({"images": [], "error": "IMGBB_API_KEY missing"}),
+            status="failed",
+        )
         return
 
     prompt_data_raw = ctx.task.step_results.get(STEP_IMAGE_PROMPT_GEN, {}).get("result", "")

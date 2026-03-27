@@ -5,7 +5,8 @@ Utility to extract MULTIMEDIA blocks from Final Structure Analysis JSON outline.
 def extract_multimedia_blocks(outline_json) -> list:
     """
     Recursively walks the JSON outline (result of final_structure_analysis)
-    and collects all objects containing a "MULTIMEDIA" key.
+    and collects all objects containing a multimedia key
+    ("MULTIMEDIA"/"multimedia" and numbered variants).
 
     Returns a list of dicts:
     [
@@ -24,16 +25,23 @@ def extract_multimedia_blocks(outline_json) -> list:
     def _walk(obj, parent_key="root"):
         nonlocal counter
         if isinstance(obj, dict):
-            if "MULTIMEDIA" in obj:
+            mm_keys = [
+                k
+                for k in obj.keys()
+                if isinstance(k, str)
+                and (k.upper() == "MULTIMEDIA" or k.upper().startswith("MULTIMEDIA_"))
+            ]
+            for mm_key in mm_keys:
                 counter += 1
                 blocks.append({
                     "id": f"img_{counter}",
                     "section": parent_key,
-                    "section_content": str(obj.get("Content", ""))[:300],
-                    "multimedia": obj["MULTIMEDIA"]
+                    "section_content": str(obj.get("Content", "") or obj.get("content", ""))[:300],
+                    "multimedia": obj[mm_key]
                 })
             for key, value in obj.items():
-                if key != "MULTIMEDIA":
+                key_up = str(key).upper()
+                if not (key_up == "MULTIMEDIA" or key_up.startswith("MULTIMEDIA_")):
                     _walk(value, parent_key=key)
         elif isinstance(obj, list):
             for item in obj:

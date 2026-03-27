@@ -78,3 +78,40 @@ def test_extract_multimedia_blocks_nested_structures():
     assert blocks[0]["section_content"] == "Child content that will be used as section_content"
     assert blocks[0]["multimedia"]["Type"] == "Infographic"
 
+
+def test_extract_multimedia_blocks_numbered_keys():
+    outline = {
+        "H2_1": "Connexion et Inscription",
+        "MULTIMEDIA_1": {
+            "Type": "Bouton d'action (CTA)",
+            "Description": "Bouton contraste 'Se connecter'",
+            "Purpose": "Repondre a l'intent de navigation",
+        },
+        "MULTIMEDIA_2": {
+            "Type": "Tableau HTML",
+            "Description": "Tableau comparatif des paliers de bonus",
+            "Purpose": "Structurer les donnees chiffrees",
+        },
+    }
+    blocks = extract_multimedia_blocks(outline)
+    assert len(blocks) == 2
+    assert blocks[0]["multimedia"]["Type"] == "Bouton d'action (CTA)"
+    assert blocks[1]["multimedia"]["Type"] == "Tableau HTML"
+
+
+def test_extract_multimedia_blocks_lowercase_key():
+    outline = {
+        "Intro": {
+            "content": "Lowercase multimedia key example",
+            "multimedia": {
+                "Type": "Image",
+                "Description": "Simple test image",
+                "Purpose": "Validate lowercase key support",
+            },
+        }
+    }
+    blocks = extract_multimedia_blocks(outline)
+    assert len(blocks) == 1
+    assert blocks[0]["section"] == "Intro"
+    assert blocks[0]["multimedia"]["Type"] == "Image"
+
