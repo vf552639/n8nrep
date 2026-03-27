@@ -633,6 +633,7 @@ def phase_serp(ctx: PipelineContext):
 
         serp_summary = {
             "source": serp_data.get("source", "unknown") if isinstance(serp_data, dict) else "unknown",
+            "_from_cache": bool(serp_data.get("_from_cache")) if isinstance(serp_data, dict) else False,
             "urls_count": _safe_len(serp_data.get("urls")) if isinstance(serp_data, dict) else 0,
             "organic_count": _safe_len(serp_data.get("organic_results")) if isinstance(serp_data, dict) else 0,
             "paa_count": _safe_len(serp_data.get("paa_full")) if isinstance(serp_data, dict) else 0,
@@ -693,6 +694,8 @@ def phase_scraping(ctx: PipelineContext):
             "failed_results": scrape_data.get("failed_results", []),
             "serper_count": scrape_data.get("serper_count", 0),
             "direct_count": scrape_data.get("direct_count", 0),
+            "cache_hits": scrape_data.get("cache_hits", 0),
+            "cache_misses": scrape_data.get("cache_misses", 0),
         }
 
         add_log(ctx.db, ctx.task, f"Scraped competitors. Avg word count: {scrape_data['average_word_count']}", step=STEP_SCRAPING)

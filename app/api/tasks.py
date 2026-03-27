@@ -16,6 +16,7 @@ from app.models.article import GeneratedArticle
 from app.workers.tasks import process_generation_task
 from app.config import settings
 from app.services.pipeline_constants import ALL_STEPS
+from app.services.serp_cache import invalidate_serp_cache
 from datetime import datetime
 
 router = APIRouter()
@@ -529,6 +530,22 @@ def retry_task(task_id: str, db: Session = Depends(get_db)):
     process_generation_task.delay(str(task.id))
     return {"msg": "Task queued for retry"}
 
+
+@router.delete("/{task_id}/cache")
+def clear_task_cache(task_id: str, db: Session = Depends(get_db)):
+    """Invalidate SERP cache key for this task."""
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    deleted = invalidate_serp_cache(
+        keyword=task.main_keyword,
+        country_code=task.country,
+        language_code=task.language,
+        serp_config=task.serp_config or {},
+    )
+    return {"msg": "Task cache invalidated", "serp_cache_deleted": bool(deleted)}
+
 @router.post("/{task_id}/approve")
 def approve_task(task_id: str, db: Session = Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()
@@ -655,6 +672,12 @@ def rerun_task_step(task_id: str, payload: RerunStepRequest, db: Session = Depen
         scraping_idx = -1
 
     if rerun_idx <= serp_idx:
+        invalidate_serp_cache(
+            keyword=task.main_keyword,
+            country_code=task.country,
+            language_code=task.language,
+            serp_config=task.serp_config or {},
+        )
         task.serp_data = None
         task.competitors_text = None
         task.outline = None

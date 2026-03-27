@@ -30,6 +30,7 @@ def parse_html(html: str) -> Dict[str, Any]:
 from app.config import settings
 from app.services.notifier import notify_serper_key_issue
 from app.services.serp import _is_excluded_domain
+from app.services.serp_cache import get_cached_scrape_item, set_cached_scrape_item
 
 _serper_key_failed = False
 
@@ -79,6 +80,8 @@ def scrape_urls(urls: List[str], max_urls: int = 10, timeout: int = 15) -> Dict[
     results = []
     failed_results = []
     urls_to_scrape = [url for url in urls if not _is_excluded_domain(url)][:max_urls]
+    cache_hits = 0
+    cache_misses = 0
     
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -143,22 +146,53 @@ def scrape_urls(urls: List[str], max_urls: int = 10, timeout: int = 15) -> Dict[
                 "error": str(e)
             })
 
+    # Try cache first, scrape only misses
+    urls_missed_cache = []
+    for url in urls_to_scrape:
+        cached = get_cached_scrape_item(url)
+        if cached and isinstance(cached, dict):
+            cache_hits += 1
+            parsed_headers = cached.get("headers", {})
+            parsed_text = cached.get("text", "")
+            parsed_word_count = cached.get("word_count", 0)
+            results.append({
+                "url": url,
+                "domain": cached.get("domain") or urlparse(url).netloc,
+                "headers": parsed_headers if isinstance(parsed_headers, dict) else {},
+                "text": str(parsed_text),
+                "word_count": int(parsed_word_count or 0),
+                "method": "cache",
+            })
+        else:
+            cache_misses += 1
+            urls_missed_cache.append(url)
+
     # Use ThreadPoolExecutor to scrape in parallel
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(urls_to_scrape))) as executor:
-        future_to_url = {executor.submit(scrape_single, url): url for url in urls_to_scrape}
-        for future in concurrent.futures.as_completed(future_to_url):
-            try:
-                success, data = future.result()
-                if success:
-                    results.append(data)
-                else:
-                    failed_results.append(data)
-                    print(f"Failed scraping {data['url']}: {data['error']}")
-            except Exception as exc:
-                url = future_to_url[future]
-                domain = urlparse(url).netloc
-                failed_results.append({"url": url, "domain": domain, "error": f"Execution exception: {exc}"})
-                print(f"{url} generated an execution exception: {exc}")
+    if urls_missed_cache:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(urls_missed_cache))) as executor:
+            future_to_url = {executor.submit(scrape_single, url): url for url in urls_missed_cache}
+            for future in concurrent.futures.as_completed(future_to_url):
+                try:
+                    success, data = future.result()
+                    if success:
+                        results.append(data)
+                        set_cached_scrape_item(
+                            data["url"],
+                            {
+                                "text": data.get("text", ""),
+                                "word_count": data.get("word_count", 0),
+                                "headers": data.get("headers", {}),
+                                "domain": data.get("domain", ""),
+                            },
+                        )
+                    else:
+                        failed_results.append(data)
+                        print(f"Failed scraping {data['url']}: {data['error']}")
+                except Exception as exc:
+                    url = future_to_url[future]
+                    domain = urlparse(url).netloc
+                    failed_results.append({"url": url, "domain": domain, "error": f"Execution exception: {exc}"})
+                    print(f"{url} generated an execution exception: {exc}")
         
     if len(results) < 3:
         print(f"Warning: Only {len(results)} successful scrapes (minimum recommended: 3)")
@@ -189,5 +223,7 @@ def scrape_urls(urls: List[str], max_urls: int = 10, timeout: int = 15) -> Dict[
         "raw_results": results,
         "failed_results": failed_results,
         "serper_count": len([r for r in results if r.get("method") == "serper"]),
-        "direct_count": len([r for r in results if r.get("method") == "direct"])
+        "direct_count": len([r for r in results if r.get("method") == "direct"]),
+        "cache_hits": cache_hits,
+        "cache_misses": cache_misses,
     }

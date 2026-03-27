@@ -4,6 +4,7 @@ import base64
 from typing import Dict, Any, Optional
 from urllib.parse import urlparse
 from app.config import settings
+from app.services.serp_cache import get_cached_serp
 
 def _is_excluded_domain(url: str) -> bool:
     """Проверяет, принадлежит ли URL к исключённому домену."""
@@ -602,8 +603,8 @@ def _merge_serp_results(google_result: dict, bing_result: dict) -> dict:
 
     return merged
 
-def fetch_serp_data(keyword: str, country_code: str, language_code: str,
-                    serp_config: dict = None) -> Dict[str, Any]:
+def _fetch_serp_data_uncached(keyword: str, country_code: str, language_code: str,
+                              serp_config: dict = None) -> Dict[str, Any]:
     """
     Routes SERP fetching based on serp_config:
     - google (default): DataForSEO Google → fallback SerpAPI
@@ -675,4 +676,21 @@ def fetch_serp_data(keyword: str, country_code: str, language_code: str,
         return dfs_parsed
 
     raise Exception("Both SERP providers failed to return results.")
+
+
+def fetch_serp_data(
+    keyword: str,
+    country_code: str,
+    language_code: str,
+    serp_config: dict = None,
+    force_refresh: bool = False,
+) -> Dict[str, Any]:
+    return get_cached_serp(
+        keyword=keyword,
+        country_code=country_code,
+        language_code=language_code,
+        serp_config=serp_config,
+        fetch_fn=_fetch_serp_data_uncached,
+        force_refresh=force_refresh,
+    )
 

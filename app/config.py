@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     DATAFORSEO_PASSWORD: str = ""
     SERPER_API_KEY: str = ""
     SERPAPI_KEY: str = ""
+    SERP_CACHE_ENABLED: bool = True
+    SERP_CACHE_TTL: int = 86400
+    SCRAPE_CACHE_TTL: int = 43200
 
     # Telegram notifications
     TELEGRAM_BOT_TOKEN: str = ""
