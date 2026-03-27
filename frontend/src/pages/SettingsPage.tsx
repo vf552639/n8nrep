@@ -164,15 +164,17 @@ export default function SettingsPage() {
 
                    <div className="space-y-4">
                      <div>
-                       <label className="block text-sm font-medium text-slate-700 mb-1">GoAPI Key (Midjourney proxy)</label>
+                       <label className="block text-sm font-medium text-slate-700 mb-1">Default Image Model</label>
                        <input
-                         type="password"
-                         value={settings.GOAPI_API_KEY || ""}
-                         onChange={(e) => setSettings({ ...settings, GOAPI_API_KEY: e.target.value })}
+                         type="text"
+                         value={settings.IMAGE_MODEL_DEFAULT || ""}
+                         onChange={(e) => setSettings({ ...settings, IMAGE_MODEL_DEFAULT: e.target.value })}
                          className="w-full border p-2.5 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500 font-mono"
-                         placeholder="goapi-..."
+                         placeholder="google/gemini-2.5-flash-image-preview"
                        />
-                       <p className="text-xs text-slate-400 mt-1">GoAPI provides Midjourney access via REST API.</p>
+                       <p className="text-xs text-slate-400 mt-1">
+                         Used when the Prompts → Image Generation (service) agent has no model set. Examples: google/gemini-2.5-flash-image-preview, black-forest-labs/flux-2-pro, sourceful/riverflow-v2-fast. See OpenRouter models with image output.
+                       </p>
                      </div>
 
                      <div>

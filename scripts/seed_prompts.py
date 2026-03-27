@@ -327,13 +327,15 @@ QUALITY:
 RESPONSE FORMAT (STRICT):
 You MUST respond with a valid JSON object containing EXACTLY these keys and no others:
 {
-  "midjourney_prompt": "your detailed visual prompt here",
+  "image_prompt": "your detailed English visual description for the image model",
   "alt_text": "short description for img alt attribute",
   "aspect_ratio": "16:9"
 }
 
+For backward compatibility you may also include "midjourney_prompt" with the same text as "image_prompt"; if only one is present, it will be used.
+
 Do not include any text outside the JSON object.
-The "midjourney_prompt" value must be a detailed English visual description for Midjourney image generation, minimum 30 words.""",
+The "image_prompt" value must be a detailed English visual description for AI image generation (no vendor-specific flags), minimum 30 words. Aspect ratio is a separate field — do not append --ar or similar to the prompt text.""",
         "user_prompt": """Create a {{type}} for a web article section.
 
 Section title: "{{parent_title}}"
@@ -346,7 +348,14 @@ Additional context:
 - This is for an online casino review website targeting Australian audience
 - The site uses a dark theme with neon accent colors
 - The image will be displayed as a full-width block between text sections""",
-    }
+    },
+    {
+        "agent_name": "image_generation",
+        "model": "google/gemini-2.5-flash-image-preview",
+        "temperature": 0.7,
+        "system_prompt": "Service step (no chat prompt): the model id below is passed to OpenRouter image generation. Pick a model that lists image in output_modalities on OpenRouter (e.g. Gemini Flash Image, FLUX, Riverflow).",
+        "user_prompt": "Unused — the pipeline sends prompts from the image_prompt_generation step directly to OpenRouter.",
+    },
 ]
 
 def seed():
@@ -371,7 +380,7 @@ def seed():
                 db.add(db_prompt)
                 inserted += 1
                 print(f"Created prompt for: {pdata['agent_name']}")
-            elif pdata["agent_name"] == "image_prompt_generation":
+            elif pdata["agent_name"] in ("image_prompt_generation", "image_generation"):
                 existing.system_prompt = pdata["system_prompt"]
                 existing.user_prompt = pdata["user_prompt"]
                 existing.model = pdata["model"]

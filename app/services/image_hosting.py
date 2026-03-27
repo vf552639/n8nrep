@@ -25,24 +25,14 @@ class ImgBBUploader:
         self.api_key = api_key
         self.upload_url = "https://api.imgbb.com/1/upload"
 
-    def upload_from_url(self, image_url: str, filename: str) -> dict:
-        """
-        Downloads image from URL, uploads to ImgBB.
-        Returns: {"url": "...", "display_url": "...", "delete_url": "..."}
-        """
-        # Download the image
-        resp = requests.get(image_url, timeout=60)
-        resp.raise_for_status()
-
-        image_b64 = base64.b64encode(resp.content).decode("utf-8")
-
-        # Upload to ImgBB
+    def upload_from_bytes(self, image_bytes: bytes, filename: str) -> dict:
+        """Upload raw image bytes to ImgBB."""
+        image_b64 = base64.b64encode(image_bytes).decode("utf-8")
         payload = {
             "key": self.api_key,
             "image": image_b64,
             "name": filename,
         }
-
         upload_resp = requests.post(self.upload_url, data=payload, timeout=30)
         upload_resp.raise_for_status()
         data = upload_resp.json()
@@ -56,3 +46,23 @@ class ImgBBUploader:
             "display_url": img_data.get("display_url", ""),
             "delete_url": img_data.get("delete_url", ""),
         }
+
+    def upload_from_data_url(self, data_url: str, filename: str) -> dict:
+        """Parse `data:image/...;base64,...` from OpenRouter and upload."""
+        if not isinstance(data_url, str) or not data_url.startswith("data:"):
+            raise ValueError("Expected a base64 data URL")
+        comma = data_url.find(",")
+        if comma == -1:
+            raise ValueError("Invalid data URL: no comma")
+        b64 = data_url[comma + 1 :].strip()
+        raw = base64.b64decode(b64)
+        return self.upload_from_bytes(raw, filename)
+
+    def upload_from_url(self, image_url: str, filename: str) -> dict:
+        """
+        Downloads image from URL, uploads to ImgBB.
+        Returns: {"url": "...", "display_url": "...", "delete_url": "..."}
+        """
+        resp = requests.get(image_url, timeout=60)
+        resp.raise_for_status()
+        return self.upload_from_bytes(resp.content, filename)

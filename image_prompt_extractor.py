@@ -55,6 +55,10 @@ QUALITY:
 - Render at highest available resolution
 - Sharp edges, no artifacts
 - Consistent lighting and shadow direction
+
+RESPONSE FORMAT (when producing structured output):
+- Use JSON with keys: image_prompt (detailed English visual description for AI image models), alt_text, aspect_ratio.
+- Do not embed aspect ratio or model flags inside the prompt text (no --ar, --v, etc.).
 """
 
 

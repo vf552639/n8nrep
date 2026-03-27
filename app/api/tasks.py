@@ -823,7 +823,7 @@ class RegenerateImageRequest(BaseModel):
 @router.post("/{task_id}/regenerate-image")
 def regenerate_image(task_id: str, payload: RegenerateImageRequest, db: Session = Depends(get_db)):
     """Regenerate a specific image (while pipeline is paused)."""
-    from app.services.image_generator import GoApiMidjourneyGenerator
+    from app.services.image_generator import OpenRouterImageGenerator, resolve_image_generation_model
     from app.services.image_hosting import ImgBBUploader
 
     task = db.query(Task).filter(Task.id == task_id).first()
@@ -847,14 +847,20 @@ def regenerate_image(task_id: str, payload: RegenerateImageRequest, db: Session 
     if not target_img:
         raise HTTPException(status_code=404, detail=f"Image '{payload.image_id}' not found")
 
-    prompt = payload.new_prompt or target_img.get("midjourney_prompt", "")
+    prompt = payload.new_prompt or target_img.get("image_prompt") or target_img.get("midjourney_prompt", "")
     if not prompt:
         raise HTTPException(status_code=400, detail="No prompt available for regeneration")
 
+    if not settings.OPENROUTER_API_KEY:
+        raise HTTPException(status_code=400, detail="OPENROUTER_API_KEY not configured")
+
     try:
-        generator = GoApiMidjourneyGenerator(
-            api_key=settings.GOAPI_API_KEY, base_url=settings.GOAPI_BASE_URL,
-            poll_interval=settings.IMAGE_POLL_INTERVAL, poll_timeout=settings.IMAGE_POLL_TIMEOUT,
+        model_id = resolve_image_generation_model(db)
+        fallback_model = settings.IMAGE_MODEL_DEFAULT if model_id != settings.IMAGE_MODEL_DEFAULT else None
+        generator = OpenRouterImageGenerator(
+            api_key=settings.OPENROUTER_API_KEY,
+            model=model_id,
+            fallback_model=fallback_model,
         )
         result = generator.generate_and_wait(
             prompt=prompt,
@@ -865,13 +871,14 @@ def regenerate_image(task_id: str, payload: RegenerateImageRequest, db: Session 
             uploader = ImgBBUploader(api_key=settings.IMGBB_API_KEY)
             keyword_slug = task.main_keyword.lower().replace(" ", "-")[:30]
             filename = f"regen_{keyword_slug}_{payload.image_id}"
-            hosted = uploader.upload_from_url(result.image_url, filename)
+            hosted = uploader.upload_from_data_url(result.image_url, filename)
 
             target_img["status"] = "completed"
-            target_img["original_url"] = result.image_url
+            target_img["original_url"] = None
             target_img["hosted_url"] = hosted.get("url", "")
             target_img["error"] = None
             if payload.new_prompt:
+                target_img["image_prompt"] = payload.new_prompt
                 target_img["midjourney_prompt"] = payload.new_prompt
         else:
             target_img["status"] = "failed"

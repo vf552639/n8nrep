@@ -7,7 +7,8 @@ import { RefreshCw, Check, X, Eye, EyeOff } from "lucide-react";
 interface ImageData {
   id: string;
   section: string;
-  midjourney_prompt: string;
+  image_prompt?: string;
+  midjourney_prompt?: string;
   alt_text: string;
   status: string;
   original_url?: string;
@@ -128,7 +129,7 @@ export default function ImageReviewPanel({ taskId, images, paused, onRefresh }: 
 
               {expandedPrompt === img.id && (
                 <div className="bg-slate-900 rounded p-2 text-xs text-emerald-400 font-mono max-h-24 overflow-auto">
-                  {img.midjourney_prompt}
+                  {img.image_prompt || img.midjourney_prompt || ""}
                 </div>
               )}
 

@@ -23,8 +23,8 @@ class SettingsUpdate(BaseModel):
     EXCLUDED_DOMAINS: str = None
     SEQUENTIAL_MODE: str = None
     MIDJOURNEY_API_KEY: str = None
-    GOAPI_API_KEY: str = None
     IMGBB_API_KEY: str = None
+    IMAGE_MODEL_DEFAULT: str = None
     IMAGE_GEN_ENABLED: str = None
 
 @router.get("/")

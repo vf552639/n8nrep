@@ -159,7 +159,7 @@ export default function TaskDetailPage() {
                         <div>
                           <p className="font-semibold text-amber-800">Pipeline paused — Images ready for review</p>
                           <p className="text-sm text-amber-600">
-                            Midjourney finished generating images. Review and approve them to continue.
+                            Image generation finished. Review and approve images to continue.
                           </p>
                         </div>
                       </div>
