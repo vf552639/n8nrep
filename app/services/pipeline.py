@@ -809,7 +809,7 @@ def phase_structure_fact_check(ctx: PipelineContext):
     save_step_result(ctx.db, ctx.task, STEP_STRUCTURE_FACT_CHECK, result=fact_check_report, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
 
 def phase_image_prompt_gen(ctx: PipelineContext):
-    """LLM agent extracts MULTIMEDIA blocks from outline and generates Midjourney prompts."""
+    """LLM agent builds image prompts per multimedia block using template vars."""
     if not settings.IMAGE_GEN_ENABLED:
         add_log(ctx.db, ctx.task, "Image generation disabled globally — skipping", step=STEP_IMAGE_PROMPT_GEN)
         save_step_result(ctx.db, ctx.task, STEP_IMAGE_PROMPT_GEN, result=json.dumps({"images": [], "skipped": True}), status="completed")
@@ -831,25 +831,133 @@ def phase_image_prompt_gen(ctx: PipelineContext):
         save_step_result(ctx.db, ctx.task, STEP_IMAGE_PROMPT_GEN, result=json.dumps({"images": []}), status="completed")
         return
 
-    add_log(ctx.db, ctx.task, f"Found {len(multimedia_blocks)} MULTIMEDIA blocks. Generating prompts...", step=STEP_IMAGE_PROMPT_GEN)
+    def _norm_mm_type(block: dict) -> str:
+        mm = block.get("multimedia", {}) if isinstance(block, dict) else {}
+        t = mm.get("Type") or mm.get("type") or ""
+        return str(t).strip()
+
+    generatable_types = {"Image", "Infographic"}
+    eligible_blocks = [b for b in multimedia_blocks if _norm_mm_type(b) in generatable_types]
+    skipped_count = len(multimedia_blocks) - len(eligible_blocks)
+    if not eligible_blocks:
+        add_log(
+            ctx.db,
+            ctx.task,
+            "MULTIMEDIA blocks found, but no generatable types (Image/Infographic) — skipping",
+            step=STEP_IMAGE_PROMPT_GEN,
+        )
+        save_step_result(ctx.db, ctx.task, STEP_IMAGE_PROMPT_GEN, result=json.dumps({"images": []}), status="completed")
+        return
+
+    add_log(
+        ctx.db,
+        ctx.task,
+        f"Found {len(multimedia_blocks)} MULTIMEDIA blocks, eligible: {len(eligible_blocks)}, skipped: {skipped_count}. Generating prompts...",
+        step=STEP_IMAGE_PROMPT_GEN,
+    )
     save_step_result(ctx.db, ctx.task, STEP_IMAGE_PROMPT_GEN, result=None, status="running")
 
-    context = (
-        f"Keyword: {ctx.task.main_keyword}\n"
-        f"Language: {ctx.task.language}\n\n"
-        f"MULTIMEDIA blocks extracted from article outline:\n"
-        f"{json.dumps(multimedia_blocks, ensure_ascii=False, indent=2)}"
-    )
-
     setup_template_vars(ctx)
-    result_json, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
-        ctx, "image_prompt_generation", context,
-        response_format={"type": "json_object"}, variables=ctx.template_vars
-    )
-    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
+    images = []
+    total_cost = 0.0
+    actual_model = None
+    last_resolved_prompts = None
+    last_variables_snapshot = None
 
-    add_log(ctx.db, ctx.task, f"Image prompt generation completed", step=STEP_IMAGE_PROMPT_GEN)
-    save_step_result(ctx.db, ctx.task, STEP_IMAGE_PROMPT_GEN, result=result_json, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
+    for idx, block in enumerate(eligible_blocks, start=1):
+        mm = block.get("multimedia", {}) if isinstance(block, dict) else {}
+        mm_type = _norm_mm_type(block) or "Image"
+        description = str(mm.get("Description") or mm.get("description") or "").strip()
+        purpose = str(mm.get("Purpose") or mm.get("purpose") or "").strip()
+        location = str(mm.get("Location") or mm.get("location") or "").strip() or f"image_{idx}"
+        parent_title = str(block.get("section") or "").strip() or "Untitled Section"
+
+        block_vars = dict(ctx.template_vars or {})
+        block_vars.update(
+            {
+                "type": mm_type,
+                "description": description,
+                "purpose": purpose,
+                "parent_title": parent_title,
+                "location": location,
+            }
+        )
+
+        block_context = (
+            "MULTIMEDIA block payload:\n"
+            f"{json.dumps(block, ensure_ascii=False, indent=2)}"
+        )
+
+        try:
+            block_result_json, block_cost, block_model, block_resolved_prompts, block_variables_snapshot = call_agent(
+                ctx,
+                "image_prompt_generation",
+                block_context,
+                response_format={"type": "json_object"},
+                variables=block_vars,
+            )
+            total_cost += block_cost
+            actual_model = block_model
+            last_resolved_prompts = block_resolved_prompts
+            last_variables_snapshot = block_variables_snapshot
+
+            parsed = clean_and_parse_json(block_result_json)
+            if not isinstance(parsed, dict):
+                parsed = {}
+
+            midjourney_prompt = (
+                parsed.get("midjourney_prompt")
+                or parsed.get("prompt")
+                or parsed.get("image_prompt")
+                or ""
+            )
+            if not midjourney_prompt:
+                add_log(
+                    ctx.db,
+                    ctx.task,
+                    f"Image prompt gen returned empty prompt for block {block.get('id', f'img_{idx}')}; block skipped",
+                    level="warn",
+                    step=STEP_IMAGE_PROMPT_GEN,
+                )
+                continue
+
+            images.append(
+                {
+                    "id": block.get("id", f"img_{idx}"),
+                    "section": parent_title,
+                    "location": location,
+                    "type": mm_type,
+                    "description": description,
+                    "purpose": purpose,
+                    "midjourney_prompt": str(midjourney_prompt).strip(),
+                    "alt_text": str(parsed.get("alt_text") or f"{mm_type} for {parent_title}").strip(),
+                    "aspect_ratio": str(parsed.get("aspect_ratio") or "16:9").strip(),
+                }
+            )
+        except Exception as e:
+            add_log(
+                ctx.db,
+                ctx.task,
+                f"Failed image prompt generation for block {block.get('id', f'img_{idx}')}: {e}",
+                level="error",
+                step=STEP_IMAGE_PROMPT_GEN,
+            )
+
+    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + total_cost
+    result_json = json.dumps({"images": images}, ensure_ascii=False)
+
+    add_log(ctx.db, ctx.task, f"Image prompt generation completed: {len(images)} prompts built", step=STEP_IMAGE_PROMPT_GEN)
+    save_step_result(
+        ctx.db,
+        ctx.task,
+        STEP_IMAGE_PROMPT_GEN,
+        result=result_json,
+        model=actual_model,
+        status="completed",
+        cost=total_cost,
+        variables_snapshot=last_variables_snapshot,
+        resolved_prompts=last_resolved_prompts,
+    )
 
 
 def phase_image_gen(ctx: PipelineContext):

@@ -15,8 +15,6 @@ type LogEntry = {
   step?: string | null;
 };
 
-type PromptsDebugStep = { id: string; label: string };
-
 export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
@@ -68,31 +66,6 @@ export default function TaskDetailPage() {
     }
   }, [isWaiting, isImagePaused]);
 
-  const PROMPTS_DEBUG_STEPS: PromptsDebugStep[] = [
-    { id: "ai_structure_analysis", label: "AI Structure Analysis" },
-    { id: "chunk_cluster_analysis", label: "Chunk Cluster Analysis" },
-    { id: "competitor_structure_analysis", label: "Competitor Structure Analysis" },
-    { id: "final_structure_analysis", label: "Final Structure Analysis" },
-    { id: "structure_fact_checking", label: "Structure Fact-Checking" },
-    { id: "image_prompt_generation", label: "Image Generation" },
-    { id: "primary_generation", label: "Primary Generation" },
-    { id: "competitor_comparison", label: "Competitor Comparison" },
-    { id: "reader_opinion", label: "Reader Opinion" },
-    { id: "interlinking_citations", label: "Interlinking & Citations" },
-    { id: "improver", label: "Improver" },
-    { id: "final_editing", label: "Final Editing" },
-    { id: "content_fact_checking", label: "Content Fact-Checking" },
-    { id: "html_structure", label: "HTML Structure" },
-    { id: "meta_generation", label: "Meta Generation" },
-  ];
-
-  const hasPromptsDebug =
-    !!task?.step_results &&
-    PROMPTS_DEBUG_STEPS.some((s) => {
-      const st: any = (task.step_results as any)[s.id];
-      return !!st;
-    });
-
   const handleForceAction = async (action: "complete" | "fail") => {
     try {
       if (!id) return;
@@ -114,7 +87,6 @@ export default function TaskDetailPage() {
   const tabs = [
     { id: "pipeline", label: "Pipeline Execution" },
     ...(hasImages || isImagePaused ? [{ id: "images", label: "🖼️ Image Review" }] : []),
-    ...(hasPromptsDebug ? [{ id: "prompts_debug", label: "Prompts Debug" }] : []),
     ...(hasDraft || isWaiting ? [{ id: "review", label: "📝 Article Review" }] : []),
     { id: "logs", label: "Execution Logs" },
   ];
@@ -190,50 +162,6 @@ export default function TaskDetailPage() {
                   No images generated for this task.
                 </div>
               )}
-            </div>
-          )}
-
-          {activeTab === "prompts_debug" && (
-            <div className="animate-in fade-in slide-in-from-bottom-2 rounded-xl border bg-white p-6 shadow-sm duration-300 space-y-6">
-              <h2 className="text-lg font-semibold text-slate-800">Prompts Debug</h2>
-              {PROMPTS_DEBUG_STEPS.map((s, idx) => {
-                const step: any = (task.step_results as any)?.[s.id];
-                if (!step) return null;
-                const rp = step?.resolved_prompts;
-                const system = rp?.system_prompt || "";
-                const user = rp?.user_prompt || "";
-                return (
-                  <div key={s.id} className="space-y-3 border rounded-lg p-4 bg-slate-50">
-                    <div className="flex items-center justify-between">
-                      <div className="font-semibold text-slate-800">
-                        {idx + 1}. {s.label}
-                      </div>
-                      {step?.status ? (
-                        <span className="text-xs font-mono text-slate-500">{step.status}</span>
-                      ) : null}
-                    </div>
-
-                    {!rp ? (
-                      <div className="text-sm text-slate-500 italic">Промпты для этого шага не сохранены.</div>
-                    ) : (
-                      <div className="space-y-3">
-                        <div>
-                          <div className="text-xs font-bold uppercase tracking-wide text-slate-600 mb-1">System prompt</div>
-                          <pre className="max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white p-3 text-xs font-mono whitespace-pre-wrap">
-                            {system || "—"}
-                          </pre>
-                        </div>
-                        <div>
-                          <div className="text-xs font-bold uppercase tracking-wide text-slate-600 mb-1">User prompt</div>
-                          <pre className="max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white p-3 text-xs font-mono whitespace-pre-wrap">
-                            {user || "—"}
-                          </pre>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
             </div>
           )}
 
