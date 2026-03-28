@@ -1,9 +1,58 @@
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import api from "@/api/client";
 import { Article } from "@/types/article";
 import ArticleFactCheck from "@/components/articles/ArticleFactCheck";
+
+function formatMetaFieldLabel(key: string) {
+  return key.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
+}
+
+function MetaFieldBlock({ fieldKey, value }: { fieldKey: string; value: unknown }) {
+  const isString = typeof value === "string";
+  const text = isString ? value : JSON.stringify(value, null, 2);
+  const len = isString ? value.length : text.length;
+
+  const charHint =
+    fieldKey === "title" ? (
+      <div className="text-sm mt-2 font-mono flex flex-wrap items-center gap-2">
+        <span
+          className={len >= 50 && len <= 60 ? "text-emerald-600" : "text-red-600"}
+        >
+          {len} characters
+        </span>
+        <span className="text-slate-400">· recommended 50–60</span>
+      </div>
+    ) : fieldKey === "description" ? (
+      <div className="text-sm mt-2 font-mono flex flex-wrap items-center gap-2">
+        <span
+          className={len >= 150 && len <= 160 ? "text-emerald-600" : "text-red-600"}
+        >
+          {len} characters
+        </span>
+        <span className="text-slate-400">· recommended 150–160</span>
+      </div>
+    ) : null;
+
+  return (
+    <div>
+      <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">
+        {formatMetaFieldLabel(fieldKey)}
+      </h3>
+      {isString ? (
+        <p className="text-slate-900 bg-slate-50 p-4 rounded-lg border shadow-sm leading-relaxed whitespace-pre-wrap">
+          {value as string}
+        </p>
+      ) : (
+        <pre className="text-sm text-slate-800 bg-slate-50 p-4 rounded-lg border shadow-sm overflow-x-auto whitespace-pre-wrap font-mono">
+          {text}
+        </pre>
+      )}
+      {charHint}
+    </div>
+  );
+}
 
 export default function ArticleDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -17,6 +66,12 @@ export default function ArticleDetailPage() {
     },
     enabled: !!id,
   });
+
+  const metaEntries = useMemo(() => {
+    const m = article?.meta_data;
+    if (!m || typeof m !== "object" || Array.isArray(m)) return [];
+    return Object.entries(m).filter(([, v]) => v != null);
+  }, [article?.meta_data]);
 
   if (isLoading) return <div className="p-6 text-slate-500">Loading article...</div>;
   if (!article) return <div className="p-6 text-red-500">Article not found</div>;
@@ -93,38 +148,48 @@ export default function ArticleDetailPage() {
               These values are produced by the <strong className="text-slate-800">meta_generation</strong> pipeline step
               from your final article HTML.
             </p>
-            <div>
-              <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">Meta Title</h3>
-              <p className="text-lg text-slate-900 bg-slate-50 p-4 rounded-lg border shadow-sm">{article.title}</p>
-              <div className="text-sm mt-2 font-mono flex flex-wrap items-center gap-2">
-                <span
-                  className={
-                    (article.title?.length || 0) >= 50 && (article.title?.length || 0) <= 60
-                      ? "text-emerald-600"
-                      : "text-red-600"
-                  }
-                >
-                  {article.title?.length || 0} characters
-                </span>
-                <span className="text-slate-400">· recommended 50–60</span>
+            {metaEntries.length > 0 ? (
+              <div className="space-y-10">
+                {metaEntries.map(([key, value]) => (
+                  <MetaFieldBlock key={key} fieldKey={key} value={value} />
+                ))}
               </div>
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2 mt-8">Meta Description</h3>
-              <p className="text-slate-900 bg-slate-50 p-4 rounded-lg border shadow-sm leading-relaxed">{article.description}</p>
-              <div className="text-sm mt-2 font-mono flex flex-wrap items-center gap-2">
-                <span
-                  className={
-                    (article.description?.length || 0) >= 150 && (article.description?.length || 0) <= 160
-                      ? "text-emerald-600"
-                      : "text-red-600"
-                  }
-                >
-                  {article.description?.length || 0} characters
-                </span>
-                <span className="text-slate-400">· recommended 150–160</span>
-              </div>
-            </div>
+            ) : (
+              <>
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">Meta Title</h3>
+                  <p className="text-lg text-slate-900 bg-slate-50 p-4 rounded-lg border shadow-sm">{article.title}</p>
+                  <div className="text-sm mt-2 font-mono flex flex-wrap items-center gap-2">
+                    <span
+                      className={
+                        (article.title?.length || 0) >= 50 && (article.title?.length || 0) <= 60
+                          ? "text-emerald-600"
+                          : "text-red-600"
+                      }
+                    >
+                      {article.title?.length || 0} characters
+                    </span>
+                    <span className="text-slate-400">· recommended 50–60</span>
+                  </div>
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2 mt-8">Meta Description</h3>
+                  <p className="text-slate-900 bg-slate-50 p-4 rounded-lg border shadow-sm leading-relaxed">{article.description}</p>
+                  <div className="text-sm mt-2 font-mono flex flex-wrap items-center gap-2">
+                    <span
+                      className={
+                        (article.description?.length || 0) >= 150 && (article.description?.length || 0) <= 160
+                          ? "text-emerald-600"
+                          : "text-red-600"
+                      }
+                    >
+                      {article.description?.length || 0} characters
+                    </span>
+                    <span className="text-slate-400">· recommended 150–160</span>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         )}
         {activeTab === "fact_check" && (

@@ -21,6 +21,7 @@ from app.config import settings
 
 from app.services.json_parser import clean_and_parse_json
 from app.services.pipeline_constants import *
+from app.services.word_counter import count_content_words
 import re
 import datetime
 
@@ -64,7 +65,7 @@ def get_prompt_obj(db: Session, agent_name: str) -> Prompt:
         raise Exception(f"No active prompt found for agent: {agent_name}")
     return prompt_obj
 
-def save_step_result(db: Session, task: Task, step_name: str, result: str, model: str = None, status: str = "completed", cost: float = 0.0, variables_snapshot: dict = None, resolved_prompts: dict = None, exclude_words_violations: dict = None):
+def save_step_result(db: Session, task: Task, step_name: str, result: str, model: str = None, status: str = "completed", cost: float = 0.0, variables_snapshot: dict = None, resolved_prompts: dict = None, exclude_words_violations: dict = None, input_word_count: int = None, output_word_count: int = None, word_count_warning: bool = None, word_loss_percentage: float = None):
     if task.step_results is None:
         task.step_results = {}
     
@@ -83,6 +84,14 @@ def save_step_result(db: Session, task: Task, step_name: str, result: str, model
         step_data["resolved_prompts"] = resolved_prompts
     if exclude_words_violations:
         step_data["exclude_words_violations"] = exclude_words_violations
+    if input_word_count is not None:
+        step_data["input_word_count"] = input_word_count
+    if output_word_count is not None:
+        step_data["output_word_count"] = output_word_count
+    if word_count_warning is not None:
+        step_data["word_count_warning"] = word_count_warning
+    if word_loss_percentage is not None:
+        step_data["word_loss_percentage"] = word_loss_percentage
     
     updated = dict(task.step_results)
     updated[step_name] = step_data
@@ -1297,18 +1306,20 @@ def phase_image_inject(ctx: PipelineContext):
     html_result = ctx.task.step_results.get(STEP_HTML_STRUCT, {}).get("result", "")
     if not html_result:
         add_log(ctx.db, ctx.task, "No HTML structure found — skipping image inject", step=STEP_IMAGE_INJECT)
-        save_step_result(ctx.db, ctx.task, STEP_IMAGE_INJECT, result="", status="completed")
+        save_step_result(ctx.db, ctx.task, STEP_IMAGE_INJECT, result="", status="completed", input_word_count=0, output_word_count=0)
         return
 
     image_data_raw = ctx.task.step_results.get(STEP_IMAGE_GEN, {}).get("result", "")
     if not image_data_raw:
         add_log(ctx.db, ctx.task, "No image data — passing HTML through unchanged", step=STEP_IMAGE_INJECT)
-        save_step_result(ctx.db, ctx.task, STEP_IMAGE_INJECT, result=html_result, status="completed")
+        wc = count_content_words(html_result)
+        save_step_result(ctx.db, ctx.task, STEP_IMAGE_INJECT, result=html_result, status="completed", input_word_count=wc, output_word_count=wc)
         return
 
     image_data = clean_and_parse_json(image_data_raw) if isinstance(image_data_raw, str) else image_data_raw
     if not isinstance(image_data, dict):
-        save_step_result(ctx.db, ctx.task, STEP_IMAGE_INJECT, result=html_result, status="completed")
+        wc = count_content_words(html_result)
+        save_step_result(ctx.db, ctx.task, STEP_IMAGE_INJECT, result=html_result, status="completed", input_word_count=wc, output_word_count=wc)
         return
 
     approved_images = [img for img in image_data.get("images", []) if img.get("approved") is True and img.get("hosted_url")]
@@ -1316,7 +1327,9 @@ def phase_image_inject(ctx: PipelineContext):
     if not approved_images:
         add_log(ctx.db, ctx.task, "No approved images — cleaning MULTIMEDIA markers", step=STEP_IMAGE_INJECT)
         cleaned = re.sub(r'\[MULTIMEDIA[^\]]*\]', '', html_result, flags=re.IGNORECASE)
-        save_step_result(ctx.db, ctx.task, STEP_IMAGE_INJECT, result=cleaned, status="completed")
+        in_w = count_content_words(html_result)
+        out_w = count_content_words(cleaned)
+        save_step_result(ctx.db, ctx.task, STEP_IMAGE_INJECT, result=cleaned, status="completed", input_word_count=in_w, output_word_count=out_w)
         return
 
     add_log(ctx.db, ctx.task, f"Injecting {len(approved_images)} approved images into HTML...", step=STEP_IMAGE_INJECT)
@@ -1353,7 +1366,9 @@ def phase_image_inject(ctx: PipelineContext):
     result_html = re.sub(r'\[MULTIMEDIA[^\]]*\]', '', result_html, flags=re.IGNORECASE)
 
     add_log(ctx.db, ctx.task, f"Image injection completed: {injected_count}/{len(approved_images)} inserted", step=STEP_IMAGE_INJECT)
-    save_step_result(ctx.db, ctx.task, STEP_IMAGE_INJECT, result=result_html, status="completed")
+    in_w = count_content_words(html_result)
+    out_w = count_content_words(result_html)
+    save_step_result(ctx.db, ctx.task, STEP_IMAGE_INJECT, result=result_html, status="completed", input_word_count=in_w, output_word_count=out_w)
 
 
 def phase_primary_gen(ctx: PipelineContext):
@@ -1371,7 +1386,8 @@ def phase_primary_gen(ctx: PipelineContext):
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
     add_log(ctx.db, ctx.task, f"Primary Generation completed ({len(draft_html)} chars)", step=STEP_PRIMARY_GEN)
-    save_step_result(ctx.db, ctx.task, STEP_PRIMARY_GEN, result=draft_html, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts, exclude_words_violations=violations)
+    out_wc = count_content_words(draft_html)
+    save_step_result(ctx.db, ctx.task, STEP_PRIMARY_GEN, result=draft_html, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts, exclude_words_violations=violations, output_word_count=out_wc)
 
 def phase_competitor_comparison(ctx: PipelineContext):
     setup_template_vars(ctx)
@@ -1436,7 +1452,9 @@ def phase_improver(ctx: PipelineContext):
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
     add_log(ctx.db, ctx.task, f"Improver completed ({len(improved_html)} chars)", step=STEP_IMPROVER)
-    save_step_result(ctx.db, ctx.task, STEP_IMPROVER, result=improved_html, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts, exclude_words_violations=violations)
+    in_wc = count_content_words(draft_html)
+    out_wc = count_content_words(improved_html)
+    save_step_result(ctx.db, ctx.task, STEP_IMPROVER, result=improved_html, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts, exclude_words_violations=violations, input_word_count=in_wc, output_word_count=out_wc)
 
 def phase_final_editing(ctx: PipelineContext):
     setup_template_vars(ctx)
@@ -1448,7 +1466,7 @@ def phase_final_editing(ctx: PipelineContext):
     outline_json = ctx.task.outline.get("final_outline", {})
     
     avg_words = ctx.template_vars.get("avg_word_count", "0")
-    input_word_count = len(BeautifulSoup(improved_html, 'html.parser').get_text().split())
+    input_word_count = count_content_words(improved_html)
     input_char_count = len(improved_html)
 
     editing_context = (
@@ -1481,7 +1499,7 @@ def phase_final_editing(ctx: PipelineContext):
             final_html, removal_report = validator.remove_violations(final_html)
 
     # Calculate output stats
-    output_word_count = len(BeautifulSoup(final_html, 'html.parser').get_text().split())
+    output_word_count = count_content_words(final_html)
     output_char_count = len(final_html)
 
     add_log(ctx.db, ctx.task, 
@@ -1489,7 +1507,7 @@ def phase_final_editing(ctx: PipelineContext):
         f"output: {output_word_count} words / {output_char_count} chars | "
         f"target avg: {avg_words} words", 
         step=STEP_FINAL_EDIT)
-    save_step_result(ctx.db, ctx.task, STEP_FINAL_EDIT, result=final_html, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts, exclude_words_violations=violations)
+    save_step_result(ctx.db, ctx.task, STEP_FINAL_EDIT, result=final_html, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts, exclude_words_violations=violations, input_word_count=input_word_count, output_word_count=output_word_count)
 
 def phase_html_structure(ctx: PipelineContext):
     setup_template_vars(ctx)
@@ -1516,8 +1534,38 @@ def phase_html_structure(ctx: PipelineContext):
     structured_html, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, "html_structure", html_struct_context, variables=ctx.template_vars)
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
+    input_wc = count_content_words(final_html)
+    output_wc = count_content_words(structured_html)
+    loss_pct = ((input_wc - output_wc) / input_wc * 100.0) if input_wc > 0 else 0.0
+    wc_kw = {}
+    if input_wc > 0 and loss_pct > 7:
+        add_log(
+            ctx.db,
+            ctx.task,
+            f"⚠️ WORD COUNT DROP: html_structure lost {loss_pct:.1f}% of content words! "
+            f"Input: {input_wc} words → Output: {output_wc} words. "
+            f"Maximum allowed loss: 7%",
+            level="warn",
+            step=STEP_HTML_STRUCT,
+        )
+        wc_kw["word_count_warning"] = True
+        wc_kw["word_loss_percentage"] = round(loss_pct, 1)
+
     add_log(ctx.db, ctx.task, f"HTML Structure completed ({len(structured_html)} chars)", step=STEP_HTML_STRUCT)
-    save_step_result(ctx.db, ctx.task, STEP_HTML_STRUCT, result=structured_html, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
+    save_step_result(
+        ctx.db,
+        ctx.task,
+        STEP_HTML_STRUCT,
+        result=structured_html,
+        model=actual_model,
+        status="completed",
+        cost=step_cost,
+        variables_snapshot=variables_snapshot,
+        resolved_prompts=resolved_prompts,
+        input_word_count=input_wc,
+        output_word_count=output_wc,
+        **wc_kw,
+    )
 
 def phase_content_fact_check(ctx: PipelineContext):
     if not settings.FACT_CHECK_ENABLED:
@@ -1673,7 +1721,7 @@ def run_pipeline(db: Session, task_id: str):
             if not description:
                 description = f"Read our comprehensive guide about {ctx.task.main_keyword}."
 
-            word_count = len(BeautifulSoup(structured_html, "html.parser").get_text(strip=True).split())
+            word_count = count_content_words(structured_html)
             full_page = generate_full_page(db, str(ctx.task.target_site_id), structured_html, title, description)
 
             # Process fact_check results
@@ -1707,6 +1755,7 @@ def run_pipeline(db: Session, task_id: str):
                     task_id=ctx.task.id,
                     title=title,
                     description=description,
+                    meta_data=meta_data,
                     html_content=structured_html,
                     full_page_html=full_page,
                     word_count=word_count,

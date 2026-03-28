@@ -3,6 +3,8 @@ export interface Article {
   task_id: string;
   title: string;
   description: string;
+  /** Full parsed JSON from meta_generation step */
+  meta_data?: Record<string, unknown> | null;
   html_content: string;
   full_page_html?: string;
   word_count: number;

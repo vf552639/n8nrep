@@ -41,6 +41,7 @@ def get_article(article_id: str, db: Session = Depends(get_db)):
         "task_id": str(article.task_id),
         "title": article.title,
         "description": article.description,
+        "meta_data": article.meta_data,
         "html_content": article.html_content,
         "word_count": article.word_count,
         "fact_check_status": article.fact_check_status,

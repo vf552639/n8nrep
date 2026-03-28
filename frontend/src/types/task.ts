@@ -46,6 +46,10 @@ export interface StepResult {
   resolved_prompts?: { system_prompt?: string; user_prompt?: string } | null;
   variables_snapshot?: Record<string, string> | null;
   exclude_words_violations?: Record<string, number> | string[] | null;
+  input_word_count?: number;
+  output_word_count?: number;
+  word_count_warning?: boolean;
+  word_loss_percentage?: number;
 }
 
 export interface TaskStepResponse {

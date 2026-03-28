@@ -12,6 +12,7 @@ class GeneratedArticle(Base):
     task_id = Column(UUID(as_uuid=True), ForeignKey('tasks.id'), nullable=False)
     title = Column(String(300), nullable=True)
     description = Column(Text, nullable=True)
+    meta_data = Column(JSONB, nullable=True)
     html_content = Column(Text, nullable=True)
     full_page_html = Column(Text, nullable=True)
     word_count = Column(Integer, nullable=True)

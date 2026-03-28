@@ -4,6 +4,59 @@ import toast from "react-hot-toast";
 
 type TabId = "result" | "prompts" | "variables";
 
+function wordCountLineClass(lossPct: number): string {
+  if (lossPct <= 7) return "text-emerald-700";
+  if (lossPct <= 15) return "text-amber-600";
+  return "text-red-600";
+}
+
+function WordCountStats({
+  input_word_count,
+  output_word_count,
+  word_count_warning,
+  word_loss_percentage,
+}: {
+  input_word_count?: number;
+  output_word_count?: number;
+  word_count_warning?: boolean;
+  word_loss_percentage?: number;
+}) {
+  const hasIn = typeof input_word_count === "number";
+  const hasOut = typeof output_word_count === "number";
+  if (!hasIn && !hasOut) return null;
+
+  let line = "";
+  let lossPct = 0;
+  if (hasIn && hasOut && input_word_count > 0) {
+    const rel = ((output_word_count - input_word_count) / input_word_count) * 100;
+    line = `📊 Words: ${input_word_count} → ${output_word_count} (${rel >= 0 ? "+" : ""}${rel.toFixed(1)}%)`;
+    lossPct = ((input_word_count - output_word_count) / input_word_count) * 100;
+  } else if (hasOut) {
+    line = `📊 Content words: ${output_word_count}`;
+  } else {
+    return null;
+  }
+
+  const displayLossPct =
+    typeof word_loss_percentage === "number"
+      ? word_loss_percentage
+      : hasIn && hasOut && input_word_count > 0
+        ? ((input_word_count - output_word_count) / input_word_count) * 100
+        : 0;
+
+  return (
+    <div className="space-y-2">
+      {word_count_warning && hasIn && hasOut && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          ⚠️ Content loss detected: {input_word_count} → {output_word_count} words (−{displayLossPct.toFixed(1)}%). Max
+          allowed: 7%
+        </div>
+      )}
+      <p className={`text-sm font-medium ${hasIn && hasOut ? wordCountLineClass(lossPct) : "text-slate-600"}`}>{line}</p>
+    </div>
+  );
+}
+
 function isEmptyVarValue(v: string): boolean {
   const s = String(v ?? "").trim();
   if (!s) return true;
@@ -47,6 +100,10 @@ export default function LlmStepView({
     result?: unknown;
     resolved_prompts?: { system_prompt?: string; user_prompt?: string } | null;
     variables_snapshot?: Record<string, string> | null;
+    input_word_count?: number;
+    output_word_count?: number;
+    word_count_warning?: boolean;
+    word_loss_percentage?: number;
   };
   stepName: string;
 }) {
@@ -64,6 +121,12 @@ export default function LlmStepView({
 
   return (
     <div className="space-y-3">
+      <WordCountStats
+        input_word_count={step.input_word_count}
+        output_word_count={step.output_word_count}
+        word_count_warning={step.word_count_warning}
+        word_loss_percentage={step.word_loss_percentage}
+      />
       <div className="flex flex-wrap gap-1 border-b border-slate-200 pb-px">
         {(
           [
