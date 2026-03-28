@@ -130,3 +130,149 @@ def test_extract_multimedia_blocks_empty_type_defaults_to_image():
     assert len(blocks) == 1
     assert blocks[0]["multimedia"]["Type"] == "Image"
 
+
+def test_extract_multimedia_russian_key():
+    """Russian МУЛЬТИМЕДИА key as dict."""
+    outline = {
+        "Section": {
+            "Content": "Текст секции",
+            "МУЛЬТИМЕДИА": {
+                "Type": "Image",
+                "Description": "Абстрактная визуализация бонусов",
+                "Purpose": "Иллюстрация к секции",
+            },
+        }
+    }
+    blocks = extract_multimedia_blocks(outline)
+    assert len(blocks) == 1
+    assert "бонусов" in blocks[0]["multimedia"]["Description"]
+
+
+def test_extract_multimedia_russian_key_as_string():
+    """Russian МУЛЬТИМЕДИА key with string value."""
+    outline = {
+        "Section": {
+            "Content": "Текст",
+            "МУЛЬТИМЕДИА": "Инфографика — пошаговая схема регистрации на сайте",
+        }
+    }
+    blocks = extract_multimedia_blocks(outline)
+    assert len(blocks) == 1
+    assert blocks[0]["multimedia"]["Type"] == "Infographic"
+    assert "регистрации" in blocks[0]["multimedia"]["Description"]
+
+
+def test_extract_multimedia_french_key():
+    """French MULTIMÉDIA key."""
+    outline = {
+        "Section": {
+            "Content": "Texte",
+            "MULTIMÉDIA": {
+                "Type": "Infographie",
+                "Description": "Schéma des étapes d'inscription",
+            },
+        }
+    }
+    blocks = extract_multimedia_blocks(outline)
+    assert len(blocks) == 1
+
+
+def test_extract_multimedia_russian_text_in_content():
+    """Russian МУЛЬТИМЕДИА embedded in Content text."""
+    outline = {
+        "H2": "Бонусы",
+        "Content": "Описание бонусов. [МУЛЬТИМЕДИА: Инфографика — сравнение бонусных программ] Продолжение текста.",
+    }
+    blocks = extract_multimedia_blocks(outline)
+    assert len(blocks) == 1
+    assert "бонусных" in blocks[0]["multimedia"]["Description"]
+
+
+def test_extract_multimedia_french_text_in_content():
+    """French [MULTIMÉDIA: ...] in Content."""
+    outline = {
+        "H2": "Inscription",
+        "Content": "Processus d'inscription. [MULTIMÉDIA: Infographie montrant les 3 étapes] Suite.",
+    }
+    blocks = extract_multimedia_blocks(outline)
+    assert len(blocks) == 1
+
+
+def test_extract_multimedia_string_value():
+    """MULTIMEDIA key exists but value is a string, not dict."""
+    outline = {
+        "H2": "Bonus Section",
+        "Content": "Text about bonuses",
+        "MULTIMEDIA": "Infographic showing bonus tiers with percentages and icons",
+    }
+    blocks = extract_multimedia_blocks(outline)
+    assert len(blocks) == 1
+    assert blocks[0]["multimedia"]["Type"] == "Infographic"
+
+
+def test_extract_multimedia_from_content_brackets():
+    """MULTIMEDIA embedded in Content as [MULTIMEDIA: ...]."""
+    outline = {
+        "H2": "Login",
+        "Content": "Steps. [MULTIMEDIA: Infographic — step-by-step visual showing 3 login steps] More.",
+    }
+    blocks = extract_multimedia_blocks(outline)
+    assert len(blocks) == 1
+
+
+def test_extract_multimedia_image_description_key():
+    """Alternative key: image_description."""
+    outline = {
+        "H2": "Games",
+        "Content": "About games",
+        "image_description": "Hero visual of slot machine reels with glowing symbols",
+    }
+    blocks = extract_multimedia_blocks(outline)
+    assert len(blocks) == 1
+    assert "slot machine" in blocks[0]["multimedia"]["Description"].lower()
+
+
+def test_extract_multimedia_изображение_key():
+    """Russian key 'изображение'."""
+    outline = {
+        "Section": {
+            "Content": "Текст",
+            "изображение": "Абстрактный щит безопасности с неоновыми акцентами",
+        }
+    }
+    blocks = extract_multimedia_blocks(outline)
+    assert len(blocks) == 1
+
+
+def test_extract_multimedia_mixed_languages():
+    """Mix of English dict and Russian text MULTIMEDIA."""
+    outline = {
+        "Section1": {
+            "Content": "English text",
+            "MULTIMEDIA": {
+                "Type": "Image",
+                "Description": "Proper dict image",
+            },
+        },
+        "Section2": {
+            "Content": "Русский текст [МУЛЬТИМЕДИА: Картинка — визуализация процесса оплаты]",
+        },
+    }
+    blocks = extract_multimedia_blocks(outline)
+    assert len(blocks) == 2
+
+
+def test_extract_multimedia_list_value():
+    """MULTIMEDIA as list of dicts."""
+    outline = {
+        "Section": {
+            "Content": "Text",
+            "MULTIMEDIA": [
+                {"Type": "Image", "Description": "First image"},
+                {"Type": "Infographic", "Description": "Second infographic"},
+            ],
+        }
+    }
+    blocks = extract_multimedia_blocks(outline)
+    assert len(blocks) == 2
+

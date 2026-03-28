@@ -827,7 +827,10 @@ def phase_image_prompt_gen(ctx: PipelineContext):
         save_step_result(ctx.db, ctx.task, STEP_IMAGE_PROMPT_GEN, result=json.dumps({"images": [], "skipped": True}), status="completed")
         return
 
-    from app.services.image_utils import extract_multimedia_blocks
+    from app.services.image_utils import (
+        _extract_multimedia_from_text_content,
+        extract_multimedia_blocks,
+    )
 
     outline_raw = ctx.task.step_results.get(STEP_FINAL_ANALYSIS, {}).get("result", "")
     if not outline_raw:
@@ -838,7 +841,32 @@ def phase_image_prompt_gen(ctx: PipelineContext):
     outline_json = clean_and_parse_json(outline_raw)
     multimedia_blocks = extract_multimedia_blocks(outline_json)
 
+    outline_raw_str = str(outline_raw)
+    if not multimedia_blocks and outline_raw_str and len(outline_raw_str) > 100:
+        text_blocks = _extract_multimedia_from_text_content(outline_raw_str, "outline_raw")
+        if text_blocks:
+            for i, tb in enumerate(text_blocks, start=1):
+                tb["id"] = f"img_{i}"
+            multimedia_blocks = text_blocks
+            add_log(
+                ctx.db,
+                ctx.task,
+                f"Found {len(text_blocks)} MULTIMEDIA block(s) via raw text fallback "
+                f"(not in JSON keys)",
+                level="info",
+                step=STEP_IMAGE_PROMPT_GEN,
+            )
+
     if not multimedia_blocks:
+        outline_snippet = outline_raw_str[:1500] if outline_raw_str else "EMPTY"
+        add_log(
+            ctx.db,
+            ctx.task,
+            f"[DEBUG] No MULTIMEDIA found anywhere. "
+            f"Outline snippet (first 1500 chars): {outline_snippet}",
+            level="warn",
+            step=STEP_IMAGE_PROMPT_GEN,
+        )
         add_log(
             ctx.db,
             ctx.task,
