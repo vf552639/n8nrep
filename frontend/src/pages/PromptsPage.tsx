@@ -155,7 +155,7 @@ function normalizePrompt(p: Partial<Prompt> | null) {
 function isPromptDirty(
   edit: Partial<Prompt> | null,
   saved: Prompt | null | undefined,
-  params: { temp: boolean; freq: boolean; pres: boolean; top: boolean }
+  params: { maxTokens: boolean; temp: boolean; freq: boolean; pres: boolean; top: boolean }
 ) {
   if (!edit || !saved) return false;
   const e = normalizePrompt(edit);
@@ -163,19 +163,24 @@ function isPromptDirty(
   if (!e || !s) return false;
   if (e.system_prompt !== s.system_prompt || e.user_prompt !== s.user_prompt) return true;
   if (e.model !== s.model) return true;
-  if ((e.max_tokens ?? null) !== (s.max_tokens ?? null)) return true;
-  const effTemp = params.temp ? e.temperature : 1.0;
+  if (e.skip_in_pipeline !== s.skip_in_pipeline) return true;
+
+  const savMaxOn = s.max_tokens != null && s.max_tokens > 0;
+  if (params.maxTokens !== savMaxOn) return true;
+  if (params.maxTokens && (e.max_tokens ?? null) !== (s.max_tokens ?? null)) return true;
+
   const savTempOn = (saved.temperature ?? 0.7) !== 1.0;
   if (params.temp !== savTempOn) return true;
+  const effTemp = params.temp ? e.temperature : 1.0;
   if (effTemp !== (saved.temperature ?? 0.7)) return true;
-  if (e.skip_in_pipeline !== s.skip_in_pipeline) return true;
+
+  const savFreq = (saved.frequency_penalty ?? 0) !== 0.0;
+  const savPres = (saved.presence_penalty ?? 0) !== 0.0;
+  const savTop = (saved.top_p ?? 1) !== 1.0;
+  if (params.freq !== savFreq || params.pres !== savPres || params.top !== savTop) return true;
   const effFreq = params.freq ? e.frequency_penalty : 0;
   const effPres = params.pres ? e.presence_penalty : 0;
   const effTop = params.top ? e.top_p : 1;
-  const savFreq = (saved.frequency_penalty ?? 0) !== 0;
-  const savPres = (saved.presence_penalty ?? 0) !== 0;
-  const savTop = (saved.top_p ?? 1) !== 1;
-  if (params.freq !== savFreq || params.pres !== savPres || params.top !== savTop) return true;
   if (effFreq !== (saved.frequency_penalty ?? 0)) return true;
   if (effPres !== (saved.presence_penalty ?? 0)) return true;
   if (effTop !== (saved.top_p ?? 1)) return true;
@@ -206,7 +211,13 @@ export default function PromptsPage() {
   const [isTestOpen, setIsTestOpen] = useState(false);
   const [testTab, setTestTab] = useState<TestTab>("context");
   const [variablesQuery, setVariablesQuery] = useState("");
-  const [paramsEnabled, setParamsEnabled] = useState({ temp: true, freq: false, pres: false, top: false });
+  const [paramsEnabled, setParamsEnabled] = useState({
+    maxTokens: false,
+    temp: false,
+    freq: false,
+    pres: false,
+    top: false,
+  });
   const [variablesDrawerOpen, setVariablesDrawerOpen] = useState(false);
 
 
@@ -263,10 +274,11 @@ export default function PromptsPage() {
 
       setEditState(cleanPrompt);
       setParamsEnabled({
+        maxTokens: cleanPrompt.max_tokens != null && cleanPrompt.max_tokens > 0,
         temp: (cleanPrompt.temperature ?? 0.7) !== 1.0,
-        freq: cleanPrompt.frequency_penalty !== undefined && cleanPrompt.frequency_penalty !== 0.0,
-        pres: cleanPrompt.presence_penalty !== undefined && cleanPrompt.presence_penalty !== 0.0,
-        top: cleanPrompt.top_p !== undefined && cleanPrompt.top_p !== 1.0,
+        freq: (cleanPrompt.frequency_penalty ?? 0) !== 0.0,
+        pres: (cleanPrompt.presence_penalty ?? 0) !== 0.0,
+        top: (cleanPrompt.top_p ?? 1) !== 1.0,
       });
     }
   }, [fullPrompt, editState?.id]);
@@ -282,6 +294,7 @@ export default function PromptsPage() {
     mutationFn: (data: Partial<Prompt>) => {
       const payload: Partial<Prompt> = {
         ...data,
+        max_tokens: paramsEnabled.maxTokens ? (data.max_tokens ?? null) : null,
         temperature: paramsEnabled.temp ? (data.temperature ?? 0.7) : 1.0,
         frequency_penalty: paramsEnabled.freq ? (data.frequency_penalty ?? 0.0) : 0.0,
         presence_penalty: paramsEnabled.pres ? (data.presence_penalty ?? 0.0) : 0.0,
@@ -419,26 +432,51 @@ export default function PromptsPage() {
 
       {activePromptListInfo && editState && !isLoadingPrompt && (
         <div className="w-full min-w-0 shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <span className="shrink-0 text-xs font-medium text-slate-600">Model</span>
-                <ModelSelector
-                  className="w-[min(100%,280px)] shrink-0"
-                  value={editState.model || "openai/gpt-4o"}
-                  models={orModels || ["openai/gpt-4o"]}
-                  onChange={(m) => setEditState((prev) => (prev ? { ...prev, model: m } : null))}
-                />
-              </div>
+          <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
+            <div className="w-[280px] shrink-0 min-w-0">
+              <span className="mb-0.5 block text-xs font-medium text-slate-600">Model</span>
+              <ModelSelector
+                className="w-full min-w-0"
+                value={editState.model || "openai/gpt-4o"}
+                models={orModels || ["openai/gpt-4o"]}
+                onChange={(m) => setEditState((prev) => (prev ? { ...prev, model: m } : null))}
+              />
+            </div>
 
-              <label className="flex items-center gap-1.5 text-xs text-slate-700 whitespace-nowrap">
-                <span>Max tokens</span>
+            <div className="w-[160px] shrink-0">
+              <span className="mb-0.5 block text-xs font-medium text-slate-600">Max tokens</span>
+              <label className="flex items-center gap-1.5 text-xs text-slate-700">
+                <input
+                  type="checkbox"
+                  className="rounded border-slate-300 text-blue-600"
+                  checked={paramsEnabled.maxTokens}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setParamsEnabled((p) => ({ ...p, maxTokens: checked }));
+                    if (!checked) {
+                      setEditState((prev) => (prev ? { ...prev, max_tokens: null } : null));
+                    } else {
+                      setEditState((prev) => {
+                        if (!prev) return null;
+                        const fromPrev =
+                          prev.max_tokens != null && prev.max_tokens > 0 ? prev.max_tokens : null;
+                        const fromDb =
+                          fullPrompt && fullPrompt.max_tokens != null && fullPrompt.max_tokens > 0
+                            ? fullPrompt.max_tokens
+                            : null;
+                        return { ...prev, max_tokens: fromPrev ?? fromDb ?? 4000 };
+                      });
+                    }
+                  }}
+                />
                 <input
                   type="number"
                   min={1}
                   max={200000}
                   step={1}
                   placeholder="default"
-                  value={editState.max_tokens ?? ""}
+                  disabled={!paramsEnabled.maxTokens}
+                  value={paramsEnabled.maxTokens ? (editState.max_tokens ?? "") : ""}
                   onChange={(e) => {
                     const raw = e.target.value;
                     setEditState((prev) =>
@@ -450,12 +488,15 @@ export default function PromptsPage() {
                         : null
                     );
                   }}
-                  className="w-24 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-right font-mono text-xs"
+                  className="min-w-0 flex-1 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-right font-mono text-xs disabled:cursor-not-allowed disabled:opacity-40"
                 />
               </label>
+            </div>
 
-              <div className="flex min-w-0 items-center gap-2">
-                <label className="flex items-center gap-1.5 text-xs text-slate-700 whitespace-nowrap">
+            <div className="w-[180px] shrink-0">
+              <span className="mb-0.5 block text-xs font-medium text-slate-600">Temperature</span>
+              <div className="flex flex-col gap-1">
+                <label className="flex items-center gap-1.5 text-xs text-slate-700">
                   <input
                     type="checkbox"
                     className="rounded border-slate-300 text-blue-600"
@@ -466,135 +507,136 @@ export default function PromptsPage() {
                       if (!checked) setEditState((prev) => (prev ? { ...prev, temperature: 1.0 } : null));
                     }}
                   />
-                  Temperature
+                  <span className="whitespace-nowrap">Custom</span>
                 </label>
+                <div className="flex min-w-0 items-center gap-1">
+                  <input
+                    type="range"
+                    min={0}
+                    max={2}
+                    step={0.1}
+                    disabled={!paramsEnabled.temp}
+                    value={editState.temperature ?? 0.7}
+                    onChange={(e) =>
+                      setEditState((prev) => (prev ? { ...prev, temperature: parseFloat(e.target.value) } : null))
+                    }
+                    className="h-1 min-w-0 flex-1 cursor-pointer accent-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
+                  />
+                  <input
+                    type="number"
+                    step={0.1}
+                    min={0}
+                    max={2}
+                    disabled={!paramsEnabled.temp}
+                    value={editState.temperature ?? 0.7}
+                    onChange={(e) =>
+                      setEditState((prev) => (prev ? { ...prev, temperature: parseFloat(e.target.value) } : null))
+                    }
+                    onBlur={(e) => {
+                      const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, 0), 2);
+                      setEditState((prev) => (prev ? { ...prev, temperature: val } : null));
+                    }}
+                    className="w-14 shrink-0 rounded border border-slate-200 bg-white px-1 py-0.5 text-right font-mono text-xs disabled:opacity-40"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="w-[160px] shrink-0">
+              <span className="mb-0.5 block text-xs font-medium text-slate-600">Freq. Penalty</span>
+              <label className="flex items-center gap-1.5 text-xs text-slate-700">
                 <input
-                  type="range"
-                  min={0}
-                  max={2}
+                  type="checkbox"
+                  className="rounded border-slate-300 text-blue-600"
+                  checked={paramsEnabled.freq}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setParamsEnabled((p) => ({ ...p, freq: checked }));
+                    if (!checked) setEditState((prev) => (prev ? { ...prev, frequency_penalty: 0.0 } : null));
+                  }}
+                />
+                <input
+                  type="number"
                   step={0.1}
-                  disabled={!paramsEnabled.temp}
-                  value={editState.temperature ?? 0.7}
+                  min={-2}
+                  max={2}
+                  disabled={!paramsEnabled.freq}
+                  value={editState.frequency_penalty ?? 0.0}
                   onChange={(e) =>
-                    setEditState((prev) => (prev ? { ...prev, temperature: parseFloat(e.target.value) } : null))
+                    setEditState((prev) => (prev ? { ...prev, frequency_penalty: parseFloat(e.target.value) } : null))
                   }
-                  className="h-1 w-24 cursor-pointer accent-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
+                  onBlur={(e) => {
+                    const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, -2), 2);
+                    setEditState((prev) => (prev ? { ...prev, frequency_penalty: val } : null));
+                  }}
+                  className="min-w-0 flex-1 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-right font-mono text-xs disabled:opacity-40"
+                />
+              </label>
+            </div>
+
+            <div className="w-[160px] shrink-0">
+              <span className="mb-0.5 block text-xs font-medium text-slate-600">Pres. Penalty</span>
+              <label className="flex items-center gap-1.5 text-xs text-slate-700">
+                <input
+                  type="checkbox"
+                  className="rounded border-slate-300 text-blue-600"
+                  checked={paramsEnabled.pres}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setParamsEnabled((p) => ({ ...p, pres: checked }));
+                    if (!checked) setEditState((prev) => (prev ? { ...prev, presence_penalty: 0.0 } : null));
+                  }}
+                />
+                <input
+                  type="number"
+                  step={0.1}
+                  min={-2}
+                  max={2}
+                  disabled={!paramsEnabled.pres}
+                  value={editState.presence_penalty ?? 0.0}
+                  onChange={(e) =>
+                    setEditState((prev) => (prev ? { ...prev, presence_penalty: parseFloat(e.target.value) } : null))
+                  }
+                  onBlur={(e) => {
+                    const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, -2), 2);
+                    setEditState((prev) => (prev ? { ...prev, presence_penalty: val } : null));
+                  }}
+                  className="min-w-0 flex-1 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-right font-mono text-xs disabled:opacity-40"
+                />
+              </label>
+            </div>
+
+            <div className="w-[140px] shrink-0">
+              <span className="mb-0.5 block text-xs font-medium text-slate-600">Top P</span>
+              <label className="flex items-center gap-1.5 text-xs text-slate-700">
+                <input
+                  type="checkbox"
+                  className="rounded border-slate-300 text-blue-600"
+                  checked={paramsEnabled.top}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setParamsEnabled((p) => ({ ...p, top: checked }));
+                    if (!checked) setEditState((prev) => (prev ? { ...prev, top_p: 1.0 } : null));
+                  }}
                 />
                 <input
                   type="number"
                   step={0.1}
                   min={0}
-                  max={2}
-                  disabled={!paramsEnabled.temp}
-                  value={editState.temperature ?? 0.7}
-                  onChange={(e) =>
-                    setEditState((prev) => (prev ? { ...prev, temperature: parseFloat(e.target.value) } : null))
-                  }
+                  max={1}
+                  disabled={!paramsEnabled.top}
+                  value={editState.top_p ?? 1.0}
+                  onChange={(e) => setEditState((prev) => (prev ? { ...prev, top_p: parseFloat(e.target.value) } : null))}
                   onBlur={(e) => {
-                    const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, 0), 2);
-                    setEditState((prev) => (prev ? { ...prev, temperature: val } : null));
+                    const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, 0), 1);
+                    setEditState((prev) => (prev ? { ...prev, top_p: val } : null));
                   }}
-                  className="w-16 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-right font-mono text-xs disabled:opacity-40"
+                  className="min-w-0 flex-1 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-right font-mono text-xs disabled:opacity-40"
                 />
-              </div>
-
-            <label className="flex items-center gap-1.5 text-xs text-slate-700">
-              <input
-                type="checkbox"
-                className="rounded border-slate-300 text-blue-600"
-                checked={paramsEnabled.freq}
-                onChange={(e) => {
-                  const checked = e.target.checked;
-                  setParamsEnabled((p) => ({ ...p, freq: checked }));
-                  if (!checked) setEditState((prev) => (prev ? { ...prev, frequency_penalty: 0.0 } : null));
-                }}
-              />
-              <span className="whitespace-nowrap">Freq. Penalty</span>
-              <input
-                type="number"
-                step={0.1}
-                min={-2}
-                max={2}
-                disabled={!paramsEnabled.freq}
-                value={editState.frequency_penalty ?? 0.0}
-                onChange={(e) => setEditState((prev) => (prev ? { ...prev, frequency_penalty: parseFloat(e.target.value) } : null))}
-                onBlur={(e) => {
-                  const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, -2), 2);
-                  setEditState((prev) => (prev ? { ...prev, frequency_penalty: val } : null));
-                }}
-                className="w-16 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-right font-mono text-xs disabled:opacity-40"
-              />
-            </label>
-
-            <label className="flex items-center gap-1.5 text-xs text-slate-700">
-              <input
-                type="checkbox"
-                className="rounded border-slate-300 text-blue-600"
-                checked={paramsEnabled.pres}
-                onChange={(e) => {
-                  const checked = e.target.checked;
-                  setParamsEnabled((p) => ({ ...p, pres: checked }));
-                  if (!checked) setEditState((prev) => (prev ? { ...prev, presence_penalty: 0.0 } : null));
-                }}
-              />
-              <span className="whitespace-nowrap">Pres. Penalty</span>
-              <input
-                type="number"
-                step={0.1}
-                min={-2}
-                max={2}
-                disabled={!paramsEnabled.pres}
-                value={editState.presence_penalty ?? 0.0}
-                onChange={(e) => setEditState((prev) => (prev ? { ...prev, presence_penalty: parseFloat(e.target.value) } : null))}
-                onBlur={(e) => {
-                  const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, -2), 2);
-                  setEditState((prev) => (prev ? { ...prev, presence_penalty: val } : null));
-                }}
-                className="w-16 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-right font-mono text-xs disabled:opacity-40"
-              />
-            </label>
-
-            <label className="flex items-center gap-1.5 text-xs text-slate-700">
-              <input
-                type="checkbox"
-                className="rounded border-slate-300 text-blue-600"
-                checked={paramsEnabled.top}
-                onChange={(e) => {
-                  const checked = e.target.checked;
-                  setParamsEnabled((p) => ({ ...p, top: checked }));
-                  if (!checked) setEditState((prev) => (prev ? { ...prev, top_p: 1.0 } : null));
-                }}
-              />
-              <span className="whitespace-nowrap">Top P</span>
-              <input
-                type="number"
-                step={0.1}
-                min={0}
-                max={1}
-                disabled={!paramsEnabled.top}
-                value={editState.top_p ?? 1.0}
-                onChange={(e) => setEditState((prev) => (prev ? { ...prev, top_p: parseFloat(e.target.value) } : null))}
-                onBlur={(e) => {
-                  const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, 0), 1);
-                  setEditState((prev) => (prev ? { ...prev, top_p: val } : null));
-                }}
-                className="w-16 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-right font-mono text-xs disabled:opacity-40"
-              />
-            </label>
+              </label>
+            </div>
 
             <div className="ml-auto flex shrink-0 items-center gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsTestOpen((o) => !o);
-                  if (isTestOpen) setTestTab("context");
-                }}
-                className={`inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium transition-colors ${
-                  isTestOpen ? "border-blue-400 bg-blue-50 text-blue-800" : "text-slate-800 hover:bg-slate-50"
-                }`}
-              >
-                <Play className="h-4 w-4" /> Test
-              </button>
               <button
                 type="button"
                 onClick={() => saveMutation.mutate(editState)}
@@ -608,7 +650,7 @@ export default function PromptsPage() {
                 {isDirty ? "Save*" : "Save"}
               </button>
             </div>
-            </div>
+          </div>
         </div>
       )}
 
@@ -665,6 +707,21 @@ export default function PromptsPage() {
                   <PanelRightOpen className="h-3.5 w-3.5" />
                   Variables ({VAR_COUNT})
                 </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsTestOpen((o) => !o);
+                    if (isTestOpen) setTestTab("context");
+                  }}
+                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium shadow-sm transition-colors ${
+                    isTestOpen
+                      ? "border-blue-400 bg-blue-50 text-blue-800"
+                      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  <Play className="h-3.5 w-3.5" />
+                  Test
+                </button>
                 <label className="ml-auto flex shrink-0 cursor-pointer items-center gap-2 text-xs font-medium text-slate-700">
                   <input
                     type="checkbox"
@@ -690,7 +747,12 @@ export default function PromptsPage() {
                         value={editState.system_prompt || ""}
                         onChange={(val) => setEditState((prev) => (prev ? { ...prev, system_prompt: val || "" } : null))}
                         onMount={(ed) => attachVarDrop(ed)}
-                        options={{ minimap: { enabled: false }, wordWrap: "on", padding: { top: 16 } }}
+                        options={{
+                          minimap: { enabled: false },
+                          wordWrap: "on",
+                          padding: { top: 16 },
+                          unusualLineTerminators: "off",
+                        }}
                         className="rounded-none"
                       />
                     </div>
@@ -707,7 +769,12 @@ export default function PromptsPage() {
                         value={editState.user_prompt || ""}
                         onChange={(val) => setEditState((prev) => (prev ? { ...prev, user_prompt: val || "" } : null))}
                         onMount={(ed) => attachVarDrop(ed)}
-                        options={{ minimap: { enabled: false }, wordWrap: "on", padding: { top: 16 } }}
+                        options={{
+                          minimap: { enabled: false },
+                          wordWrap: "on",
+                          padding: { top: 16 },
+                          unusualLineTerminators: "off",
+                        }}
                         className="rounded-none"
                       />
                     </div>
@@ -718,7 +785,7 @@ export default function PromptsPage() {
                   <PromptTestPanel
                     promptId={editState.id}
                     model={editState.model || "openai/gpt-4o"}
-                    maxTokens={editState.max_tokens ?? null}
+                    maxTokens={paramsEnabled.maxTokens ? (editState.max_tokens ?? null) : null}
                     agentLabel={AGENT_MAP[activePromptListInfo.agent_name] || activePromptListInfo.agent_name}
                     testTab={testTab}
                     setTestTab={setTestTab}
@@ -923,7 +990,13 @@ function PromptTestPanel({
                   language={outputText.trim().startsWith("{") ? "json" : "markdown"}
                   theme="vs-light"
                   value={outputText}
-                  options={{ readOnly: true, minimap: { enabled: false }, wordWrap: "on", padding: { top: 12 } }}
+                  options={{
+                    readOnly: true,
+                    minimap: { enabled: false },
+                    wordWrap: "on",
+                    padding: { top: 12 },
+                    unusualLineTerminators: "off",
+                  }}
                 />
               )}
             </div>
@@ -955,7 +1028,13 @@ function PromptTestPanel({
                       language="markdown"
                       theme="vs-light"
                       value={result.resolved_prompts.system_prompt}
-                      options={{ readOnly: true, minimap: { enabled: false }, wordWrap: "on", padding: { top: 8 } }}
+                      options={{
+                        readOnly: true,
+                        minimap: { enabled: false },
+                        wordWrap: "on",
+                        padding: { top: 8 },
+                        unusualLineTerminators: "off",
+                      }}
                     />
                   </div>
                 </div>
@@ -970,7 +1049,13 @@ function PromptTestPanel({
                       language="markdown"
                       theme="vs-light"
                       value={result.resolved_prompts.user_prompt}
-                      options={{ readOnly: true, minimap: { enabled: false }, wordWrap: "on", padding: { top: 8 } }}
+                      options={{
+                        readOnly: true,
+                        minimap: { enabled: false },
+                        wordWrap: "on",
+                        padding: { top: 8 },
+                        unusualLineTerminators: "off",
+                      }}
                     />
                   </div>
                 </div>

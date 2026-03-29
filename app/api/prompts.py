@@ -9,6 +9,18 @@ from app.services.pipeline import apply_template_vars
 
 router = APIRouter()
 
+
+def _sanitize(text: Optional[str]) -> str:
+    if text is None:
+        return ""
+    return (
+        text.replace("\u2028", "\n")
+        .replace("\u2029", "\n\n")
+        .replace("\u00a0", " ")
+        .replace("\ufeff", "")
+    )
+
+
 class PromptCreate(BaseModel):
     agent_name: str
     system_prompt: str
@@ -105,8 +117,8 @@ def restore_prompt_version(
         version=next_version,
         is_active=True,
         skip_in_pipeline=source.skip_in_pipeline,
-        system_prompt=source.system_prompt,
-        user_prompt=source.user_prompt or "",
+        system_prompt=_sanitize(source.system_prompt),
+        user_prompt=_sanitize(source.user_prompt or ""),
         model=source.model,
         max_tokens=source.max_tokens,
         temperature=source.temperature,
@@ -154,8 +166,8 @@ def create_prompt(prompt_in: PromptCreate, db: Session = Depends(get_db)):
         version=next_version,
         is_active=True,
         skip_in_pipeline=prompt_in.skip_in_pipeline,
-        system_prompt=prompt_in.system_prompt,
-        user_prompt=prompt_in.user_prompt,
+        system_prompt=_sanitize(prompt_in.system_prompt),
+        user_prompt=_sanitize(prompt_in.user_prompt),
         model=prompt_in.model,
         max_tokens=prompt_in.max_tokens,
         temperature=prompt_in.temperature,
