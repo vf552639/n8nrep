@@ -57,6 +57,6 @@ CRITICAL_VARS = {
     "html_structure": ["keyword", "language"],
     "meta_generation": ["keyword", "language"],
     "structure_fact_checking": ["keyword", "result_final_structure_analysis"],
-    "fact_checking": ["keyword", "language"],
+    "content_fact_checking": ["keyword", "language"],
 }
 

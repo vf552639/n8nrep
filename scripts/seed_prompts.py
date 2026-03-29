@@ -1,6 +1,5 @@
 import sys
 import os
-import json
 
 # Ensure app is in Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -8,10 +7,14 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.database import SessionLocal
 from app.models.prompt import Prompt
 
+# Re-apply model/text/max_tokens from seed when running `python scripts/seed_prompts.py`
+PROMPTS_FORCE_UPDATE = frozenset({"image_prompt_generation", "image_generation", "html_structure"})
+
 PROMPTS_DATA = [
     {
         "agent_name": "ai_structure_analysis",
         "model": "openai/gpt-4o",
+        "max_tokens": 8000,
         "temperature": 0.7,
         "system_prompt": "You are an expert SEO structure analyst. Your goal is to analyze the keyword and the SERP context to determine the best structure for a new article.\nRespond ONLY with a valid JSON document.",
         "user_prompt": """Analyze the following SEO request and SERP data:
@@ -50,6 +53,7 @@ Respond with pure JSON only, without markdown wrapping.""",
     {
         "agent_name": "chunk_cluster_analysis",
         "model": "openai/gpt-4o",
+        "max_tokens": 4000,
         "temperature": 0.7,
         "system_prompt": "You are a content analyst. Cluster the content headings and topics of competitors into a logical flow of information.",
         "user_prompt": """Keyword: {{keyword}}
@@ -66,6 +70,7 @@ Group these headings and snippets into thematic clusters. What are the core topi
     {
         "agent_name": "competitor_structure_analysis",
         "model": "openai/gpt-4o",
+        "max_tokens": 4000,
         "temperature": 0.7,
         "system_prompt": "You are a top-tier structural editor. Analyze competitor structures to find their weaknesses and strengths.",
         "user_prompt": """Keyword: {{keyword}}
@@ -80,6 +85,7 @@ Provide a detailed analysis of their structures. What's missing? How can we crea
     {
         "agent_name": "final_structure_analysis",
         "model": "openai/gpt-4o",
+        "max_tokens": 8000,
         "temperature": 0.7,
         "system_prompt": "You are the final structural architect. You combine multiple analyses to produce a concrete outline for the article.\nRespond ONLY with a valid JSON document.",
         "user_prompt": """Keyword: {{keyword}} ({{page_type}})
@@ -105,6 +111,7 @@ Respond with pure JSON only, without markdown wrapping.""",
     {
         "agent_name": "structure_fact_checking",
         "model": "openai/gpt-4o",
+        "max_tokens": 4000,
         "temperature": 0.7,
         "system_prompt": "You are a meticulous fact-checker.",
         "user_prompt": """Keyword: {{keyword}}
@@ -120,6 +127,7 @@ Output a short report on what needs fixing, or 'PASSED' if it's perfect.""",
     {
         "agent_name": "primary_generation",
         "model": "openai/gpt-4o",
+        "max_tokens": 16000,
         "temperature": 0.8,
         "system_prompt": "You are a master content creator. Write the article in HTML format, following the provided instructions and style identically seamlessly.",
         "user_prompt": """Keyword: {{keyword}} ({{page_type}})
@@ -142,6 +150,7 @@ Use proper HTML tags (<h1>, <h2>, <p>, <ul>...). Output pure HTML.""",
     {
         "agent_name": "competitor_comparison",
         "model": "openai/gpt-4o",
+        "max_tokens": 4000,
         "temperature": 0.7,
         "system_prompt": "You are a critical reviewer comparing two pieces of content.",
         "user_prompt": """Keyword: {{keyword}}
@@ -161,6 +170,7 @@ Compare our article vs competitors. Identify 3 specific areas where our article 
     {
         "agent_name": "reader_opinion",
         "model": "openai/gpt-4o",
+        "max_tokens": 4000,
         "temperature": 0.7,
         "system_prompt": "You simulate the target audience of the article.",
         "user_prompt": """Keyword: {{keyword}}
@@ -175,6 +185,7 @@ As a member of the target audience, provide ruthless feedback on readability, en
     {
         "agent_name": "interlinking_citations",
         "model": "openai/gpt-4o",
+        "max_tokens": 4000,
         "temperature": 0.7,
         "system_prompt": "You are an internal linking specialist.",
         "user_prompt": """Keyword: {{keyword}}
@@ -188,6 +199,7 @@ Improve the original text by adding natural HTML <a> links where suitable, assum
     {
         "agent_name": "improver",
         "model": "openai/gpt-4o",
+        "max_tokens": 16000,
         "temperature": 0.8,
         "system_prompt": "You are an executive editor. You synthesize feedback and improve the draft.",
         "user_prompt": """Original Text:
@@ -205,6 +217,7 @@ Improve the HTML text significantly. Ensure you address the feedback. Output pur
     {
         "agent_name": "final_editing",
         "model": "openai/gpt-4o",
+        "max_tokens": 16000,
         "temperature": 0.7,
         "system_prompt": "You are the final proofreader and formatter. Polish the prose.",
         "user_prompt": """Keyword: {{keyword}}
@@ -222,6 +235,7 @@ Conduct a final polish. Ensure rhythms are crisp. Output the final HTML.""",
     {
         "agent_name": "content_fact_checking",
         "model": "openai/gpt-4o",
+        "max_tokens": 4000,
         "temperature": 0.7,
         "system_prompt": "You are a stringent fact-checker.",
         "user_prompt": """Keyword: {{keyword}}
@@ -234,9 +248,15 @@ Identify any factual discrepancies or unsubstantiated claims in the text. Provid
     },
     {
         "agent_name": "html_structure",
-        "model": "openai/gpt-4o",
-        "temperature": 0.7,
-        "system_prompt": "You are an expert Frontend Developer. You merge content into a base HTML template.",
+        "model": "google/gemini-2.5-flash",
+        "max_tokens": 16000,
+        "temperature": 0.3,
+        "system_prompt": """You are an expert Frontend Developer. You merge content into a base HTML template.
+
+CRITICAL RULE: You MUST preserve ALL content from the input article word-for-word.
+Do NOT summarize, shorten, or omit any paragraphs, lists, or sections.
+Your job is ONLY to wrap the existing content in the HTML template structure.
+The output MUST contain every sentence from the input article.""",
         "user_prompt": """Site: {{site_name}}
 Template Name: {{site_template_name}}
 
@@ -251,6 +271,7 @@ Insert the content into the most logical container (e.g., `<main>`, `<article>`,
     {
         "agent_name": "meta_generation",
         "model": "openai/gpt-4o",
+        "max_tokens": 1000,
         "temperature": 0.7,
         "system_prompt": "You are an SEO meta tag generator. Output JSON only.",
         "user_prompt": """Keyword: {{keyword}}
@@ -276,6 +297,7 @@ Respond with pure JSON only, without markdown wrapping.""",
     {
         "agent_name": "image_prompt_generation",
         "model": "openai/gpt-4o",
+        "max_tokens": 2000,
         "temperature": 0.7,
         "system_prompt": """You are a professional graphic designer specializing in web assets for iGaming and online casino review websites.
 
@@ -374,17 +396,20 @@ def seed():
                     user_prompt=pdata["user_prompt"],
                     model=pdata["model"],
                     temperature=pdata["temperature"],
+                    max_tokens=pdata.get("max_tokens"),
                     is_active=True,
-                    version=1
+                    version=1,
                 )
                 db.add(db_prompt)
                 inserted += 1
                 print(f"Created prompt for: {pdata['agent_name']}")
-            elif pdata["agent_name"] in ("image_prompt_generation", "image_generation"):
+            elif pdata["agent_name"] in PROMPTS_FORCE_UPDATE:
                 existing.system_prompt = pdata["system_prompt"]
                 existing.user_prompt = pdata["user_prompt"]
                 existing.model = pdata["model"]
                 existing.temperature = pdata["temperature"]
+                if "max_tokens" in pdata:
+                    existing.max_tokens = pdata["max_tokens"]
                 updated += 1
                 print(f"Updated prompt for: {pdata['agent_name']}")
             else:

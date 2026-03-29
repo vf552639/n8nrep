@@ -17,6 +17,8 @@ export const promptsApi = {
   restoreVersion: (id: string, versionId: string) => 
     api.post(`/prompts/${id}/versions/${versionId}/restore`).then(res => res.data),
     
-  testPrompt: (id: string, data: { context: Record<string, any>; model: string }) =>
-    api.post(`/prompts/${id}/test`, data).then(res => res.data),
+  testPrompt: (
+    id: string,
+    data: { context: Record<string, unknown>; model: string; max_tokens?: number | null }
+  ) => api.post(`/prompts/${id}/test`, data).then((res) => res.data),
 };

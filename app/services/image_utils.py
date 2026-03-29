@@ -315,7 +315,10 @@ def extract_multimedia_blocks(outline_json) -> list:
             for mm_key in mm_keys:
                 mm_val = obj[mm_key]
                 section_content = str(
-                    obj.get("Content", "") or obj.get("content", "")
+                    obj.get("Content", "")
+                    or obj.get("content", "")
+                    or obj.get("structura", "")
+                    or obj.get("Structura", "")
                 )[:300]
 
                 if isinstance(mm_val, dict):

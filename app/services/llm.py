@@ -24,6 +24,7 @@ def generate_text(
     frequency_penalty: float = 0.0,
     presence_penalty: float = 0.0,
     top_p: float = 1.0,
+    max_tokens: Optional[int] = None,
     max_retries: int = 3,
     response_format: Optional[Dict[str, str]] = None
 ) -> Tuple[str, float, str, Optional[Dict[str, Any]]]:
@@ -53,6 +54,8 @@ def generate_text(
                     "X-Title": "SEO-Generator"
                 }
             }
+            if max_tokens is not None and max_tokens > 0:
+                kwargs["max_tokens"] = max_tokens
             if response_format:
                  kwargs["response_format"] = response_format
                  

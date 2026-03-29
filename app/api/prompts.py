@@ -26,6 +26,7 @@ class PromptTest(BaseModel):
     user_prompt: str
     test_data: str
     model: str
+    max_tokens: Optional[int] = None
     temperature: Optional[float] = 0.7
     frequency_penalty: Optional[float] = 0.0
     presence_penalty: Optional[float] = 0.0
@@ -34,6 +35,7 @@ class PromptTest(BaseModel):
 class PromptTestContext(BaseModel):
     context: Dict[str, Any]
     model: Optional[str] = None
+    max_tokens: Optional[int] = None
 
 @router.get("/")
 def get_prompts(active_only: bool = Query(True), db: Session = Depends(get_db)):
@@ -176,6 +178,7 @@ def test_prompt(test_in: PromptTest):
             system_prompt=test_in.system_prompt,
             user_prompt=f"{test_in.user_prompt}\n\n{test_in.test_data}" if test_in.user_prompt else test_in.test_data,
             model=test_in.model,
+            max_tokens=test_in.max_tokens,
             temperature=test_in.temperature,
             frequency_penalty=test_in.frequency_penalty,
             presence_penalty=test_in.presence_penalty,
@@ -199,11 +202,15 @@ def test_prompt_by_id(prompt_id: str, test_ctx: PromptTestContext, db: Session =
         user_text, _ = apply_template_vars(prompt.user_prompt or "", test_ctx.context)
         
         target_model = test_ctx.model if test_ctx.model else prompt.model
-        
+        max_tokens = (
+            test_ctx.max_tokens if test_ctx.max_tokens is not None else prompt.max_tokens
+        )
+
         text, cost, actual_model, usage = generate_text(
             system_prompt=system_text,
             user_prompt=user_text,
             model=target_model,
+            max_tokens=max_tokens,
             temperature=prompt.temperature,
             frequency_penalty=prompt.frequency_penalty,
             presence_penalty=prompt.presence_penalty,

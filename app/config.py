@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     FACT_CHECK_MODE: str = "soft" # "soft" or "strict"
     FACT_CHECK_FAIL_THRESHOLD: int = 1
 
+    # Self-check / retry budgets (exclude-word retries, html_structure recovery)
+    SELF_CHECK_MAX_RETRIES: int = 1
+    SELF_CHECK_MAX_COST_PER_STEP: float = 0.10
+
     # Image Generation (optional) — OpenRouter image models + ImgBB hosting
     IMAGE_GEN_ENABLED: bool = False
     IMGBB_API_KEY: str = ""

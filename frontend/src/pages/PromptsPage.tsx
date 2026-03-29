@@ -143,6 +143,7 @@ function normalizePrompt(p: Partial<Prompt> | null) {
     system_prompt: p.system_prompt ?? "",
     user_prompt: p.user_prompt ?? "",
     model: p.model ?? "",
+    max_tokens: p.max_tokens ?? null,
     temperature: p.temperature ?? 0.7,
     frequency_penalty: p.frequency_penalty ?? 0,
     presence_penalty: p.presence_penalty ?? 0,
@@ -162,6 +163,7 @@ function isPromptDirty(
   if (!e || !s) return false;
   if (e.system_prompt !== s.system_prompt || e.user_prompt !== s.user_prompt) return true;
   if (e.model !== s.model) return true;
+  if ((e.max_tokens ?? null) !== (s.max_tokens ?? null)) return true;
   const effTemp = params.temp ? e.temperature : 1.0;
   const savTempOn = (saved.temperature ?? 0.7) !== 1.0;
   if (params.temp !== savTempOn) return true;
@@ -428,6 +430,30 @@ export default function PromptsPage() {
                 />
               </div>
 
+              <label className="flex items-center gap-1.5 text-xs text-slate-700 whitespace-nowrap">
+                <span>Max tokens</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={200000}
+                  step={1}
+                  placeholder="default"
+                  value={editState.max_tokens ?? ""}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    setEditState((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            max_tokens: raw === "" ? null : parseInt(raw, 10) || null,
+                          }
+                        : null
+                    );
+                  }}
+                  className="w-24 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-right font-mono text-xs"
+                />
+              </label>
+
               <div className="flex min-w-0 items-center gap-2">
                 <label className="flex items-center gap-1.5 text-xs text-slate-700 whitespace-nowrap">
                   <input
@@ -692,6 +718,7 @@ export default function PromptsPage() {
                   <PromptTestPanel
                     promptId={editState.id}
                     model={editState.model || "openai/gpt-4o"}
+                    maxTokens={editState.max_tokens ?? null}
                     agentLabel={AGENT_MAP[activePromptListInfo.agent_name] || activePromptListInfo.agent_name}
                     testTab={testTab}
                     setTestTab={setTestTab}
@@ -746,6 +773,7 @@ export default function PromptsPage() {
 function PromptTestPanel({
   promptId,
   model,
+  maxTokens,
   agentLabel,
   testTab,
   setTestTab,
@@ -753,6 +781,7 @@ function PromptTestPanel({
 }: {
   promptId: string;
   model: string;
+  maxTokens: number | null;
   agentLabel: string;
   testTab: TestTab;
   setTestTab: (t: TestTab) => void;
@@ -779,6 +808,7 @@ function PromptTestPanel({
       return promptsApi.testPrompt(promptId, {
         context: parsedContext,
         model,
+        max_tokens: maxTokens,
       }) as Promise<TestResultShape>;
     },
     onSuccess: (data) => {

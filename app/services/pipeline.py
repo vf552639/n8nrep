@@ -22,6 +22,7 @@ from app.config import settings
 from app.services.json_parser import clean_and_parse_json
 from app.services.pipeline_constants import *
 from app.services.word_counter import count_content_words
+from app.services.html_inserter import programmatic_html_insert
 import re
 import datetime
 
@@ -61,6 +62,8 @@ class PipelineContext:
 
 def get_prompt_obj(db: Session, agent_name: str) -> Prompt:
     prompt_obj = db.query(Prompt).filter(Prompt.agent_name == agent_name, Prompt.is_active == True).first()
+    if not prompt_obj and agent_name == "content_fact_checking":
+        prompt_obj = db.query(Prompt).filter(Prompt.agent_name == "fact_checking", Prompt.is_active == True).first()
     if not prompt_obj:
         raise Exception(f"No active prompt found for agent: {agent_name}")
     return prompt_obj
@@ -112,7 +115,7 @@ def add_log(db: Session, task: Task, msg: str, level: str = "info", step: str = 
     task.logs = current_logs
     db.commit()
 
-from typing import Tuple
+from typing import Optional, Tuple
 
 def apply_template_vars(text: str, variables: dict) -> Tuple[str, dict]:
     """Replace {{variable_name}} placeholders in text with actual values and return a resolution report."""
@@ -264,43 +267,85 @@ def call_agent(ctx: PipelineContext, agent_name: str, context: str, response_for
         "presence_penalty": prompt.presence_penalty,
         "top_p": prompt.top_p,
     }
+    if prompt.max_tokens is not None and prompt.max_tokens > 0:
+        kwargs["max_tokens"] = prompt.max_tokens
     if response_format:
         kwargs["response_format"] = response_format
-    
+
     res, cost, model, _ = generate_text(**kwargs)
     return res, cost, model, resolved_prompts, variables_snapshot
 
-def call_agent_with_exclude_validation(ctx: PipelineContext, agent_name: str, context: str, step_constant: str, max_retries: int = 1):
+def call_agent_with_exclude_validation(
+    ctx: PipelineContext,
+    agent_name: str,
+    context: str,
+    step_constant: str,
+    max_retries: Optional[int] = None,
+):
     from app.services.exclude_words_validator import ExcludeWordsValidator
-    
-    result_text, total_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, agent_name, context, variables=ctx.template_vars)
-    
+
+    if max_retries is None:
+        max_retries = getattr(settings, "SELF_CHECK_MAX_RETRIES", 1)
+    retry_budget = float(getattr(settings, "SELF_CHECK_MAX_COST_PER_STEP", 0.10) or 0.0)
+    retry_spent = 0.0
+
+    result_text, total_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
+        ctx, agent_name, context, variables=ctx.template_vars
+    )
+
     exclude_str = ctx.template_vars.get("exclude_words", "")
     if not exclude_str.strip():
         return result_text, total_cost, actual_model, resolved_prompts, variables_snapshot, None
-        
+
     validator = ExcludeWordsValidator(exclude_str)
     report = validator.validate(result_text)
-    
+
     if report["passed"]:
         return result_text, total_cost, actual_model, resolved_prompts, variables_snapshot, None
-        
-    add_log(ctx.db, ctx.task, f"EXCLUDE_WORDS violation: found {report['found_words']}", level="warn", step=step_constant)
-    
+
+    add_log(
+        ctx.db,
+        ctx.task,
+        f"EXCLUDE_WORDS violation: found {report['found_words']}",
+        level="warn",
+        step=step_constant,
+    )
+
     retry_count = 0
     while retry_count < max_retries and not report["passed"]:
+        if retry_budget > 0 and retry_spent >= retry_budget:
+            add_log(
+                ctx.db,
+                ctx.task,
+                f"Budget limit reached for exclude-word retries (${retry_spent:.4f}). Using best result.",
+                level="warn",
+                step=step_constant,
+            )
+            break
         retry_count += 1
-        add_log(ctx.db, ctx.task, f"Retrying agent {agent_name} due to exclude words violation (Attempt {retry_count}).", level="info", step=step_constant)
-        
-        retry_context = context + f"\n\nCRITICAL: Your previous output contained forbidden words: {report['found_words']}. You MUST NOT use these words. Rewrite the text avoiding them completely."
-        
-        retry_text, retry_cost, r_model, r_prompts, r_vars = call_agent(ctx, agent_name, retry_context, variables=ctx.template_vars)
+        add_log(
+            ctx.db,
+            ctx.task,
+            f"Retrying agent {agent_name} due to exclude words violation (Attempt {retry_count}).",
+            level="info",
+            step=step_constant,
+        )
+
+        retry_context = context + (
+            f"\n\nCRITICAL: Your previous output contained forbidden words: {report['found_words']}. "
+            f"You MUST NOT use these words. Rewrite the text avoiding them completely."
+        )
+
+        retry_text, retry_cost, r_model, r_prompts, r_vars = call_agent(
+            ctx, agent_name, retry_context, variables=ctx.template_vars
+        )
+        retry_spent += retry_cost
         total_cost += retry_cost
         result_text = retry_text
         actual_model = r_model
         resolved_prompts = r_prompts
         variables_snapshot = r_vars
-        
+
         report = validator.validate(result_text)
         
     violations_dict = None
@@ -1540,7 +1585,7 @@ def phase_final_editing(ctx: PipelineContext):
 def phase_html_structure(ctx: PipelineContext):
     setup_template_vars(ctx)
     final_html = ctx.task.step_results.get(STEP_FINAL_EDIT, {}).get("result", "")
-    
+
     template_ref = ""
     if ctx.template_vars.get("site_template_html"):
         template_ref = (
@@ -1550,7 +1595,7 @@ def phase_html_structure(ctx: PipelineContext):
             f"Adapt your HTML structure to be compatible with this template:\n"
             f"{ctx.template_vars['site_template_html']}"
         )
-        
+
     html_struct_context = (
         f"Article HTML:\n{final_html}\n\n"
         f"Keyword: {ctx.task.main_keyword}\n"
@@ -1559,12 +1604,83 @@ def phase_html_structure(ctx: PipelineContext):
     )
     add_log(ctx.db, ctx.task, "Starting HTML Structure formatting...", step=STEP_HTML_STRUCT)
     save_step_result(ctx.db, ctx.task, STEP_HTML_STRUCT, result=None, status="running")
-    structured_html, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, "html_structure", html_struct_context, variables=ctx.template_vars)
-    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
-    
+    structured_html, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
+        ctx, "html_structure", html_struct_context, variables=ctx.template_vars
+    )
+    ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + step_cost
+
     input_wc = count_content_words(final_html)
     output_wc = count_content_words(structured_html)
     loss_pct = ((input_wc - output_wc) / input_wc * 100.0) if input_wc > 0 else 0.0
+
+    max_rec = getattr(settings, "SELF_CHECK_MAX_RETRIES", 1)
+    retry_budget = float(getattr(settings, "SELF_CHECK_MAX_COST_PER_STEP", 0.10) or 0.0)
+
+    if input_wc > 0 and loss_pct > 7 and max_rec >= 1 and retry_budget > 0:
+        add_log(
+            ctx.db,
+            ctx.task,
+            f"Content loss {loss_pct:.1f}% detected, attempting recovery (single retry)...",
+            level="warn",
+            step=STEP_HTML_STRUCT,
+        )
+        prev_loss = loss_pct
+        recovery_context = (
+            f"PREVIOUS ATTEMPT FAILED: You lost {prev_loss:.1f}% of content words.\n"
+            f"Input had {input_wc} words but your output only had {output_wc} words.\n\n"
+            f"YOU MUST OUTPUT ALL {input_wc} WORDS from the article below.\n"
+            f"Do NOT summarize or shorten. Insert the COMPLETE article into the template.\n\n"
+            f"{html_struct_context}"
+        )
+        retry_html, retry_cost, retry_model, retry_prompts, retry_vars = call_agent(
+            ctx, "html_structure", recovery_context, variables=ctx.template_vars
+        )
+        ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + retry_cost
+        if retry_cost > retry_budget:
+            add_log(
+                ctx.db,
+                ctx.task,
+                f"Recovery retry cost ${retry_cost:.4f} exceeded per-step retry budget ${retry_budget:.4f}.",
+                level="warn",
+                step=STEP_HTML_STRUCT,
+            )
+        retry_wc = count_content_words(retry_html)
+        retry_loss = ((input_wc - retry_wc) / input_wc * 100.0) if input_wc > 0 else 0.0
+        if retry_loss < prev_loss:
+            structured_html = retry_html
+            output_wc = retry_wc
+            loss_pct = retry_loss
+            step_cost += retry_cost
+            actual_model = retry_model
+            resolved_prompts = retry_prompts
+            variables_snapshot = retry_vars
+            add_log(
+                ctx.db,
+                ctx.task,
+                f"Recovery improved: {retry_loss:.1f}% loss (was {prev_loss:.1f}%)",
+                step=STEP_HTML_STRUCT,
+            )
+
+    if input_wc > 0 and loss_pct > 20:
+        add_log(
+            ctx.db,
+            ctx.task,
+            f"Content loss still {loss_pct:.1f}% after recovery. Using programmatic insert.",
+            level="warn",
+            step=STEP_HTML_STRUCT,
+        )
+        template_raw = ctx.template_vars.get("site_template_html", "") or ""
+        structured_html = programmatic_html_insert(template_raw, final_html)
+        output_wc = count_content_words(structured_html)
+        loss_pct = ((input_wc - output_wc) / input_wc * 100.0) if input_wc > 0 else 0.0
+        add_log(
+            ctx.db,
+            ctx.task,
+            f"Programmatic HTML insert: {output_wc} words, loss now {loss_pct:.1f}%",
+            level="info",
+            step=STEP_HTML_STRUCT,
+        )
+
     wc_kw = {}
     if input_wc > 0 and loss_pct > 7:
         add_log(
@@ -1617,7 +1733,7 @@ def phase_content_fact_check(ctx: PipelineContext):
     
     try:
         fact_check_json_str, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
-            ctx, "fact_checking", fact_check_context,
+            ctx, "content_fact_checking", fact_check_context,
             response_format={"type": "json_object"}, variables=ctx.template_vars
         )
         ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
@@ -1626,7 +1742,7 @@ def phase_content_fact_check(ctx: PipelineContext):
         save_step_result(ctx.db, ctx.task, STEP_CONTENT_FACT_CHECK, result=fact_check_json_str, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
     except Exception as e:
         add_log(ctx.db, ctx.task, f"Fact-checking agent failed or not found: {str(e)}", level="warn", step=STEP_CONTENT_FACT_CHECK)
-        save_step_result(ctx.db, ctx.task, STEP_CONTENT_FACT_CHECK, result='{"verification_status": "warn", "issues": [], "summary": "Failed to run fact_checking agent."}', status="completed")
+        save_step_result(ctx.db, ctx.task, STEP_CONTENT_FACT_CHECK, result='{"verification_status": "warn", "issues": [], "summary": "Failed to run content_fact_checking agent."}', status="completed")
 
 def phase_meta_generation(ctx: PipelineContext):
     setup_template_vars(ctx)
