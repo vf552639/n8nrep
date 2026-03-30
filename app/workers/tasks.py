@@ -107,17 +107,44 @@ def process_site_project(self, project_id: str):
                 db.commit()
                 db.refresh(new_task)
             
-            # Run pipeline SYNCHRONOUSLY
+            # Run pipeline SYNCHRONOUSLY (auto_mode=True: no manual image/test pauses for bulk projects)
             try:
-                run_pipeline(db, str(new_task.id))
+                run_pipeline(db, str(new_task.id), auto_mode=True)
             except Exception as pipeline_err:
                 print(f"Pipeline error for task {new_task.id}: {pipeline_err}")
-                
+                db.refresh(new_task)
+                if new_task.status not in ("failed", "completed"):
+                    new_task.status = "failed"
+                    new_task.error_log = f"Pipeline exception: {pipeline_err}"
+                    db.commit()
+
             db.refresh(new_task)
-            if new_task.status == "failed":
+
+            if new_task.status != "completed":
                 project.status = "failed"
-                project.error_log = f"Failed at page: {page.page_title} - {new_task.error_log}"
+
+                if new_task.status == "failed":
+                    error_detail = new_task.error_log or "Unknown error"
+                elif new_task.status == "processing":
+                    pause_info = (new_task.step_results or {}).get("_pipeline_pause", {})
+                    error_detail = (
+                        f"Pipeline stuck in processing. Pause state: {pause_info}"
+                    )
+                else:
+                    error_detail = f"Unexpected task status: {new_task.status}"
+
+                project.error_log = (
+                    f"Stopped at page #{i + 1}: '{page.page_title}' "
+                    f"(keyword: '{keyword}'). "
+                    f"Task {new_task.id} status: {new_task.status}. "
+                    f"Detail: {error_detail}"
+                )
                 db.commit()
+
+                print(
+                    f"[Project {project_id}] STOPPED: Task {new_task.id} "
+                    f"finished with status '{new_task.status}' instead of 'completed'"
+                )
                 return
             
             # Cooperative cancellation: check if user requested stop

@@ -80,6 +80,22 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
+      {project.status === "failed" && project.error_log && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+          <div className="flex items-start gap-3">
+            <span className="text-red-500 text-lg" aria-hidden>
+              ❌
+            </span>
+            <div>
+              <p className="font-semibold text-red-800">Project Failed</p>
+              <p className="text-sm text-red-700 mt-1 font-mono whitespace-pre-wrap break-words">
+                {project.error_log}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="bg-white border p-6 rounded-xl shadow-sm">
         <div className="flex justify-between items-center mb-4">
            <h2 className="text-lg font-semibold text-slate-800">Overall Progress</h2>

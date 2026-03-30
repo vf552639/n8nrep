@@ -9,6 +9,7 @@ export interface Project {
   author_id?: string;
   status: "pending" | "generating" | "stopped" | "completed" | "failed";
   progress: number;
+  error_log?: string | null;
   created_at: string;
   tasks?: ProjectTaskExpanded[];
 }

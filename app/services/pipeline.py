@@ -1758,7 +1758,56 @@ def phase_meta_generation(ctx: PipelineContext):
     add_log(ctx.db, ctx.task, f"Meta Tags Generation completed", step=STEP_META_GEN)
     save_step_result(ctx.db, ctx.task, STEP_META_GEN, result=meta_json_str, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
 
-def run_pipeline(db: Session, task_id: str):
+
+def _auto_approve_images(ctx: PipelineContext) -> None:
+    """
+    Approve all successfully generated images (status completed + hosted_url), clear image review pause.
+    Mirrors POST /tasks/{id}/approve-images for site-project auto_mode runs.
+    """
+    import json as _json
+
+    step_results = dict(ctx.task.step_results or {})
+    image_gen_result = step_results.get(STEP_IMAGE_GEN, {}).get("result", "")
+    if not image_gen_result:
+        step_results["_pipeline_pause"] = {"active": False, "reason": "image_review"}
+        step_results["_images_approved"] = True
+        ctx.task.step_results = step_results
+        ctx.db.commit()
+        add_log(ctx.db, ctx.task, "auto_mode: no image_generation payload — cleared image pause", step=STEP_IMAGE_GEN)
+        return
+    try:
+        data = _json.loads(image_gen_result) if isinstance(image_gen_result, str) else image_gen_result
+    except Exception:
+        step_results["_pipeline_pause"] = {"active": False, "reason": "image_review"}
+        step_results["_images_approved"] = True
+        ctx.task.step_results = step_results
+        ctx.db.commit()
+        add_log(ctx.db, ctx.task, "auto_mode: could not parse image_generation JSON — cleared image pause", level="warn", step=STEP_IMAGE_GEN)
+        return
+    images = data.get("images", [])
+    approved_n = 0
+    for img in images:
+        if img.get("status") == "completed" and img.get("hosted_url"):
+            img["approved"] = True
+            approved_n += 1
+        else:
+            img["approved"] = False
+    step_data = dict(step_results.get(STEP_IMAGE_GEN, {}))
+    step_data["result"] = _json.dumps(data, ensure_ascii=False)
+    step_results[STEP_IMAGE_GEN] = step_data
+    step_results["_pipeline_pause"] = {"active": False, "reason": "image_review"}
+    step_results["_images_approved"] = True
+    ctx.task.step_results = step_results
+    ctx.db.commit()
+    add_log(
+        ctx.db,
+        ctx.task,
+        f"auto_mode: approved {approved_n} image(s) with completed status, continuing pipeline",
+        step=STEP_IMAGE_GEN,
+    )
+
+
+def run_pipeline(db: Session, task_id: str, auto_mode: bool = False):
     ctx = PipelineContext(db, task_id)
 
     ctx.task.status = "processing"
@@ -1777,11 +1826,21 @@ def run_pipeline(db: Session, task_id: str):
         if isinstance(pause_state, dict) and pause_state.get("active"):
             reason = pause_state.get("reason", "unknown")
             if reason == "image_review" and not step_results.get("_images_approved"):
-                add_log(db, ctx.task, "⏸️ Pipeline paused: waiting for image review", step=None)
-                return
+                if not auto_mode:
+                    add_log(db, ctx.task, "⏸️ Pipeline paused: waiting for image review", step=None)
+                    return
+                _auto_approve_images(ctx)
             elif reason == "test_mode" and not step_results.get("test_mode_approved"):
-                add_log(db, ctx.task, "⏸️ Pipeline paused: waiting for test mode approval", step=None)
-                return
+                if not auto_mode:
+                    add_log(db, ctx.task, "⏸️ Pipeline paused: waiting for test mode approval", step=None)
+                    return
+                updated = dict(ctx.task.step_results or {})
+                updated["test_mode_approved"] = True
+                updated["waiting_for_approval"] = False
+                updated["_pipeline_pause"] = {"active": False, "reason": "test_mode"}
+                ctx.task.step_results = updated
+                db.commit()
+                add_log(db, ctx.task, "auto_mode: test mode approval applied, continuing", step=None)
             else:
                 # Pause was resolved — clear it
                 updated = dict(step_results)
@@ -1814,7 +1873,10 @@ def run_pipeline(db: Session, task_id: str):
         pause_state = step_results.get("_pipeline_pause", {})
         if isinstance(pause_state, dict) and pause_state.get("active") and pause_state.get("reason") == "image_review":
             if not step_results.get("_images_approved"):
-                return  # Early exit — resume via /approve-images
+                if auto_mode:
+                    _auto_approve_images(ctx)
+                else:
+                    return  # Early exit — resume via /approve-images
 
         run_phase(db, ctx.task, STEP_PRIMARY_GEN, phase_primary_gen, ctx)
 
@@ -1822,15 +1884,24 @@ def run_pipeline(db: Session, task_id: str):
         if settings.TEST_MODE:
             step_results = ctx.task.step_results or {}
             if not step_results.get("test_mode_approved"):
-                add_log(db, ctx.task, "🛑 TEST MODE: Pausing pipeline after Primary Generation. Waiting for manual approval.", step=None)
-                
-                updated = dict(step_results)
-                updated["waiting_for_approval"] = True
-                updated["_pipeline_pause"] = {"active": True, "reason": "test_mode", "message": "Test mode: review primary generation"}
-                ctx.task.step_results = updated
-                ctx.task.status = "processing"
-                db.commit()
-                return
+                if auto_mode:
+                    updated = dict(step_results)
+                    updated["test_mode_approved"] = True
+                    updated["waiting_for_approval"] = False
+                    updated["_pipeline_pause"] = {"active": False, "reason": "test_mode"}
+                    ctx.task.step_results = updated
+                    db.commit()
+                    add_log(db, ctx.task, "auto_mode: skipped TEST MODE pause after primary generation", step=None)
+                else:
+                    add_log(db, ctx.task, "🛑 TEST MODE: Pausing pipeline after Primary Generation. Waiting for manual approval.", step=None)
+
+                    updated = dict(step_results)
+                    updated["waiting_for_approval"] = True
+                    updated["_pipeline_pause"] = {"active": True, "reason": "test_mode", "message": "Test mode: review primary generation"}
+                    ctx.task.step_results = updated
+                    ctx.task.status = "processing"
+                    db.commit()
+                    return
 
         if ctx.use_serp:
             run_phase(db, ctx.task, STEP_COMP_COMPARISON, phase_competitor_comparison, ctx)

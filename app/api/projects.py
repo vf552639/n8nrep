@@ -172,7 +172,10 @@ def get_project_details(id: str, db: Session = Depends(get_db)):
         
     # Get all tasks for this project
     tasks = db.query(Task).filter(Task.project_id == id).order_by(Task.created_at).all()
-    
+    total_tasks = len(tasks)
+    completed_tasks = sum(1 for t in tasks if t.status == "completed")
+    progress_pct = round((completed_tasks / total_tasks) * 100) if total_tasks > 0 else 0
+
     return {
         "id": str(project.id),
         "name": project.name,
@@ -183,6 +186,8 @@ def get_project_details(id: str, db: Session = Depends(get_db)):
         "current_page_index": project.current_page_index,
         "build_zip_url": project.build_zip_url,
         "stopping_requested": project.stopping_requested,
+        "error_log": project.error_log,
+        "progress": progress_pct,
         "created_at": project.created_at.isoformat(),
         "tasks": [{
             "id": str(t.id),
