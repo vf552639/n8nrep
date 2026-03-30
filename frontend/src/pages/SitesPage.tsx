@@ -132,11 +132,23 @@ export default function SitesPage() {
 
 function CreateSiteModal({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
+  const { data: authors } = useQuery({
+    queryKey: ["authors"],
+    queryFn: () => import("@/api/authors").then((m) => m.authorsApi.getAll()),
+  });
+
+  const countries = Array.from(
+    new Set((authors || []).map((a: { country: string }) => a.country).filter(Boolean))
+  ).sort();
+  const languages = Array.from(
+    new Set((authors || []).map((a: { language: string }) => a.language).filter(Boolean))
+  ).sort();
+
   const [formData, setFormData] = useState({
     name: "",
     domain: "",
-    country: "US",
-    language: "en"
+    country: "",
+    language: "",
   });
 
   const mutation = useMutation({
@@ -151,8 +163,8 @@ function CreateSiteModal({ onClose }: { onClose: () => void }) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.domain) {
-      toast.error("Name and Domain are required");
+    if (!formData.name || !formData.domain || !formData.country || !formData.language) {
+      toast.error("Name, Domain, Country, and Language are required");
       return;
     }
     mutation.mutate(formData);
@@ -190,22 +202,40 @@ function CreateSiteModal({ onClose }: { onClose: () => void }) {
            </div>
            <div className="grid grid-cols-2 gap-4">
              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Country</label>
-                <input 
-                  type="text" 
+                <label className="block text-sm font-medium text-slate-700 mb-1">Country *</label>
+                <select
+                  required
+                  className="w-full border outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-sm bg-white"
                   value={formData.country}
-                  onChange={e => setFormData({...formData, country: e.target.value})}
-                  className="w-full border outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-sm uppercase" 
-                />
+                  onChange={(e) => setFormData({ ...formData, country: e.target.value })}
+                >
+                  <option value="" disabled>
+                    Select country...
+                  </option>
+                  {(countries as string[]).map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
              </div>
              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Language</label>
-                <input 
-                  type="text" 
+                <label className="block text-sm font-medium text-slate-700 mb-1">Language *</label>
+                <select
+                  required
+                  className="w-full border outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-sm bg-white"
                   value={formData.language}
-                  onChange={e => setFormData({...formData, language: e.target.value})}
-                  className="w-full border outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-sm lowercase" 
-                />
+                  onChange={(e) => setFormData({ ...formData, language: e.target.value })}
+                >
+                  <option value="" disabled>
+                    Select language...
+                  </option>
+                  {(languages as string[]).map((l) => (
+                    <option key={l} value={l}>
+                      {l}
+                    </option>
+                  ))}
+                </select>
              </div>
            </div>
            <div className="flex justify-end gap-3 mt-8 pt-4 border-t">

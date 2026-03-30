@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useState } from "react";
+import { Fragment, useState, type Dispatch, type SetStateAction } from "react";
 import toast from "react-hot-toast";
 import { blueprintsApi } from "@/api/blueprints";
 import { Blueprint, BlueprintPage } from "@/types/blueprint";
@@ -93,13 +93,22 @@ export default function BlueprintsPage() {
       </div>
 
       {isCreateOpen && (
-        <CreateBlueprintModal onClose={() => setIsCreateOpen(false)} />
+        <CreateBlueprintModal
+          onClose={() => setIsCreateOpen(false)}
+          setExpandedBlueprintId={setExpandedBlueprintId}
+        />
       )}
     </div>
   );
 }
 
-function CreateBlueprintModal({ onClose }: { onClose: () => void }) {
+function CreateBlueprintModal({
+  onClose,
+  setExpandedBlueprintId,
+}: {
+  onClose: () => void;
+  setExpandedBlueprintId: Dispatch<SetStateAction<string | null>>;
+}) {
   const queryClient = useQueryClient();
   const [formData, setFormData] = useState({
     name: "",
@@ -108,9 +117,12 @@ function CreateBlueprintModal({ onClose }: { onClose: () => void }) {
 
   const mutation = useMutation({
     mutationFn: (data: Partial<Blueprint> & { slug: string }) => blueprintsApi.create(data),
-    onSuccess: () => {
+    onSuccess: (data: { id: string; name?: string; slug?: string }) => {
       toast.success("Blueprint created successfully");
       queryClient.invalidateQueries({ queryKey: ["blueprints"] });
+      if (data?.id) {
+        setExpandedBlueprintId(data.id);
+      }
       onClose();
     },
     onError: () => toast.error("Failed to create blueprint")

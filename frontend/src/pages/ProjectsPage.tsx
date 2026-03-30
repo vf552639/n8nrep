@@ -6,6 +6,8 @@ import { projectsApi } from "@/api/projects";
 import { sitesApi } from "@/api/sites";
 import { blueprintsApi } from "@/api/blueprints";
 import { Project } from "@/types/project";
+import { Author } from "@/types/author";
+import { Site } from "@/types/site";
 import { ReactTable } from "@/components/common/ReactTable";
 import StatusBadge from "@/components/common/StatusBadge";
 import { Plus, FolderGit2, X } from "lucide-react";
@@ -93,19 +95,49 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
     blueprint_id: "",
     site_id: "",
     seed_keyword: "",
-    country: "US",
-    language: "en",
-    author_id: ""
+    country: "",
+    language: "",
+    author_id: "" as string,
   });
 
-  const { data: blueprints } = useQuery({
-    queryKey: ["blueprints"],
-    queryFn: async () => blueprintsApi.getAll({ limit: 100 }),
+  const { data: authors } = useQuery({
+    queryKey: ["authors"],
+    queryFn: () => import("@/api/authors").then((m) => m.authorsApi.getAll()),
   });
 
   const { data: sites } = useQuery({
     queryKey: ["sites"],
     queryFn: async () => sitesApi.getAll({ limit: 100 }),
+  });
+
+  const selectedSite = (sites || []).find((s: Site) => s.id === formData.site_id);
+
+  const countries = Array.from(
+    new Set(
+      [
+        ...(authors || []).map((a: Author) => a.country),
+        ...(selectedSite?.country ? [selectedSite.country] : []),
+        ...(formData.country ? [formData.country] : []),
+      ].filter(Boolean)
+    )
+  ).sort();
+  const languages = Array.from(
+    new Set(
+      [
+        ...(authors || []).map((a: Author) => a.language),
+        ...(selectedSite?.language ? [selectedSite.language] : []),
+        ...(formData.language ? [formData.language] : []),
+      ].filter(Boolean)
+    )
+  ).sort();
+
+  const filteredAuthors = (authors || []).filter(
+    (a: Author) => a.country === formData.country && a.language === formData.language
+  );
+
+  const { data: blueprints } = useQuery({
+    queryKey: ["blueprints"],
+    queryFn: async () => blueprintsApi.getAll({ limit: 100 }),
   });
 
   const mutation = useMutation({
@@ -120,13 +152,33 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.blueprint_id || !formData.site_id || !formData.seed_keyword) {
-      toast.error("Please fill in all required fields (Name, Blueprint, Site, Seed Keyword)");
+    if (
+      !formData.name ||
+      !formData.blueprint_id ||
+      !formData.site_id ||
+      !formData.seed_keyword ||
+      !formData.country ||
+      !formData.language
+    ) {
+      toast.error(
+        "Please fill in all required fields (Name, Blueprint, Site, Seed Keyword, Country, Language)"
+      );
       return;
     }
     const payload: Partial<Project> = { ...formData };
     if (!payload.author_id) delete payload.author_id;
     mutation.mutate(payload);
+  };
+
+  const onSiteChange = (siteId: string) => {
+    const site = (sites || []).find((s: Site) => s.id === siteId);
+    setFormData((prev) => ({
+      ...prev,
+      site_id: siteId,
+      country: site ? site.country : prev.country,
+      language: site ? site.language : prev.language,
+      author_id: "",
+    }));
   };
 
   return (
@@ -160,7 +212,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
                <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Target Site *</label>
                   <select 
-                    required value={formData.site_id} onChange={e => setFormData({...formData, site_id: e.target.value})}
+                    required value={formData.site_id} onChange={(e) => onSiteChange(e.target.value)}
                     className="w-full border outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-sm bg-white"
                   >
                     <option value="" disabled>Select target site...</option>
@@ -178,30 +230,70 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
                </div>
                <div className="grid grid-cols-2 gap-4">
                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Country</label>
-                    <input 
-                      type="text" 
-                      value={formData.country} onChange={e => setFormData({...formData, country: e.target.value})}
-                      className="w-full border outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-sm uppercase" 
-                    />
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Country *</label>
+                    <select
+                      required
+                      className="w-full border outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-sm bg-white"
+                      value={formData.country}
+                      onChange={(e) =>
+                        setFormData({ ...formData, country: e.target.value, author_id: "" })
+                      }
+                    >
+                      <option value="" disabled>
+                        Select country...
+                      </option>
+                      {(countries as string[]).map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
                  </div>
                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Language</label>
-                    <input 
-                      type="text" 
-                      value={formData.language} onChange={e => setFormData({...formData, language: e.target.value})}
-                      className="w-full border outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-sm lowercase" 
-                    />
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Language *</label>
+                    <select
+                      required
+                      className="w-full border outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-sm bg-white"
+                      value={formData.language}
+                      onChange={(e) =>
+                        setFormData({ ...formData, language: e.target.value, author_id: "" })
+                      }
+                    >
+                      <option value="" disabled>
+                        Select language...
+                      </option>
+                      {(languages as string[]).map((l) => (
+                        <option key={l} value={l}>
+                          {l}
+                        </option>
+                      ))}
+                    </select>
                  </div>
                </div>
                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Author ID (Optional)</label>
-                  <input 
-                    type="text" 
-                    value={formData.author_id} onChange={e => setFormData({...formData, author_id: e.target.value})}
-                    className="w-full border outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-sm" 
-                    placeholder="Auto-assigns based on country/lang if empty" 
-                  />
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Author</label>
+                  <select
+                    className="w-full border outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-sm bg-white disabled:bg-slate-50 disabled:text-slate-400"
+                    value={formData.author_id}
+                    onChange={(e) => setFormData({ ...formData, author_id: e.target.value })}
+                    disabled={!formData.country || !formData.language}
+                  >
+                    {!formData.country || !formData.language ? (
+                      <option value="">Auto</option>
+                    ) : (
+                      <>
+                        <option value="">Auto (by country/language)</option>
+                        {filteredAuthors.map((a: Author) => (
+                          <option key={a.id} value={a.id}>
+                            {a.author || a.id}
+                          </option>
+                        ))}
+                      </>
+                    )}
+                  </select>
+                  {(!formData.country || !formData.language) && (
+                    <p className="mt-1 text-xs text-slate-500">Select Country and Language first (or use Target Site to prefill)</p>
+                  )}
                </div>
             </form>
         </div>
