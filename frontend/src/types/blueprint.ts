@@ -15,6 +15,7 @@ export interface BlueprintPage {
   keyword_template_brand?: string;
   filename: string;
   sort_order: number;
+  nav_label?: string;
   show_in_nav: boolean;
   show_in_footer: boolean;
   use_serp: boolean;

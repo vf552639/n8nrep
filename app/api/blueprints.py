@@ -120,4 +120,4 @@ def delete_blueprint_page(id: str, page_id: str, db: Session = Depends(get_db)):
         
     db.delete(db_page)
     db.commit()
-    return {"msg": "Page deleted"}
+    return {"status": "deleted"}

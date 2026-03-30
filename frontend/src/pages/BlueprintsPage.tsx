@@ -1,13 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import toast from "react-hot-toast";
 import { blueprintsApi } from "@/api/blueprints";
-import { Blueprint } from "@/types/blueprint";
-import { ReactTable } from "@/components/common/ReactTable";
-import { Plus, LayoutTemplate, X } from "lucide-react";
+import { Blueprint, BlueprintPage } from "@/types/blueprint";
+import { ChevronDown, ChevronRight, LayoutTemplate, Pencil, Plus, Trash2, X } from "lucide-react";
 
 export default function BlueprintsPage() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [expandedBlueprintId, setExpandedBlueprintId] = useState<string | null>(null);
 
   const { data: blueprints, isLoading } = useQuery({
     queryKey: ["blueprints"],
@@ -15,24 +15,6 @@ export default function BlueprintsPage() {
       return blueprintsApi.getAll({ limit: 1000 });
     },
   });
-
-  const columns = [
-    { 
-      accessorKey: "name", 
-      header: "Blueprint Name", 
-      cell: ({ row }: any) => <div className="font-semibold text-slate-800 flex items-center gap-2"><LayoutTemplate className="w-4 h-4 text-slate-400"/> {row.original.name}</div> 
-    },
-    { 
-      accessorKey: "description", 
-      header: "Description", 
-      cell: ({ row }: any) => <span className="text-slate-500">{row.original.description || "No description"}</span> 
-    },
-    { 
-      accessorKey: "created_at", 
-      header: "Created At", 
-      cell: ({ row }: any) => <span className="text-sm text-slate-500">{new Date(row.original.created_at).toLocaleDateString()}</span> 
-    },
-  ];
 
   return (
     <div className="space-y-6">
@@ -49,11 +31,66 @@ export default function BlueprintsPage() {
         </button>
       </div>
 
-      <ReactTable 
-        columns={columns as any} 
-        data={blueprints || []} 
-        isLoading={isLoading} 
-      />
+      <div className="overflow-hidden rounded-xl border bg-white shadow-sm">
+        <table className="w-full">
+          <thead className="bg-slate-50">
+            <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+              <th className="w-10 px-4 py-3" />
+              <th className="px-4 py-3">Blueprint Name</th>
+              <th className="px-4 py-3">Description</th>
+              <th className="px-4 py-3">Created At</th>
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading && (
+              <tr>
+                <td colSpan={4} className="px-4 py-8 text-center text-sm text-slate-500">
+                  Loading blueprints...
+                </td>
+              </tr>
+            )}
+            {!isLoading && (blueprints || []).length === 0 && (
+              <tr>
+                <td colSpan={4} className="px-4 py-8 text-center text-sm text-slate-500">
+                  No blueprints found
+                </td>
+              </tr>
+            )}
+            {(blueprints || []).map((blueprint) => {
+              const expanded = expandedBlueprintId === blueprint.id;
+              return (
+                <Fragment key={blueprint.id}>
+                  <tr
+                    className="cursor-pointer border-t hover:bg-slate-50"
+                    onClick={() => setExpandedBlueprintId(expanded ? null : blueprint.id)}
+                  >
+                    <td className="px-4 py-3 text-slate-500">
+                      {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2 font-semibold text-slate-800">
+                        <LayoutTemplate className="h-4 w-4 text-slate-400" />
+                        {blueprint.name}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-slate-500">{blueprint.description || "No description"}</td>
+                    <td className="px-4 py-3 text-sm text-slate-500">
+                      {new Date(blueprint.created_at).toLocaleDateString()}
+                    </td>
+                  </tr>
+                  {expanded && (
+                    <tr className="border-t bg-slate-50/60">
+                      <td colSpan={4} className="p-4">
+                        <BlueprintPagesPanel blueprintId={blueprint.id} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
 
       {isCreateOpen && (
         <CreateBlueprintModal onClose={() => setIsCreateOpen(false)} />
@@ -70,7 +107,7 @@ function CreateBlueprintModal({ onClose }: { onClose: () => void }) {
   });
 
   const mutation = useMutation({
-    mutationFn: (data: Partial<Blueprint>) => blueprintsApi.create(data),
+    mutationFn: (data: Partial<Blueprint> & { slug: string }) => blueprintsApi.create(data),
     onSuccess: () => {
       toast.success("Blueprint created successfully");
       queryClient.invalidateQueries({ queryKey: ["blueprints"] });
@@ -85,7 +122,12 @@ function CreateBlueprintModal({ onClose }: { onClose: () => void }) {
       toast.error("Blueprint Name is required");
       return;
     }
-    mutation.mutate(formData);
+    const slug = formData.name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    mutation.mutate({ ...formData, slug: slug || `blueprint-${Date.now()}` });
   };
 
   return (
@@ -136,6 +178,531 @@ function CreateBlueprintModal({ onClose }: { onClose: () => void }) {
            </div>
         </form>
       </div>
+    </div>
+  );
+}
+
+function BlueprintPagesPanel({ blueprintId }: { blueprintId: string }) {
+  const queryClient = useQueryClient();
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [editingPage, setEditingPage] = useState<BlueprintPage | null>(null);
+  const [previewSeed, setPreviewSeed] = useState("casinox");
+  const [isBrandSeed, setIsBrandSeed] = useState(false);
+
+  const { data: pages, isLoading } = useQuery({
+    queryKey: ["blueprint-pages", blueprintId],
+    queryFn: () => blueprintsApi.getPages(blueprintId),
+    enabled: !!blueprintId,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (pageId: string) => blueprintsApi.deletePage(blueprintId, pageId),
+    onSuccess: () => {
+      toast.success("Page deleted");
+      queryClient.invalidateQueries({ queryKey: ["blueprint-pages", blueprintId] });
+    },
+    onError: () => toast.error("Failed to delete page"),
+  });
+
+  const onDelete = (page: BlueprintPage) => {
+    if (!window.confirm(`Delete page "${page.page_title}"?`)) return;
+    deleteMutation.mutate(page.id);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-slate-800">Pages</h3>
+        <button
+          type="button"
+          onClick={() => setIsAddOpen(true)}
+          className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Add Page
+        </button>
+      </div>
+
+      <div className="overflow-x-auto rounded-lg border bg-white">
+        <table className="min-w-[980px] w-full">
+          <thead className="bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+            <tr>
+              <th className="px-2 py-2">#</th>
+              <th className="px-2 py-2">Slug</th>
+              <th className="px-2 py-2">Title</th>
+              <th className="px-2 py-2">Type</th>
+              <th className="px-2 py-2">Keyword Template</th>
+              <th className="px-2 py-2">Brand Template</th>
+              <th className="px-2 py-2">Filename</th>
+              <th className="px-2 py-2 text-center">SERP</th>
+              <th className="px-2 py-2 text-center">Nav</th>
+              <th className="px-2 py-2 text-center">Footer</th>
+              <th className="px-2 py-2 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="text-sm">
+            {isLoading && (
+              <tr>
+                <td colSpan={11} className="px-2 py-6 text-center text-slate-500">
+                  Loading pages...
+                </td>
+              </tr>
+            )}
+            {!isLoading && (pages || []).length === 0 && (
+              <tr>
+                <td colSpan={11} className="px-2 py-6 text-center text-slate-500">
+                  No pages yet
+                </td>
+              </tr>
+            )}
+            {(pages || []).map((page) => (
+              <tr key={page.id} className="border-t">
+                <td className="px-2 py-2 font-mono text-xs">{page.sort_order}</td>
+                <td className="px-2 py-2 font-mono text-xs">{page.page_slug}</td>
+                <td className="px-2 py-2">{page.page_title}</td>
+                <td className="px-2 py-2">{page.page_type}</td>
+                <td className="px-2 py-2 font-mono text-xs">{page.keyword_template}</td>
+                <td className="px-2 py-2 font-mono text-xs text-slate-600">{page.keyword_template_brand || "-"}</td>
+                <td className="px-2 py-2 font-mono text-xs">{page.filename}</td>
+                <td className="px-2 py-2 text-center">{page.use_serp ? "✅" : "❌"}</td>
+                <td className="px-2 py-2 text-center">{page.show_in_nav ? "✅" : "❌"}</td>
+                <td className="px-2 py-2 text-center">{page.show_in_footer ? "✅" : "❌"}</td>
+                <td className="px-2 py-2 text-right">
+                  <button
+                    type="button"
+                    onClick={() => setEditingPage(page)}
+                    className="mr-1 inline-flex items-center rounded p-1 text-blue-600 hover:bg-blue-50"
+                    title="Edit page"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDelete(page)}
+                    className="inline-flex items-center rounded p-1 text-rose-600 hover:bg-rose-50"
+                    title="Delete page"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="space-y-2 rounded-lg border bg-white p-3">
+        <div className="text-sm font-semibold text-slate-800">Keyword Preview</div>
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            type="text"
+            value={previewSeed}
+            onChange={(e) => setPreviewSeed(e.target.value)}
+            placeholder="Enter test seed"
+            className="w-full max-w-xs rounded-md border px-3 py-1.5 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+          />
+          <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={isBrandSeed}
+              onChange={(e) => setIsBrandSeed(e.target.checked)}
+              className="rounded border-slate-300"
+            />
+            Brand seed
+          </label>
+        </div>
+        <div className="overflow-x-auto rounded border">
+          <table className="min-w-[640px] w-full">
+            <thead className="bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+              <tr>
+                <th className="px-2 py-2">#</th>
+                <th className="px-2 py-2">Page</th>
+                <th className="px-2 py-2">Template Used</th>
+                <th className="px-2 py-2">Preview Keyword</th>
+              </tr>
+            </thead>
+            <tbody className="text-sm">
+              {(pages || []).map((page) => {
+                const selectedTemplate =
+                  isBrandSeed && page.keyword_template_brand ? page.keyword_template_brand : page.keyword_template;
+                return (
+                  <tr key={`preview-${page.id}`} className="border-t">
+                    <td className="px-2 py-2 font-mono text-xs">{page.sort_order}</td>
+                    <td className="px-2 py-2">{page.page_slug}</td>
+                    <td className="px-2 py-2 font-mono text-xs">{selectedTemplate}</td>
+                    <td className="px-2 py-2 font-mono text-xs">
+                      {selectedTemplate.split("{seed}").join(previewSeed || "{seed}")}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {isAddOpen && (
+        <AddBlueprintPageModal
+          blueprintId={blueprintId}
+          onClose={() => setIsAddOpen(false)}
+        />
+      )}
+
+      {editingPage && (
+        <EditBlueprintPageModal
+          blueprintId={blueprintId}
+          page={editingPage}
+          onClose={() => setEditingPage(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function AddBlueprintPageModal({ blueprintId, onClose }: { blueprintId: string; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [formData, setFormData] = useState({
+    page_slug: "",
+    page_title: "",
+    page_type: "article",
+    keyword_template: "{seed}",
+    keyword_template_brand: "{seed}",
+    filename: "",
+    sort_order: 0,
+    nav_label: "",
+    show_in_nav: true,
+    show_in_footer: true,
+    use_serp: true,
+  });
+
+  const mutation = useMutation({
+    mutationFn: (data: Partial<BlueprintPage>) => blueprintsApi.createPage(blueprintId, data),
+    onSuccess: () => {
+      toast.success("Page added");
+      queryClient.invalidateQueries({ queryKey: ["blueprint-pages", blueprintId] });
+      onClose();
+    },
+    onError: () => toast.error("Failed to add page"),
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.page_slug || !formData.page_title || !formData.keyword_template || !formData.filename) {
+      toast.error("Fill required fields");
+      return;
+    }
+    mutation.mutate({
+      ...formData,
+      keyword_template_brand: formData.keyword_template_brand || undefined,
+      nav_label: formData.nav_label || undefined,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-2xl overflow-hidden rounded-xl bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b bg-slate-50 px-6 py-4">
+          <h2 className="text-lg font-bold text-slate-900">Add Blueprint Page</h2>
+          <button onClick={onClose} className="rounded p-1 text-slate-500 hover:bg-slate-200">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4 p-6">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Field label="Slug *">
+              <input
+                value={formData.page_slug}
+                onChange={(e) => setFormData((p) => ({ ...p, page_slug: e.target.value }))}
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                placeholder="home"
+              />
+            </Field>
+            <Field label="Title *">
+              <input
+                value={formData.page_title}
+                onChange={(e) => setFormData((p) => ({ ...p, page_title: e.target.value }))}
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                placeholder="Home Page"
+              />
+            </Field>
+            <Field label="Type">
+              <input
+                value={formData.page_type}
+                onChange={(e) => setFormData((p) => ({ ...p, page_type: e.target.value }))}
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                placeholder="article"
+              />
+            </Field>
+            <Field label="Filename *">
+              <input
+                value={formData.filename}
+                onChange={(e) => setFormData((p) => ({ ...p, filename: e.target.value }))}
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                placeholder="index.html"
+              />
+            </Field>
+            <Field label="Sort Order">
+              <input
+                type="number"
+                value={formData.sort_order}
+                onChange={(e) => setFormData((p) => ({ ...p, sort_order: Number(e.target.value) || 0 }))}
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              />
+            </Field>
+            <Field label="Nav Label">
+              <input
+                value={formData.nav_label}
+                onChange={(e) => setFormData((p) => ({ ...p, nav_label: e.target.value }))}
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                placeholder="Home"
+              />
+            </Field>
+          </div>
+
+          <Field label="Keyword Template *">
+            <input
+              value={formData.keyword_template}
+              onChange={(e) => setFormData((p) => ({ ...p, keyword_template: e.target.value }))}
+              className="w-full rounded-lg border px-3 py-2 font-mono text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              placeholder="{seed} online casino"
+            />
+          </Field>
+          <Field label="Brand Template">
+            <input
+              value={formData.keyword_template_brand}
+              onChange={(e) => setFormData((p) => ({ ...p, keyword_template_brand: e.target.value }))}
+              className="w-full rounded-lg border px-3 py-2 font-mono text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              placeholder="{seed}"
+            />
+          </Field>
+
+          <div className="flex flex-wrap gap-4 text-sm text-slate-700">
+            <label className="inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={formData.use_serp}
+                onChange={(e) => setFormData((p) => ({ ...p, use_serp: e.target.checked }))}
+                className="rounded border-slate-300"
+              />
+              Use SERP
+            </label>
+            <label className="inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={formData.show_in_nav}
+                onChange={(e) => setFormData((p) => ({ ...p, show_in_nav: e.target.checked }))}
+                className="rounded border-slate-300"
+              />
+              Show in Nav
+            </label>
+            <label className="inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={formData.show_in_footer}
+                onChange={(e) => setFormData((p) => ({ ...p, show_in_footer: e.target.checked }))}
+                className="rounded border-slate-300"
+              />
+              Show in Footer
+            </label>
+          </div>
+
+          <div className="mt-6 flex justify-end gap-3 border-t pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={mutation.isPending}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {mutation.isPending ? "Adding..." : "Add Page"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function EditBlueprintPageModal({
+  blueprintId,
+  page,
+  onClose,
+}: {
+  blueprintId: string;
+  page: BlueprintPage;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [formData, setFormData] = useState({
+    page_slug: page.page_slug,
+    page_title: page.page_title,
+    page_type: page.page_type,
+    keyword_template: page.keyword_template,
+    keyword_template_brand: page.keyword_template_brand || "",
+    filename: page.filename,
+    sort_order: page.sort_order,
+    nav_label: page.nav_label || "",
+    show_in_nav: page.show_in_nav,
+    show_in_footer: page.show_in_footer,
+    use_serp: page.use_serp,
+  });
+
+  const mutation = useMutation({
+    mutationFn: (data: Partial<BlueprintPage>) => blueprintsApi.updatePage(blueprintId, page.id, data),
+    onSuccess: () => {
+      toast.success("Page updated");
+      queryClient.invalidateQueries({ queryKey: ["blueprint-pages", blueprintId] });
+      onClose();
+    },
+    onError: () => toast.error("Failed to update page"),
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.page_slug || !formData.page_title || !formData.keyword_template || !formData.filename) {
+      toast.error("Fill required fields");
+      return;
+    }
+    mutation.mutate({
+      ...formData,
+      keyword_template_brand: formData.keyword_template_brand || undefined,
+      nav_label: formData.nav_label || undefined,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-2xl overflow-hidden rounded-xl bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b bg-slate-50 px-6 py-4">
+          <h2 className="text-lg font-bold text-slate-900">Edit Blueprint Page</h2>
+          <button onClick={onClose} className="rounded p-1 text-slate-500 hover:bg-slate-200">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4 p-6">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Field label="Slug *">
+              <input
+                value={formData.page_slug}
+                onChange={(e) => setFormData((p) => ({ ...p, page_slug: e.target.value }))}
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              />
+            </Field>
+            <Field label="Title *">
+              <input
+                value={formData.page_title}
+                onChange={(e) => setFormData((p) => ({ ...p, page_title: e.target.value }))}
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              />
+            </Field>
+            <Field label="Type">
+              <input
+                value={formData.page_type}
+                onChange={(e) => setFormData((p) => ({ ...p, page_type: e.target.value }))}
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              />
+            </Field>
+            <Field label="Filename *">
+              <input
+                value={formData.filename}
+                onChange={(e) => setFormData((p) => ({ ...p, filename: e.target.value }))}
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              />
+            </Field>
+            <Field label="Sort Order">
+              <input
+                type="number"
+                value={formData.sort_order}
+                onChange={(e) => setFormData((p) => ({ ...p, sort_order: Number(e.target.value) || 0 }))}
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              />
+            </Field>
+            <Field label="Nav Label">
+              <input
+                value={formData.nav_label}
+                onChange={(e) => setFormData((p) => ({ ...p, nav_label: e.target.value }))}
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              />
+            </Field>
+          </div>
+
+          <Field label="Keyword Template *">
+            <input
+              value={formData.keyword_template}
+              onChange={(e) => setFormData((p) => ({ ...p, keyword_template: e.target.value }))}
+              className="w-full rounded-lg border px-3 py-2 font-mono text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            />
+          </Field>
+          <Field label="Brand Template">
+            <input
+              value={formData.keyword_template_brand}
+              onChange={(e) => setFormData((p) => ({ ...p, keyword_template_brand: e.target.value }))}
+              className="w-full rounded-lg border px-3 py-2 font-mono text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            />
+          </Field>
+
+          <div className="flex flex-wrap gap-4 text-sm text-slate-700">
+            <label className="inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={formData.use_serp}
+                onChange={(e) => setFormData((p) => ({ ...p, use_serp: e.target.checked }))}
+                className="rounded border-slate-300"
+              />
+              Use SERP
+            </label>
+            <label className="inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={formData.show_in_nav}
+                onChange={(e) => setFormData((p) => ({ ...p, show_in_nav: e.target.checked }))}
+                className="rounded border-slate-300"
+              />
+              Show in Nav
+            </label>
+            <label className="inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={formData.show_in_footer}
+                onChange={(e) => setFormData((p) => ({ ...p, show_in_footer: e.target.checked }))}
+                className="rounded border-slate-300"
+              />
+              Show in Footer
+            </label>
+          </div>
+
+          <div className="mt-6 flex justify-end gap-3 border-t pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={mutation.isPending}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {mutation.isPending ? "Saving..." : "Save Changes"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="mb-1 block text-sm font-medium text-slate-700">{label}</label>
+      {children}
     </div>
   );
 }
