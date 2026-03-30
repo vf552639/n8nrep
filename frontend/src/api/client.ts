@@ -1,5 +1,6 @@
 import axios from "axios";
 import toast from "react-hot-toast";
+import { formatApiErrorDetail } from "@/lib/apiErrorMessage";
 
 const api = axios.create({
   // Fallback to localhost:8000/api if the env variable isn't set
@@ -24,11 +25,17 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    const cfg = error.config;
     if (error.response?.status === 401 || error.response?.status === 403) {
-      toast.error("Authentication failed or missing API Key.");
-    } else {
-      // Attempt to extract the detail message from FastAPI HTTPExceptions
-      const msg = error.response?.data?.detail || error.message || "An unknown error occurred";
+      if (!cfg?.skipErrorToast) {
+        toast.error("Authentication failed or missing API Key.");
+      }
+    } else if (!cfg?.skipErrorToast) {
+      const raw = error.response?.data?.detail;
+      const msg =
+        formatApiErrorDetail(raw) ||
+        error.message ||
+        "An unknown error occurred";
       toast.error(msg);
     }
     return Promise.reject(error);

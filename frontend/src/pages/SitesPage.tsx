@@ -27,7 +27,17 @@ export default function SitesPage() {
       queryClient.invalidateQueries({ queryKey: ["sites"] });
       setDeleteId(null);
     },
-    onError: () => toast.error("Failed to delete site"),
+    onError: (error: unknown) => {
+      const ax = error as { response?: { data?: { detail?: string | string[] } } };
+      const d = ax.response?.data?.detail;
+      const msg =
+        typeof d === "string"
+          ? d
+          : Array.isArray(d)
+            ? d.join(" ")
+            : "Failed to delete site";
+      toast.error(msg);
+    },
   });
 
   const columns = [

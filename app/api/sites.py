@@ -6,6 +6,8 @@ import uuid
 
 from app.database import get_db
 from app.models.site import Site, SiteTemplate
+from app.models.task import Task
+from app.models.project import SiteProject
 
 router = APIRouter()
 
@@ -48,7 +50,16 @@ def delete_site(site_id: str, db: Session = Depends(get_db)):
     site = db.query(Site).filter(Site.id == site_id).first()
     if not site:
         raise HTTPException(status_code=404, detail="Site not found")
-    # Cascades should ideally handle templates, but let's manual delete them if no cascade set
+
+    task_count = db.query(Task).filter(Task.target_site_id == site_id).count()
+    project_count = db.query(SiteProject).filter(SiteProject.site_id == site_id).count()
+
+    if task_count > 0 or project_count > 0:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot delete: site has {task_count} tasks and {project_count} projects. Delete them first.",
+        )
+
     db.query(SiteTemplate).filter(SiteTemplate.site_id == site_id).delete()
     db.delete(site)
     db.commit()

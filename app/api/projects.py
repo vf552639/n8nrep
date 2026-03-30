@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from sqlalchemy.sql import func
 from typing import List, Optional
+from collections import defaultdict
 from pydantic import BaseModel
 import uuid
 import os
@@ -50,18 +51,35 @@ class SiteProjectResponse(BaseModel):
 @router.get("/")
 def get_projects(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
     projects = db.query(SiteProject).order_by(desc(SiteProject.created_at)).offset(skip).limit(limit).all()
-    return [{
-        "id": str(p.id),
-        "name": p.name,
-        "blueprint_id": str(p.blueprint_id),
-        "site_id": str(p.site_id),
-        "seed_keyword": p.seed_keyword,
-        "seed_is_brand": getattr(p, 'seed_is_brand', False),
-        "status": p.status,
-        "current_page_index": p.current_page_index,
-        "build_zip_url": p.build_zip_url,
-        "created_at": p.created_at.isoformat()
-    } for p in projects]
+    if not projects:
+        return []
+
+    project_ids = [p.id for p in projects]
+    task_rows = db.query(Task).filter(Task.project_id.in_(project_ids)).all()
+    by_project = defaultdict(list)
+    for t in task_rows:
+        by_project[str(t.project_id)].append(t)
+
+    out = []
+    for p in projects:
+        tasks = by_project.get(str(p.id), [])
+        total = len(tasks)
+        completed = sum(1 for t in tasks if t.status == "completed")
+        progress = round((completed / total) * 100) if total > 0 else 0
+        out.append({
+            "id": str(p.id),
+            "name": p.name,
+            "blueprint_id": str(p.blueprint_id),
+            "site_id": str(p.site_id),
+            "seed_keyword": p.seed_keyword,
+            "seed_is_brand": getattr(p, 'seed_is_brand', False),
+            "status": p.status,
+            "current_page_index": p.current_page_index,
+            "build_zip_url": p.build_zip_url,
+            "created_at": p.created_at.isoformat(),
+            "progress": progress,
+        })
+    return out
 
 @router.post("/")
 def create_project(project_in: SiteProjectCreate, db: Session = Depends(get_db)):

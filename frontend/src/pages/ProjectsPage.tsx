@@ -3,9 +3,9 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import { projectsApi } from "@/api/projects";
+import { formatApiErrorDetail } from "@/lib/apiErrorMessage";
 import { sitesApi } from "@/api/sites";
 import { blueprintsApi } from "@/api/blueprints";
-import { Project } from "@/types/project";
 import { Author } from "@/types/author";
 import { Site } from "@/types/site";
 import { ReactTable } from "@/components/common/ReactTable";
@@ -141,13 +141,23 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
   });
 
   const mutation = useMutation({
-    mutationFn: (data: Partial<Project>) => projectsApi.create(data),
+    mutationFn: projectsApi.create,
     onSuccess: () => {
       toast.success("Project started successfully");
       queryClient.invalidateQueries({ queryKey: ["projects"] });
       onClose();
     },
-    onError: () => toast.error("Failed to start project")
+    onError: (error: unknown) => {
+      const ax = error as {
+        response?: { data?: { detail?: unknown } };
+        message?: string;
+      };
+      const msg =
+        formatApiErrorDetail(ax.response?.data?.detail) ||
+        ax.message ||
+        "Failed to start project";
+      toast.error(msg);
+    },
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -165,9 +175,19 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
       );
       return;
     }
-    const payload: Partial<Project> = { ...formData };
-    if (!payload.author_id) delete payload.author_id;
-    mutation.mutate(payload);
+    const authorId =
+      formData.author_id && formData.author_id.trim() !== ""
+        ? Number(formData.author_id)
+        : undefined;
+    mutation.mutate({
+      name: formData.name,
+      blueprint_id: formData.blueprint_id,
+      target_site: formData.site_id,
+      seed_keyword: formData.seed_keyword,
+      country: formData.country,
+      language: formData.language,
+      ...(authorId != null && !Number.isNaN(authorId) ? { author_id: authorId } : {}),
+    });
   };
 
   const onSiteChange = (siteId: string) => {
