@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, Integer, Text, ForeignKey, DateTime, BigInteger, Boolean
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import uuid
@@ -23,6 +23,16 @@ class SiteProject(Base):
     stopping_requested = Column(Boolean, default=False, server_default="false", comment="Флаг запроса остановки")
     build_zip_url = Column(Text, nullable=True)
     error_log = Column(Text, nullable=True)
+    is_archived = Column(Boolean, default=False, server_default="false", comment="Архивный проект")
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    logs = Column(JSONB, nullable=True, default=list)
+    serp_config = Column(
+        JSONB,
+        nullable=True,
+        default=dict,
+        comment="SERP config: search_engine, depth, device, os",
+    )
     created_at = Column(DateTime, default=datetime.utcnow)
 
     blueprint = relationship("SiteBlueprint", back_populates="projects")

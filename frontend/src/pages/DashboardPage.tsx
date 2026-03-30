@@ -4,10 +4,10 @@ import { dashboardApi } from "@/api/dashboard";
 import { tasksApi } from "@/api/tasks";
 import { DashboardStats, QueueStatus } from "@/types/common";
 import StatusBadge from "@/components/common/StatusBadge";
-import { Activity, Server } from "lucide-react";
+import { Activity, Server, Search } from "lucide-react";
 
 export default function DashboardPage() {
-  const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({
+    const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({
     queryKey: ["dashboard-stats"],
     queryFn: dashboardApi.getStats,
     refetchInterval: 10000
@@ -19,6 +19,12 @@ export default function DashboardPage() {
     refetchInterval: 10000
   });
 
+  const { data: serpHealth } = useQuery({
+    queryKey: ["serp-health"],
+    queryFn: () => dashboardApi.getSerpHealth(),
+    refetchInterval: 300000,
+  });
+
   const { data: latestTasks, isLoading: tasksLoading } = useQuery({
     queryKey: ["dashboard-latest-tasks"],
     queryFn: () => tasksApi.getAll({ limit: 10 }),
@@ -26,6 +32,24 @@ export default function DashboardPage() {
   });
 
   const isLoading = statsLoading || queueLoading || tasksLoading;
+
+  const overall = serpHealth?.overall as string | undefined;
+  const serpBadgeClass =
+    overall === "ok"
+      ? "bg-green-50 text-green-800 border-green-200"
+      : overall === "unconfigured"
+        ? "bg-slate-100 text-slate-600 border-slate-200"
+        : overall === "error"
+          ? "bg-red-50 text-red-800 border-red-200"
+          : "bg-slate-50 text-slate-700 border-slate-200";
+  const serpLabel =
+    overall === "ok"
+      ? "SERP: Online"
+      : overall === "unconfigured"
+        ? "SERP: Not configured"
+        : overall === "error"
+          ? "SERP: Degraded"
+          : "SERP: —";
 
   if (isLoading) return <div className="p-8 text-center animate-pulse">Loading dashboard...</div>;
 
@@ -38,6 +62,24 @@ export default function DashboardPage() {
              <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm font-medium ${queue.celery_workers_online ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
                <Server className="w-4 h-4" />
                Celery: {queue.celery_workers_online ? 'Online' : 'Offline'}
+             </div>
+           )}
+           {serpHealth && (
+             <div
+               className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm font-medium ${serpBadgeClass}`}
+               title={[
+                 serpHealth.dataforseo &&
+                   typeof serpHealth.dataforseo === "object" &&
+                   `DataForSEO: ${(serpHealth.dataforseo as { status?: string }).status === "ok" ? "✓" : "✕"} ${(serpHealth.dataforseo as { latency_ms?: number }).latency_ms ?? "—"}ms`,
+                 serpHealth.serpapi &&
+                   typeof serpHealth.serpapi === "object" &&
+                   `SerpAPI: ${(serpHealth.serpapi as { status?: string }).status === "ok" ? "✓" : "✕"} ${(serpHealth.serpapi as { latency_ms?: number }).latency_ms ?? "—"}ms`,
+               ]
+                 .filter(Boolean)
+                 .join(" | ")}
+             >
+               <Search className="w-4 h-4" />
+               {serpLabel}
              </div>
            )}
            {stats && (

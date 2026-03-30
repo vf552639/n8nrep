@@ -17,6 +17,14 @@ export function formatApiErrorDetail(detail: unknown): string {
       .filter(Boolean)
       .join("; ");
   }
+  if (typeof detail === "object" && detail !== null && "message" in detail) {
+    const o = detail as { message?: unknown; existing_project_id?: unknown };
+    let s = o.message != null ? String(o.message) : "";
+    if (o.existing_project_id != null) {
+      s += ` (existing id: ${String(o.existing_project_id)})`;
+    }
+    return s || JSON.stringify(detail);
+  }
   if (typeof detail === "object") {
     try {
       return JSON.stringify(detail);

@@ -1,7 +1,37 @@
+import time as time_module
+from datetime import datetime
+
 from celery.exceptions import SoftTimeLimitExceeded, MaxRetriesExceededError
+from sqlalchemy.orm.attributes import flag_modified
+
 from app.workers.celery_app import celery_app
 from app.database import SessionLocal
 from app.services.pipeline import run_pipeline
+
+
+def _append_project_log(db, project, msg: str, level: str = "info") -> None:
+    logs = list(project.logs or [])
+    logs.append(
+        {
+            "ts": datetime.utcnow().isoformat() + "Z",
+            "msg": msg,
+            "level": level,
+        }
+    )
+    project.logs = logs
+    flag_modified(project, "logs")
+
+
+def _fmt_duration(seconds: float) -> str:
+    s = int(round(seconds))
+    m, s = divmod(s, 60)
+    h, m = divmod(m, 60)
+    if h:
+        return f"{h}h {m}m {s}s"
+    if m:
+        return f"{m}m {s}s"
+    return f"{s}s"
+
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def process_generation_task(self, task_id: str):
@@ -45,53 +75,63 @@ def process_site_project(self, project_id: str):
     from app.models.task import Task
     from app.services.site_builder import build_site
     import traceback
-    
+    import json
+
+    project = None
     try:
         project = db.query(SiteProject).filter(SiteProject.id == project_id).first()
         if not project:
             print(f"Project {project_id} not found!")
             return
-            
+
         project.status = "generating"
         db.commit()
-        
-        pages = db.query(BlueprintPage).filter(BlueprintPage.blueprint_id == project.blueprint_id).order_by(BlueprintPage.sort_order).all()
-        
-        # Skip already completed pages (enables resume after stop)
+
+        pages = (
+            db.query(BlueprintPage)
+            .filter(BlueprintPage.blueprint_id == project.blueprint_id)
+            .order_by(BlueprintPage.sort_order)
+            .all()
+        )
+        failed_pages = []
+        n_pages = len(pages)
+
         existing_tasks = db.query(Task).filter(
             Task.project_id == project.id,
-            Task.status == "completed"
+            Task.status == "completed",
         ).all()
         completed_page_ids = {str(t.blueprint_page_id) for t in existing_tasks}
-        
+
         for i, page in enumerate(pages):
             if str(page.id) in completed_page_ids:
                 print(f"Skipping already completed page: {page.page_title}")
                 continue
-            
+
             project.current_page_index = i
             db.commit()
-            
-            # Generate Keyword based on brand fallback vs standard template
+
             template = page.keyword_template
-            if getattr(project, 'seed_is_brand', False) and getattr(page, 'keyword_template_brand', None):
+            if getattr(project, "seed_is_brand", False) and getattr(
+                page, "keyword_template_brand", None
+            ):
                 template = page.keyword_template_brand
             keyword = template.replace("{seed}", project.seed_keyword)
-            
-            # Check if a pending/failed task already exists for this page (from prior attempt)
+
             existing_task = db.query(Task).filter(
                 Task.project_id == project.id,
                 Task.blueprint_page_id == page.id,
-                Task.status.in_(["pending", "failed"])
+                Task.status.in_(["pending", "failed"]),
             ).first()
-            
+
+            proj_serp = getattr(project, "serp_config", None) or {}
+
             if existing_task:
                 new_task = existing_task
                 new_task.status = "pending"
                 new_task.error_log = None
+                new_task.serp_config = proj_serp
                 db.commit()
             else:
-                # Create Task
                 new_task = Task(
                     main_keyword=keyword,
                     country=project.country,
@@ -101,13 +141,24 @@ def process_site_project(self, project_id: str):
                     author_id=project.author_id,
                     project_id=project.id,
                     blueprint_page_id=page.id,
-                    status="pending"
+                    status="pending",
+                    serp_config=proj_serp,
                 )
                 db.add(new_task)
                 db.commit()
                 db.refresh(new_task)
-            
-            # Run pipeline SYNCHRONOUSLY (auto_mode=True: no manual image/test pauses for bulk projects)
+
+            db.refresh(project)
+            if project.started_at is None:
+                project.started_at = datetime.utcnow()
+            _append_project_log(
+                db,
+                project,
+                f"Starting page {i + 1}/{n_pages}: '{page.page_title}'",
+            )
+            db.commit()
+
+            t0 = time_module.monotonic()
             try:
                 run_pipeline(db, str(new_task.id), auto_mode=True)
             except Exception as pipeline_err:
@@ -119,10 +170,20 @@ def process_site_project(self, project_id: str):
                     db.commit()
 
             db.refresh(new_task)
+            elapsed = time_module.monotonic() - t0
+
+            if new_task.status == "completed":
+                db.refresh(new_task)
+                cost = float(new_task.total_cost or 0)
+                _append_project_log(
+                    db,
+                    project,
+                    f"Page {i + 1}/{n_pages} completed in {_fmt_duration(elapsed)} "
+                    f"(cost: ${cost:.4f})",
+                )
+                db.commit()
 
             if new_task.status != "completed":
-                project.status = "failed"
-
                 if new_task.status == "failed":
                     error_detail = new_task.error_log or "Unknown error"
                 elif new_task.status == "processing":
@@ -133,40 +194,97 @@ def process_site_project(self, project_id: str):
                 else:
                     error_detail = f"Unexpected task status: {new_task.status}"
 
-                project.error_log = (
-                    f"Stopped at page #{i + 1}: '{page.page_title}' "
-                    f"(keyword: '{keyword}'). "
-                    f"Task {new_task.id} status: {new_task.status}. "
-                    f"Detail: {error_detail}"
+                short_err = (error_detail or "")[:200]
+                _append_project_log(
+                    db,
+                    project,
+                    f"Page {i + 1}/{n_pages} FAILED: {short_err}. Skipping.",
+                    level="error",
                 )
                 db.commit()
 
-                print(
-                    f"[Project {project_id}] STOPPED: Task {new_task.id} "
-                    f"finished with status '{new_task.status}' instead of 'completed'"
+                failed_pages.append(
+                    {
+                        "page": page.page_title,
+                        "keyword": keyword,
+                        "task_id": str(new_task.id),
+                        "task_status": str(new_task.status),
+                        "error": error_detail,
+                    }
                 )
-                return
-            
-            # Cooperative cancellation: check if user requested stop
+                print(
+                    f"[Project {project_id}] Page skipped (non-completed task): "
+                    f"{page.page_title} — {new_task.status}"
+                )
+
+                db.refresh(project)
+                if project.stopping_requested:
+                    project.status = "stopped"
+                    project.stopping_requested = False
+                    project.completed_at = datetime.utcnow()
+                    if failed_pages:
+                        project.error_log = json.dumps(failed_pages, ensure_ascii=False)
+                    _append_project_log(
+                        db, project, "Project stopped by user.", level="warning"
+                    )
+                    db.commit()
+                    print(f"Project {project_id} stopped by user after task {new_task.id}")
+                    return
+
+                continue
+
             db.refresh(project)
             if project.stopping_requested:
                 project.status = "stopped"
                 project.stopping_requested = False
+                project.completed_at = datetime.utcnow()
+                if failed_pages:
+                    project.error_log = json.dumps(failed_pages, ensure_ascii=False)
+                _append_project_log(
+                    db, project, "Project stopped by user.", level="warning"
+                )
                 db.commit()
                 print(f"Project {project_id} stopped by user after task {new_task.id}")
                 return
 
-        # If we reached here, everything succeeded
         project.current_page_index = len(pages)
+        if project.started_at is None:
+            project.started_at = datetime.utcnow()
         build_site(db, project_id)
-        
+
         project.status = "completed"
+        if failed_pages:
+            project.error_log = json.dumps(failed_pages, ensure_ascii=False)
+        else:
+            project.error_log = None
+        project.completed_at = datetime.utcnow()
+
+        all_tasks = db.query(Task).filter(Task.project_id == project.id).all()
+        total_cost = float(sum((t.total_cost or 0) for t in all_tasks))
+        ok = sum(1 for t in all_tasks if t.status == "completed")
+        fail_n = sum(1 for t in all_tasks if t.status == "failed")
+        _append_project_log(
+            db,
+            project,
+            f"Project completed: {ok}/{n_pages} pages successful, {fail_n} failed. "
+            f"Total cost: ${total_cost:.4f}",
+        )
         db.commit()
-        
+
     except Exception as exc:
         if project:
             project.status = "failed"
             project.error_log = traceback.format_exc()
+            project.completed_at = datetime.utcnow()
+            try:
+                _append_project_log(
+                    db,
+                    project,
+                    f"Project failed: {exc!s}",
+                    level="error",
+                )
+            except Exception:
+                pass
             db.commit()
     finally:
         db.close()

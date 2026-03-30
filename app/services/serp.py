@@ -1,10 +1,15 @@
 import requests
 import json
+import time
 import base64
 from typing import Dict, Any, Optional
 from urllib.parse import urlparse
 from app.config import settings
 from app.services.serp_cache import get_cached_serp
+
+MAX_SERP_RETRIES = 2
+SERP_RETRY_DELAY = 30  # seconds between attempts when both providers fail
+
 
 def _is_excluded_domain(url: str) -> bool:
     """Проверяет, принадлежит ли URL к исключённому домену."""
@@ -654,28 +659,40 @@ def _fetch_serp_data_uncached(keyword: str, country_code: str, language_code: st
             return bing_result
         raise Exception("Google+Bing SERP: both engines failed.")
 
-    # Default: google with SerpAPI fallback
-    dfs_parsed = None
-    dfs_data = call_dataforseo(keyword, country_code, language_code,
-                               depth, device, os_type)
-    if dfs_data and dfs_data.get("items"):
-        dfs_parsed = _parse_dataforseo_response(dfs_data)
-        if dfs_parsed["urls"]:
+    # Default: google with SerpAPI fallback + retry with backoff on total failure
+    for attempt in range(MAX_SERP_RETRIES):
+        dfs_parsed = None
+        dfs_data = call_dataforseo(
+            keyword, country_code, language_code, depth, device, os_type
+        )
+        if dfs_data and dfs_data.get("items"):
+            dfs_parsed = _parse_dataforseo_response(dfs_data)
+            if dfs_parsed["urls"]:
+                return dfs_parsed
+            print(
+                f"DataForSEO returned {len(dfs_data['items'])} items but 0 usable organic URLs. Trying SerpAPI..."
+            )
+
+        if not dfs_data or not dfs_data.get("items"):
+            print("DataForSEO failed or returned empty. Falling back to SerpAPI...")
+
+        serp_data = call_serpapi(keyword, country_code, language_code)
+        if serp_data and serp_data.get("organic_results"):
+            return _parse_serpapi_response(serp_data)
+
+        if dfs_parsed:
+            print(
+                "SerpAPI also returned no organic results. Returning partial DataForSEO data."
+            )
             return dfs_parsed
-        print(f"DataForSEO returned {len(dfs_data['items'])} items but 0 usable organic URLs. Trying SerpAPI...")
 
-    if not dfs_data or not dfs_data.get("items"):
-        print("DataForSEO failed or returned empty. Falling back to SerpAPI...")
+        if attempt < MAX_SERP_RETRIES - 1:
+            print(
+                f"[SERP] Attempt {attempt + 1} failed, retrying in {SERP_RETRY_DELAY}s..."
+            )
+            time.sleep(SERP_RETRY_DELAY)
 
-    serp_data = call_serpapi(keyword, country_code, language_code)
-    if serp_data and serp_data.get("organic_results"):
-        return _parse_serpapi_response(serp_data)
-
-    if dfs_parsed:
-        print("SerpAPI also returned no organic results. Returning partial DataForSEO data.")
-        return dfs_parsed
-
-    raise Exception("Both SERP providers failed to return results.")
+    raise Exception("Both SERP providers failed to return results after retries.")
 
 
 def fetch_serp_data(
@@ -693,4 +710,115 @@ def fetch_serp_data(
         fetch_fn=_fetch_serp_data_uncached,
         force_refresh=force_refresh,
     )
+
+
+_serp_health_cache: dict = {"result": None, "timestamp": 0.0}
+SERP_HEALTH_CACHE_TTL = 300  # 5 minutes
+
+
+def check_serp_health() -> dict:
+    """
+    Тестовый пинг SERP-провайдеров. Возвращает статус каждого.
+    """
+    import time as time_mod
+
+    from app.config import settings
+
+    result: Dict[str, Any] = {
+        "dataforseo": {"status": "unconfigured", "latency_ms": None, "detail": None},
+        "serpapi": {"status": "unconfigured", "latency_ms": None, "detail": None},
+    }
+
+    if settings.DATAFORSEO_LOGIN and settings.DATAFORSEO_PASSWORD:
+        start = time_mod.time()
+        try:
+            dfs_data = call_dataforseo(
+                "test", "us", "en", depth=1, device="mobile", os_type="android"
+            )
+            latency = int((time_mod.time() - start) * 1000)
+            if dfs_data and dfs_data.get("items"):
+                result["dataforseo"] = {
+                    "status": "ok",
+                    "latency_ms": latency,
+                    "detail": None,
+                }
+            else:
+                result["dataforseo"] = {
+                    "status": "error",
+                    "latency_ms": latency,
+                    "detail": "Returned empty items",
+                }
+        except Exception as e:
+            latency = int((time_mod.time() - start) * 1000)
+            result["dataforseo"] = {
+                "status": "error",
+                "latency_ms": latency,
+                "detail": str(e)[:300],
+            }
+
+    if settings.SERPAPI_KEY:
+        start = time_mod.time()
+        try:
+            serp_data = call_serpapi("test", "us", "en")
+            latency = int((time_mod.time() - start) * 1000)
+            if serp_data and serp_data.get("organic_results"):
+                result["serpapi"] = {
+                    "status": "ok",
+                    "latency_ms": latency,
+                    "detail": None,
+                }
+            else:
+                result["serpapi"] = {
+                    "status": "error",
+                    "latency_ms": latency,
+                    "detail": "No organic results",
+                }
+        except Exception as e:
+            latency = int((time_mod.time() - start) * 1000)
+            result["serpapi"] = {
+                "status": "error",
+                "latency_ms": latency,
+                "detail": str(e)[:300],
+            }
+
+    ok_any = any(
+        isinstance(v, dict) and v.get("status") == "ok"
+        for k, v in result.items()
+        if k in ("dataforseo", "serpapi")
+    )
+    all_unconfigured = all(
+        isinstance(v, dict) and v.get("status") == "unconfigured"
+        for k, v in result.items()
+        if k in ("dataforseo", "serpapi")
+    )
+    if ok_any:
+        result["overall"] = "ok"
+    elif all_unconfigured:
+        result["overall"] = "unconfigured"
+    else:
+        result["overall"] = "error"
+
+    return result
+
+
+def get_serp_health(force_refresh: bool = False) -> dict:
+    import time as time_mod
+
+    now = time_mod.time()
+    if (
+        not force_refresh
+        and _serp_health_cache["result"]
+        and (now - _serp_health_cache["timestamp"]) < SERP_HEALTH_CACHE_TTL
+    ):
+        cached = dict(_serp_health_cache["result"])
+        cached["_from_cache"] = True
+        cached["_cache_age_seconds"] = int(now - _serp_health_cache["timestamp"])
+        return cached
+
+    result = check_serp_health()
+    _serp_health_cache["result"] = result
+    _serp_health_cache["timestamp"] = now
+    out = dict(result)
+    out["_from_cache"] = False
+    return out
 

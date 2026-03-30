@@ -676,8 +676,29 @@ def phase_serp(ctx: PipelineContext):
     if not ctx.task.serp_data:
         add_log(ctx.db, ctx.task, "Fetching SERP data...", step=STEP_SERP)
         save_step_result(ctx.db, ctx.task, STEP_SERP, result=None, status="running")
-        serp_data = fetch_serp_data(ctx.task.main_keyword, ctx.task.country, ctx.task.language,
-                                    serp_config=ctx.task.serp_config)
+        try:
+            serp_data = fetch_serp_data(
+                ctx.task.main_keyword,
+                ctx.task.country,
+                ctx.task.language,
+                serp_config=ctx.task.serp_config,
+            )
+        except Exception as serp_err:
+            add_log(
+                ctx.db,
+                ctx.task,
+                f"❌ SERP fetch failed: {str(serp_err)}",
+                level="error",
+                step=STEP_SERP,
+            )
+            save_step_result(
+                ctx.db,
+                ctx.task,
+                STEP_SERP,
+                result=json.dumps({"error": str(serp_err)}),
+                status="failed",
+            )
+            raise
         ctx.task.serp_data = serp_data
         ctx.db.commit()
         add_log(ctx.db, ctx.task, f"SERP Research completed.", step=STEP_SERP)

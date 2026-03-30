@@ -211,6 +211,17 @@ def render_dashboard():
                 online = q_stats.get("celery_workers_online")
                 st.metric("Celery Workers", "🟢 Online" if online else "🔴 Offline")
 
+        serp_health = fetch_data("health/serp")
+        if serp_health:
+            overall = serp_health.get("overall", "unknown")
+            icon = {"ok": "🟢", "error": "🔴", "unconfigured": "⚪"}.get(overall, "❓")
+            st.metric("SERP Providers", f"{icon} {str(overall).upper()}")
+            if overall == "error":
+                for provider in ["dataforseo", "serpapi"]:
+                    info = serp_health.get(provider, {})
+                    if isinstance(info, dict) and info.get("status") == "error":
+                        st.warning(f"{provider}: {info.get('detail', 'Unknown error')}")
+
 # ----- REUSABLE: STEP MONITOR -----
 def render_serp_viewer(task_id: str, key_prefix: str = ""):
     """Показывает SERP-данные в виде таблиц с возможностью скачать CSV."""
@@ -1294,18 +1305,21 @@ def render_blueprints():
 def render_projects():
     st.header("📁 Проекты (Сайты)")
     
-    col_limit, col_skip, _ = st.columns([1, 1, 4])
+    col_limit, col_skip, col_arch = st.columns([1, 1, 2])
     proj_limit = col_limit.number_input("Лимит", min_value=10, max_value=500, value=50, step=10, key="proj_limit")
     proj_skip = col_skip.number_input("Отступ (Skip)", min_value=0, value=0, step=proj_limit, key="proj_skip")
+    show_archived = col_arch.checkbox("Показать архивные проекты", value=False, key="proj_show_archived")
+    archived_param = "true" if show_archived else "false"
     
     blueprints = fetch_data("blueprints/") or []
     authors = fetch_data("authors/") or []
     sites = fetch_data("sites/") or []
-    projects = fetch_data(f"projects/?limit={proj_limit}&skip={proj_skip}") or []
+    projects = fetch_data(f"projects/?limit={proj_limit}&skip={proj_skip}&archived={archived_param}") or []
     
     if projects:
         df = pd.DataFrame(projects)
-        st.dataframe(df[["id", "name", "seed_keyword", "status", "created_at"]], use_container_width=True)
+        cols = [c for c in ["id", "name", "seed_keyword", "status", "is_archived", "country", "language", "created_at"] if c in df.columns]
+        st.dataframe(df[cols], use_container_width=True)
         
     with st.expander("Создать новый проект"):
         with st.form("new_project_form"):
@@ -1317,21 +1331,6 @@ def render_projects():
             col_s1, col_s2 = st.columns(2)
             pr_seed = col_s1.text_input("Seed Keyword (e.g. casinox)")
             pr_seed_is_brand = col_s2.checkbox("Брендовый Seed (seed_is_brand)", help="Включите, если seed keyword уже содержит тип заведения (напр. 'lemon kasyno' вместо просто 'lemon').")
-            
-            # Preview Seed keywords logic
-            if pr_bp and pr_seed:
-                bp_id_selected = bp_opts[pr_bp]
-                pages_data = fetch_data(f"blueprints/{bp_id_selected}/pages") or []
-                if pages_data:
-                    preview_data = []
-                    for page in pages_data:
-                        template = page.get("keyword_template", "")
-                        if pr_seed_is_brand and page.get("keyword_template_brand"):
-                            template = page["keyword_template_brand"]
-                        final_kw = template.replace("{seed}", pr_seed)
-                        preview_data.append({"Страница": page["page_slug"], "Итоговый ключ": final_kw})
-                    st.markdown("**Превью генерации ключей:**")
-                    st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
             
             countries = list(set([a.get("country") for a in authors if a.get("country")]))
             languages = list(set([a.get("language") for a in authors if a.get("language")]))
@@ -1349,10 +1348,42 @@ def render_projects():
                     pr_author = filtered_authors[pr_author_name]
             else:
                 st.selectbox("Автор", ["Авто (по ГЕО/Языку)"], disabled=True)
-                    
-            if st.form_submit_button("Создать и Запустить"):
+
+            st.markdown("**Настройки SERP (Advanced)**")
+            serp_engine = st.selectbox("Search Engine", ["google", "bing", "google+bing"], index=0, key="proj_serp_engine")
+            serp_depth = st.selectbox("Глубина результатов", [10, 20, 30, 50, 100], index=0, key="proj_serp_depth")
+            serp_device = st.selectbox("Устройство", ["mobile", "desktop"], index=0, key="proj_serp_device")
+
+            preview_btn = st.form_submit_button("Предпросмотр проекта")
+            create_btn = st.form_submit_button("Создать и Запустить")
+
+            if preview_btn:
                 if pr_name and pr_bp and pr_seed and pr_site and pr_country and pr_lang:
-                    post_data("projects/", {
+                    payload = {
+                        "blueprint_id": bp_opts[pr_bp],
+                        "seed_keyword": pr_seed,
+                        "seed_is_brand": pr_seed_is_brand,
+                        "target_site": pr_site,
+                        "country": pr_country,
+                        "language": pr_lang,
+                        "author_id": pr_author,
+                    }
+                    if serp_engine != "google" or serp_depth != 10 or serp_device != "mobile":
+                        payload["serp_config"] = {
+                            "search_engine": serp_engine,
+                            "depth": serp_depth,
+                            "device": serp_device,
+                            "os": "android",
+                        }
+                    prev = post_data("projects/preview", payload)
+                    if prev:
+                        st.session_state["proj_preview"] = prev
+                else:
+                    st.error("Заполните все обязательные поля для предпросмотра")
+
+            if create_btn:
+                if pr_name and pr_bp and pr_seed and pr_site and pr_country and pr_lang:
+                    body = {
                         "name": pr_name,
                         "blueprint_id": bp_opts[pr_bp],
                         "seed_keyword": pr_seed,
@@ -1360,13 +1391,40 @@ def render_projects():
                         "target_site": pr_site,
                         "country": pr_country,
                         "language": pr_lang,
-                        "author_id": pr_author
-                    })
-                    st.success("Проект запущен!")
-                    st.rerun()
+                        "author_id": pr_author,
+                    }
+                    if serp_engine != "google" or serp_depth != 10 or serp_device != "mobile":
+                        body["serp_config"] = {
+                            "search_engine": serp_engine,
+                            "depth": serp_depth,
+                            "device": serp_device,
+                            "os": "android",
+                        }
+                    res = post_data("projects/", body)
+                    if res:
+                        sw = res.get("serp_warning")
+                        if sw:
+                            st.warning(sw)
+                        st.success("Проект запущен!")
+                        st.session_state.pop("proj_preview", None)
+                        st.rerun()
                 else:
                     st.error("Заполните все обязательные поля")
-                    
+
+        pv = st.session_state.get("proj_preview")
+        if pv:
+            st.markdown("### Результат предпросмотра")
+            for w in pv.get("warnings") or []:
+                st.warning(w)
+            st.write(f"**Сайт:** {pv.get('site', {}).get('name')} — шаблон: {'да' if pv.get('site', {}).get('has_template') else 'нет'}")
+            au = pv.get("author") or {}
+            st.write(f"**Автор:** {au.get('name') or '—'} ({au.get('source')})")
+            ec = pv.get("estimated_cost")
+            st.write(f"**Ориентировочная стоимость:** {f'${ec:.4f}' if ec is not None else '—'}")
+            pages = pv.get("pages") or []
+            if pages:
+                st.dataframe(pd.DataFrame(pages), use_container_width=True)
+
     if projects:
         st.subheader("Просмотр проекта")
         selected_pr_id = st.selectbox("Выберите проект", [p["id"] for p in projects], format_func=lambda x: next(p["name"] for p in projects if p["id"] == x))
@@ -1380,6 +1438,21 @@ def render_projects():
             st.progress(completed / total_pages if total_pages > 0 else 0, text=f"Прогресс: {completed} / {total_pages} страниц")
             
             st.write(f"**Статус проекта:** {details['status']}")
+            is_arch = details.get("is_archived", False)
+            ac1, ac2 = st.columns(2)
+            with ac1:
+                if is_arch:
+                    if st.button("📤 Восстановить из архива", key=f"unarchive_{selected_pr_id}"):
+                        post_data(f"projects/{selected_pr_id}/unarchive", {})
+                        st.success("Проект восстановлен из архива")
+                        st.rerun()
+                else:
+                    if st.button("📥 Архивировать", key=f"archive_{selected_pr_id}"):
+                        post_data(f"projects/{selected_pr_id}/archive", {})
+                        st.success("Проект отправлен в архив")
+                        st.rerun()
+            with ac2:
+                st.caption("Архив скрывает проект из списка «Активные» без удаления данных.")
             
             # Bug 3: Real status check for pending projects
             if details['status'] == 'pending':
@@ -1435,6 +1508,13 @@ def render_projects():
             
             if details['status'] == 'completed' and details.get('build_zip_url'):
                 st.markdown(f'<a href="{API_URL}/projects/{selected_pr_id}/download" target="_blank"><button style="background-color:#4F46E5;color:white;padding:10px 24px;border:none;border-radius:8px;font-weight:600;cursor:pointer;">Скачать готовый сайт (.zip)</button></a>', unsafe_allow_html=True)
+            if details.get('status') != 'pending' and tasks:
+                st.markdown(
+                    f'<a href="{API_URL}/projects/{selected_pr_id}/export-csv" target="_blank">'
+                    f'<button style="background:#059669;color:white;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;margin-top:8px;">'
+                    f'📊 Скачать сводку (CSV)</button></a>',
+                    unsafe_allow_html=True,
+                )
                 
             if tasks:
                 st.markdown("### Задачи проекта")
