@@ -129,6 +129,16 @@ export default function ProjectDetailPage() {
     },
   });
 
+  const etaEstimate = useMemo(() => {
+    const p = project;
+    if (!p || p.status !== "generating") return null;
+    const completed = p.completed_tasks ?? 0;
+    const rem = p.remaining_pages ?? 0;
+    if (p.started_at == null || completed <= 0 || rem <= 0) return null;
+    const elapsed = (nowTick - new Date(p.started_at).getTime()) / 1000;
+    return (elapsed / completed) * rem;
+  }, [project, nowTick]);
+
   if (isLoading) return <div className="p-6 text-slate-500">Loading project...</div>;
   if (!project) return <div className="p-6 text-red-500">Project not found</div>;
 
@@ -136,15 +146,6 @@ export default function ProjectDetailPage() {
     project.started_at != null
       ? (nowTick - new Date(project.started_at).getTime()) / 1000
       : null;
-
-  const etaEstimate = useMemo(() => {
-    if (!project || project.status !== "generating") return null;
-    const completed = project.completed_tasks ?? 0;
-    const rem = project.remaining_pages ?? 0;
-    if (project.started_at == null || completed <= 0 || rem <= 0) return null;
-    const elapsed = (nowTick - new Date(project.started_at).getTime()) / 1000;
-    return (elapsed / completed) * rem;
-  }, [project, nowTick]);
 
   const failedCount = project.failed_count ?? 0;
   const canRetryFailed =
