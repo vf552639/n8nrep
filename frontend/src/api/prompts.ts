@@ -1,6 +1,11 @@
 import api from "./client";
 import { Prompt, PromptVersion } from "@/types/prompt";
 
+export interface PromptSaveResponse {
+  id: string;
+  version: number;
+}
+
 export const promptsApi = {
   getAll: (params?: { skip?: number; limit?: number }) => 
     api.get<Prompt[]>("/prompts", { params }).then(res => res.data),
@@ -8,8 +13,8 @@ export const promptsApi = {
   getOne: (id: string) => 
     api.get<Prompt>(`/prompts/${id}`).then(res => res.data),
     
-  update: (data: Partial<Prompt>) => 
-    api.post<Prompt>(`/prompts/`, data).then(res => res.data),
+  update: (data: Partial<Prompt>) =>
+    api.post<PromptSaveResponse>(`/prompts/`, data).then(res => res.data),
     
   getVersions: (id: string) => 
     api.get<PromptVersion[]>(`/prompts/${id}/versions`).then(res => res.data),

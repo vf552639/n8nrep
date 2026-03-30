@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Editor from "@monaco-editor/react";
 import toast from "react-hot-toast";
@@ -205,7 +205,6 @@ interface TestResultShape {
 
 export default function PromptsPage() {
   const queryClient = useQueryClient();
-  const justSavedRef = useRef(false);
   const [activePromptId, setActivePromptId] = useState<string | null>(null);
   const [editState, setEditState] = useState<Partial<Prompt> | null>(null);
   const [isTestOpen, setIsTestOpen] = useState(false);
@@ -264,8 +263,7 @@ export default function PromptsPage() {
 
   useEffect(() => {
     if (!fullPrompt) return;
-    if (fullPrompt.id !== editState?.id || justSavedRef.current) {
-      justSavedRef.current = false;
+    if (fullPrompt.id !== editState?.id) {
       const cleanPrompt = { ...fullPrompt };
       if (cleanPrompt.temperature !== undefined) cleanPrompt.temperature = Math.round(cleanPrompt.temperature * 10) / 10;
       if (cleanPrompt.frequency_penalty !== undefined) cleanPrompt.frequency_penalty = Math.round(cleanPrompt.frequency_penalty * 10) / 10;
@@ -302,12 +300,13 @@ export default function PromptsPage() {
       };
       return promptsApi.update(payload);
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       toast.success("Prompt saved successfully");
-      justSavedRef.current = true;
+      setActivePromptId(data.id);
+      setEditState(null);
       queryClient.invalidateQueries({ queryKey: ["prompts"] });
-      queryClient.invalidateQueries({ queryKey: ["prompt", derivedActiveId] });
-      queryClient.invalidateQueries({ queryKey: ["prompt-versions", derivedActiveId] });
+      queryClient.invalidateQueries({ queryKey: ["prompt", data.id] });
+      queryClient.invalidateQueries({ queryKey: ["prompt-versions", data.id] });
     },
     onError: () => toast.error("Failed to save prompt"),
   });
