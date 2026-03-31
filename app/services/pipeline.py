@@ -432,6 +432,35 @@ def setup_vars(ctx: PipelineContext):
                     if isinstance(kw, str) and kw.strip() and kw not in highlighted_keywords:
                         highlighted_keywords.append(kw)
         highlighted_keywords = list(set(highlighted_keywords))[:MAX_HIGHLIGHTED_KEYWORDS]
+
+        # Auto-generate additional_keywords from SERP data if task field is empty
+        auto_additional = ""
+        deduped = []
+        if not ctx.task.additional_keywords:
+            lsi_parts = []
+            if highlighted_keywords:
+                lsi_parts.extend(highlighted_keywords[:15])
+            if related:
+                lsi_parts.extend(related[:10])
+            main_kw_lower = ctx.task.main_keyword.lower()
+            seen = set()
+            for kw in lsi_parts:
+                if not isinstance(kw, str):
+                    continue
+                kw_lower = kw.lower().strip()
+                if kw_lower and kw_lower != main_kw_lower and kw_lower not in seen:
+                    seen.add(kw_lower)
+                    deduped.append(kw.strip())
+            auto_additional = ", ".join(deduped[:20])
+
+        if auto_additional and not ctx.task.additional_keywords:
+            add_log(
+                ctx.db,
+                ctx.task,
+                f"Auto-generated additional_keywords from SERP data ({len(deduped)} keywords)",
+                level="info",
+                step="setup_vars",
+            )
         
         paa_with_answers = "\n".join([
             f"Q: {p['question']}\nA: {p['answer']}" 
@@ -488,7 +517,7 @@ def setup_vars(ctx: PipelineContext):
 
         ctx.analysis_vars = {
             "keyword": ctx.task.main_keyword,
-            "additional_keywords": ctx.task.additional_keywords or "",
+            "additional_keywords": ctx.task.additional_keywords or auto_additional or "",
             "country": ctx.task.country,
             "language": ctx.task.language,
             "exclude_words": settings.EXCLUDE_WORDS,
@@ -510,6 +539,11 @@ def setup_vars(ctx: PipelineContext):
             "related_searches": json.dumps(related, ensure_ascii=False),
             "people_also_search": json.dumps(_safe_list(serp.get("people_also_search")), ensure_ascii=False),
         }
+
+        # Ensure additional_keywords is never empty for critical agents:
+        # if SERP data and manual field are both empty, fall back to main keyword.
+        if not ctx.analysis_vars.get("additional_keywords"):
+            ctx.analysis_vars["additional_keywords"] = ctx.task.main_keyword
 
         # Restore results from previous pipeline phases (setup_vars recreates analysis_vars from scratch)
         if isinstance(ctx.outline_data, dict):
@@ -534,7 +568,7 @@ def setup_vars(ctx: PipelineContext):
         print(traceback.format_exc())
         ctx.analysis_vars = {
             "keyword": ctx.task.main_keyword,
-            "additional_keywords": ctx.task.additional_keywords or "",
+            "additional_keywords": ctx.task.additional_keywords or ctx.task.main_keyword,
             "country": ctx.task.country,
             "language": ctx.task.language,
             "exclude_words": settings.EXCLUDE_WORDS,
@@ -613,7 +647,7 @@ def setup_template_vars(ctx: PipelineContext):
     ctx.template_vars = {
         "already_covered_topics": already_covered_topics,
         "keyword": ctx.task.main_keyword,
-        "additional_keywords": ctx.task.additional_keywords or "",
+        "additional_keywords": ctx.task.additional_keywords or ctx.analysis_vars.get("additional_keywords", ""),
         "country": ctx.task.country,
         "language": ctx.task.language,
         "page_type": ctx.task.page_type,

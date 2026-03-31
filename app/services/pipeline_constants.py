@@ -48,7 +48,7 @@ CRITICAL_VARS = {
     "competitor_structure_analysis": ["keyword", "language", "country"],
     "final_structure_analysis": ["keyword", "language", "country"],
     "image_prompt_generation": ["keyword", "language"],
-    "primary_generation": ["keyword", "additional_keywords", "avg_word_count", "language", "exclude_words"],
+    "primary_generation": ["keyword", "additional_keywords", "language"],
     "competitor_comparison": ["keyword"],
     "reader_opinion": ["keyword"],
     "interlinking_citations": ["keyword", "site_name"],
