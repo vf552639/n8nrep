@@ -50,6 +50,7 @@ export interface StepResult {
   output_word_count?: number;
   word_count_warning?: boolean;
   word_loss_percentage?: number;
+  started_at?: string;
 }
 
 export interface TaskStepResponse {

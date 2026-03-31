@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str
     DEFAULT_MODEL: str = "openai/gpt-5"
     ANALYST_MODEL: str = "google/gemini-2.5-pro"
+    LLM_REQUEST_TIMEOUT: int = 300
 
     # SERP & Scraping
     DATAFORSEO_LOGIN: str = ""
@@ -41,7 +42,12 @@ class Settings(BaseSettings):
 
     # Celery
     CELERY_CONCURRENCY: int = 2
-    CELERY_TASK_TIME_LIMIT: int = 900
+    CELERY_TASK_TIME_LIMIT: int = 1800
+    CELERY_SOFT_TIME_LIMIT: int = 1500
+    STALE_TASK_TIMEOUT_MINUTES: int = 15
+    STEP_TIMEOUT_MINUTES: int = 15
+    PIPELINE_STEP_TIMEOUT_SECONDS: int = 900
+    PROJECT_PAGE_APPROVAL: bool = False
 
     # Fact Checking
     FACT_CHECK_ENABLED: bool = True

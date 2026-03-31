@@ -10,6 +10,7 @@ import uuid
 import os
 import csv
 import io
+from datetime import datetime
 
 from app.database import get_db
 from app.api.tasks import calculate_progress
@@ -22,7 +23,7 @@ from app.models.article import GeneratedArticle
 from app.workers.celery_app import celery_app
 
 # Imported to defer circular dep issues, will verify app.workers.tasks is available
-from app.workers.tasks import process_site_project
+from app.workers.tasks import process_site_project, advance_project
 
 router = APIRouter()
 
@@ -165,6 +166,7 @@ def _project_detail_extras(
         "total_cost": round(total_cost, 4),
         "avg_cost_per_page": avg_cost_per_page,
         "started_at": project.started_at.isoformat() if project.started_at else None,
+        "generation_started_at": project.generation_started_at.isoformat() if getattr(project, "generation_started_at", None) else None,
         "completed_at": project.completed_at.isoformat() if project.completed_at else None,
         "duration_seconds": duration_seconds,
         "avg_seconds_per_page": avg_seconds_per_page,
@@ -264,6 +266,7 @@ def get_projects(
             "build_zip_url": p.build_zip_url,
             "created_at": p.created_at.isoformat(),
             "progress": progress,
+            "generation_started_at": p.generation_started_at.isoformat() if getattr(p, "generation_started_at", None) else None,
             "is_archived": bool(getattr(p, "is_archived", False)),
             "country": p.country,
             "language": p.language,
@@ -644,6 +647,7 @@ def get_project_details(id: str, db: Session = Depends(get_db)):
         "failed_count": failed_count,
         "is_archived": bool(getattr(project, "is_archived", False)),
         "created_at": project.created_at.isoformat(),
+        "generation_started_at": project.generation_started_at.isoformat() if getattr(project, "generation_started_at", None) else None,
         "celery_task_id": project.celery_task_id,
         "total_tasks": total_tasks,
         "completed_tasks": completed_tasks,
@@ -879,6 +883,27 @@ def resume_project(id: str, db: Session = Depends(get_db)):
     process_site_project.delay(str(project.id))
     
     return {"msg": "Project resumed", "project_id": str(project.id)}
+
+@router.post("/{id}/approve-page")
+def approve_page(id: str, db: Session = Depends(get_db)):
+    """Approve latest completed page and continue project generation."""
+    project = db.query(SiteProject).filter(SiteProject.id == id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.status != "awaiting_page_approval":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Project is not awaiting approval (status: {project.status})",
+        )
+
+    project.status = "generating"
+    logs = list(project.logs or [])
+    logs.append({"ts": datetime.utcnow().isoformat() + "Z", "msg": "Page approved. Continuing generation.", "level": "info"})
+    project.logs = logs
+    db.commit()
+
+    advance_project.delay(str(project.id), True)
+    return {"msg": "Page approved, generation resumed", "project_id": str(project.id)}
 
 @router.get("/{id}/download")
 def download_project_zip(id: str, db: Session = Depends(get_db)):

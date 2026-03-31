@@ -63,6 +63,8 @@ export const projectsApi = {
 
   retryFailedPages: (id: string) =>
     api.post<{ msg: string; project_id: string; retried_count: number }>(`/projects/${id}/retry-failed`).then((res) => res.data),
+  approvePage: (id: string) =>
+    api.post<{ msg: string; project_id: string }>(`/projects/${id}/approve-page`).then((res) => res.data),
 
   stopProject: (id: string) => api.post(`/projects/${id}/stop`).then((res) => res.data),
 

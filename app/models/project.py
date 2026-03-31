@@ -17,7 +17,7 @@ class SiteProject(Base):
     language = Column(String(10), nullable=False)
     seed_is_brand = Column(Boolean, default=False)
     author_id = Column(BigInteger, ForeignKey('authors.id'), nullable=True)
-    status = Column(String(50), default='pending', comment="pending | generating | completed | failed | stopped")
+    status = Column(String(50), default='pending', comment="pending | generating | awaiting_page_approval | completed | failed | stopped")
     current_page_index = Column(Integer, default=0)
     celery_task_id = Column(String(255), nullable=True, comment="Celery task ID для отладки")
     stopping_requested = Column(Boolean, default=False, server_default="false", comment="Флаг запроса остановки")
@@ -25,6 +25,7 @@ class SiteProject(Base):
     error_log = Column(Text, nullable=True)
     is_archived = Column(Boolean, default=False, server_default="false", comment="Архивный проект")
     started_at = Column(DateTime, nullable=True)
+    generation_started_at = Column(DateTime, nullable=True, comment="Actual generation start time")
     completed_at = Column(DateTime, nullable=True)
     logs = Column(JSONB, nullable=True, default=list)
     serp_config = Column(

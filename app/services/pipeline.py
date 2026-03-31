@@ -25,6 +25,7 @@ from app.services.word_counter import count_content_words
 from app.services.html_inserter import programmatic_html_insert
 import re
 import datetime
+import signal
 
 class PipelineContext:
     def __init__(self, db: Session, task_id: str):
@@ -72,11 +73,17 @@ def save_step_result(db: Session, task: Task, step_name: str, result: str, model
     if task.step_results is None:
         task.step_results = {}
     
+    now_iso = datetime.datetime.utcnow().isoformat()
+    previous_step = (task.step_results or {}).get(step_name, {}) if isinstance(task.step_results, dict) else {}
     step_data = {
         "status": status,
         "result": result[:50000] if result else None,
-        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "timestamp": now_iso,
     }
+    if status == "running":
+        step_data["started_at"] = previous_step.get("started_at") or now_iso
+    elif previous_step.get("started_at"):
+        step_data["started_at"] = previous_step.get("started_at")
     if model:
         step_data["model"] = model
     if cost > 0:
@@ -99,7 +106,19 @@ def save_step_result(db: Session, task: Task, step_name: str, result: str, model
     updated = dict(task.step_results)
     updated[step_name] = step_data
     task.step_results = updated
+    task.last_heartbeat = datetime.datetime.utcnow()
     db.commit() # Required to trigger SQLAlchemy JSON updates safely without flag_modified
+
+def mark_step_running(db: Session, task: Task, step_key: str, model_name: str = None):
+    """Mark pipeline step as running and preserve original started_at."""
+    save_step_result(
+        db,
+        task,
+        step_key,
+        result=None,
+        status="running",
+        model=model_name,
+    )
 
 def add_log(db: Session, task: Task, msg: str, level: str = "info", step: str = None):
     entry = {
@@ -257,6 +276,15 @@ def call_agent(ctx: PipelineContext, agent_name: str, context: str, response_for
     print(f"[call_agent] {agent_name} | model={prompt.model} | "
           f"system={len(system_text)} chars | user={len(user_msg)} chars | "
           f"total={total_chars} chars (~{total_chars // 4} tokens est.)")
+    est_tokens = total_chars // 4
+    if est_tokens > 50000:
+        add_log(
+            ctx.db,
+            ctx.task,
+            f"Large context for {agent_name}: ~{est_tokens} tokens estimated",
+            level="warn",
+            step=agent_name,
+        )
     
     kwargs = {
         "system_prompt": system_text,
@@ -271,6 +299,50 @@ def call_agent(ctx: PipelineContext, agent_name: str, context: str, response_for
         kwargs["max_tokens"] = prompt.max_tokens
     if response_format:
         kwargs["response_format"] = response_format
+
+    def _touch_heartbeat():
+        ctx.task.last_heartbeat = datetime.datetime.utcnow()
+        ctx.db.commit()
+
+    def _on_llm_progress(event: str, payload: dict):
+        if event == "retry_wait":
+            add_log(
+                ctx.db,
+                ctx.task,
+                (
+                    f"[{agent_name}] Retry {payload.get('attempt')}/{payload.get('max_retries')}: "
+                    f"{payload.get('reason')}. Sleeping {payload.get('sleep_seconds')}s"
+                ),
+                level="warn",
+                step=agent_name,
+            )
+            _touch_heartbeat()
+        elif event == "response_received":
+            usage = payload.get("usage") or {}
+            p = usage.get("prompt_tokens", 0)
+            c = usage.get("completion_tokens", 0)
+            add_log(
+                ctx.db,
+                ctx.task,
+                (
+                    f"[{agent_name}] LLM response received "
+                    f"({p}+{c} tokens, ${float(payload.get('cost') or 0.0):.4f})"
+                ),
+                level="info",
+                step=agent_name,
+            )
+            _touch_heartbeat()
+
+    add_log(
+        ctx.db,
+        ctx.task,
+        f"[{agent_name}] Sending LLM request (model={prompt.model}, max_tokens={kwargs.get('max_tokens')})",
+        level="info",
+        step=agent_name,
+    )
+    _touch_heartbeat()
+    kwargs["timeout"] = int(getattr(settings, "LLM_REQUEST_TIMEOUT", 300))
+    kwargs["progress_callback"] = _on_llm_progress
 
     res, cost, model, _ = generate_text(**kwargs)
     return res, cost, model, resolved_prompts, variables_snapshot
@@ -704,12 +776,37 @@ def run_phase(db: Session, task: Task, step_key: str, phase_func, *args, **kwarg
     print(f"Running phase: {step_key}")
     task.last_heartbeat = datetime.datetime.utcnow()
     db.commit()
-    phase_func(*args, **kwargs)
+    timeout_seconds = int(getattr(settings, "STEP_TIMEOUT_MINUTES", 15)) * 60
+    old_handler = None
+    alarm_enabled = False
+    try:
+        if hasattr(signal, "SIGALRM"):
+            def _handle_step_timeout(signum, frame):
+                raise TimeoutError(f"Step timed out after {timeout_seconds}s")
+            try:
+                old_handler = signal.getsignal(signal.SIGALRM)
+                signal.signal(signal.SIGALRM, _handle_step_timeout)
+                signal.alarm(timeout_seconds)
+                alarm_enabled = True
+            except ValueError:
+                # SIGALRM is only valid in main thread on some runtimes.
+                alarm_enabled = False
+        phase_func(*args, **kwargs)
+    except TimeoutError as e:
+        msg = str(e)
+        save_step_result(db, task, step_key, result=msg, status="failed")
+        add_log(db, task, f"{step_key} failed: {msg}", level="error", step=step_key)
+        raise
+    finally:
+        if alarm_enabled and hasattr(signal, "SIGALRM"):
+            signal.alarm(0)
+            if old_handler is not None:
+                signal.signal(signal.SIGALRM, old_handler)
 
 def phase_serp(ctx: PipelineContext):
     if not ctx.task.serp_data:
         add_log(ctx.db, ctx.task, "Fetching SERP data...", step=STEP_SERP)
-        save_step_result(ctx.db, ctx.task, STEP_SERP, result=None, status="running")
+        mark_step_running(ctx.db, ctx.task, STEP_SERP)
         try:
             serp_data = fetch_serp_data(
                 ctx.task.main_keyword,
@@ -778,7 +875,7 @@ def phase_scraping(ctx: PipelineContext):
             raise Exception(f"Pipeline stopped: SERP returned 0 organic URLs (source={serp_source}). Cannot proceed without competitor data.")
         
         add_log(ctx.db, ctx.task, f"Scraping {len(urls)} competitors...", step=STEP_SCRAPING)
-        save_step_result(ctx.db, ctx.task, STEP_SCRAPING, result=None, status="running")
+        mark_step_running(ctx.db, ctx.task, STEP_SCRAPING)
     
         scrape_data = scrape_urls(urls)
         ctx.task.competitors_text = scrape_data["merged_text"]
@@ -814,7 +911,7 @@ def phase_ai_structure(ctx: PipelineContext):
     ctx.db.refresh(ctx.task)  # Force reload from DB
     setup_vars(ctx)
     add_log(ctx.db, ctx.task, "Starting AI Structure Analysis...", step=STEP_AI_ANALYSIS)
-    save_step_result(ctx.db, ctx.task, STEP_AI_ANALYSIS, result=None, status="running")
+    mark_step_running(ctx.db, ctx.task, STEP_AI_ANALYSIS)
     ai_structure, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
         ctx, "ai_structure_analysis", ctx.base_context, 
         response_format={"type": "json_object"}, variables=ctx.analysis_vars
@@ -850,7 +947,7 @@ def phase_chunk_analysis(ctx: PipelineContext):
     ctx.db.refresh(ctx.task)  # Force reload from DB
     setup_vars(ctx)
     add_log(ctx.db, ctx.task, "Starting Chunk Cluster Analysis...", step=STEP_CHUNK_ANALYSIS)
-    save_step_result(ctx.db, ctx.task, STEP_CHUNK_ANALYSIS, result=None, status="running")
+    mark_step_running(ctx.db, ctx.task, STEP_CHUNK_ANALYSIS)
     ai_structure = ctx.outline_data.get("ai_structure", "")
     chunk_context = f"{ctx.base_context}\n\nAI Structure Analysis:\n{ai_structure}"
     chunk_analysis, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, "chunk_cluster_analysis", chunk_context, variables=ctx.analysis_vars)
@@ -867,7 +964,7 @@ def phase_competitor_structure(ctx: PipelineContext):
     ctx.db.refresh(ctx.task)  # Force reload from DB
     setup_vars(ctx)
     add_log(ctx.db, ctx.task, "Starting Competitor Structure Analysis...", step=STEP_COMP_STRUCTURE)
-    save_step_result(ctx.db, ctx.task, STEP_COMP_STRUCTURE, result=None, status="running")
+    mark_step_running(ctx.db, ctx.task, STEP_COMP_STRUCTURE)
     chunk_analysis = ctx.outline_data.get("chunk_analysis", "")
     competitor_context = (
         f"{ctx.base_context}\n\n"
@@ -888,7 +985,7 @@ def phase_final_structure(ctx: PipelineContext):
     ctx.db.refresh(ctx.task)  # Force reload from DB
     setup_vars(ctx)
     add_log(ctx.db, ctx.task, "Starting Final Structure Analysis (JSON)...", step=STEP_FINAL_ANALYSIS)
-    save_step_result(ctx.db, ctx.task, STEP_FINAL_ANALYSIS, result=None, status="running")
+    mark_step_running(ctx.db, ctx.task, STEP_FINAL_ANALYSIS)
     
     final_analysis_context = (
         f"{ctx.base_context}\n\n"
@@ -912,7 +1009,7 @@ def phase_final_structure(ctx: PipelineContext):
 def phase_structure_fact_check(ctx: PipelineContext):
     setup_template_vars(ctx)
     add_log(ctx.db, ctx.task, "Starting Structure Fact-Checking...", step=STEP_STRUCTURE_FACT_CHECK)
-    save_step_result(ctx.db, ctx.task, STEP_STRUCTURE_FACT_CHECK, result=None, status="running")
+    mark_step_running(ctx.db, ctx.task, STEP_STRUCTURE_FACT_CHECK)
     
     fact_check_report, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, "structure_fact_checking", "", variables=ctx.template_vars)
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
@@ -1073,7 +1170,7 @@ def phase_image_prompt_gen(ctx: PipelineContext):
         f"Found {len(multimedia_blocks)} MULTIMEDIA blocks, eligible: {len(eligible_blocks)}, skipped: {skipped_count}. Generating prompts...",
         step=STEP_IMAGE_PROMPT_GEN,
     )
-    save_step_result(ctx.db, ctx.task, STEP_IMAGE_PROMPT_GEN, result=None, status="running")
+    mark_step_running(ctx.db, ctx.task, STEP_IMAGE_PROMPT_GEN)
 
     setup_template_vars(ctx)
     images = []
@@ -1319,7 +1416,7 @@ def phase_image_gen(ctx: PipelineContext):
         f"Starting OpenRouter image generation for {len(images_to_gen)} image(s), model={model_id}...",
         step=STEP_IMAGE_GEN,
     )
-    save_step_result(ctx.db, ctx.task, STEP_IMAGE_GEN, result=None, status="running")
+    mark_step_running(ctx.db, ctx.task, STEP_IMAGE_GEN)
 
     uploader = ImgBBUploader(api_key=settings.IMGBB_API_KEY)
     keyword_slug = ctx.task.main_keyword.lower().replace(" ", "-")[:30]
@@ -1461,7 +1558,7 @@ def phase_image_inject(ctx: PipelineContext):
         return
 
     add_log(ctx.db, ctx.task, f"Injecting {len(approved_images)} approved images into HTML...", step=STEP_IMAGE_INJECT)
-    save_step_result(ctx.db, ctx.task, STEP_IMAGE_INJECT, result=None, status="running")
+    mark_step_running(ctx.db, ctx.task, STEP_IMAGE_INJECT)
 
     soup = BeautifulSoup(html_result, 'html.parser')
     injected_count = 0
@@ -1509,7 +1606,7 @@ def phase_primary_gen(ctx: PipelineContext):
         f"Outline: {json.dumps(outline_json, ensure_ascii=False)}"
     )
     add_log(ctx.db, ctx.task, "Starting Primary Generation...", step=STEP_PRIMARY_GEN)
-    save_step_result(ctx.db, ctx.task, STEP_PRIMARY_GEN, result=None, status="running")
+    mark_step_running(ctx.db, ctx.task, STEP_PRIMARY_GEN)
     draft_html, step_cost, actual_model, resolved_prompts, variables_snapshot, violations = call_agent_with_exclude_validation(ctx, "primary_generation", gen_context, step_constant=STEP_PRIMARY_GEN)
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
@@ -1525,7 +1622,7 @@ def phase_competitor_comparison(ctx: PipelineContext):
         f"Competitors:\n{ctx.task.competitors_text[:15000]}"
     )
     add_log(ctx.db, ctx.task, "Starting Competitor Comparison...", step=STEP_COMP_COMPARISON)
-    save_step_result(ctx.db, ctx.task, STEP_COMP_COMPARISON, result=None, status="running")
+    mark_step_running(ctx.db, ctx.task, STEP_COMP_COMPARISON)
     comparison_review, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, "competitor_comparison", comparison_context, variables=ctx.template_vars)
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
@@ -1537,7 +1634,7 @@ def phase_reader_opinion(ctx: PipelineContext):
     draft_html = ctx.task.step_results.get(STEP_PRIMARY_GEN, {}).get("result", "")
     reader_context = f"Article:\n{draft_html}"
     add_log(ctx.db, ctx.task, "Starting Reader Opinion analysis...", step=STEP_READER_OPINION)
-    save_step_result(ctx.db, ctx.task, STEP_READER_OPINION, result=None, status="running")
+    mark_step_running(ctx.db, ctx.task, STEP_READER_OPINION)
     reader_feedback, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, "reader_opinion", reader_context, variables=ctx.template_vars)
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
@@ -1554,7 +1651,7 @@ def phase_interlink(ctx: PipelineContext):
         f"Site: {ctx.site_name}"
     )
     add_log(ctx.db, ctx.task, "Starting Interlinking & Citations...", step=STEP_INTERLINK)
-    save_step_result(ctx.db, ctx.task, STEP_INTERLINK, result=None, status="running")
+    mark_step_running(ctx.db, ctx.task, STEP_INTERLINK)
     interlink_suggestions, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, "interlinking_citations", interlink_context, variables=ctx.template_vars)
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
@@ -1575,7 +1672,7 @@ def phase_improver(ctx: PipelineContext):
         f"Interlinking & Citations Suggestions:\n{interlink_suggestions}"
     )
     add_log(ctx.db, ctx.task, "Starting Improver (draft enhancement)...", step=STEP_IMPROVER)
-    save_step_result(ctx.db, ctx.task, STEP_IMPROVER, result=None, status="running")
+    mark_step_running(ctx.db, ctx.task, STEP_IMPROVER)
     improved_html, step_cost, actual_model, resolved_prompts, variables_snapshot, violations = call_agent_with_exclude_validation(ctx, "improver", improver_context, step_constant=STEP_IMPROVER)
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
@@ -1605,7 +1702,7 @@ def phase_final_editing(ctx: PipelineContext):
         f"Review & verify this HTML article matches the outline structure."
     )
     add_log(ctx.db, ctx.task, "Starting Final Editing...", step=STEP_FINAL_EDIT)
-    save_step_result(ctx.db, ctx.task, STEP_FINAL_EDIT, result=None, status="running")
+    mark_step_running(ctx.db, ctx.task, STEP_FINAL_EDIT)
     final_html, step_cost, actual_model, resolved_prompts, variables_snapshot, violations = call_agent_with_exclude_validation(ctx, "final_editing", editing_context, step_constant=STEP_FINAL_EDIT)
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     
@@ -1658,7 +1755,7 @@ def phase_html_structure(ctx: PipelineContext):
         f"{template_ref}"
     )
     add_log(ctx.db, ctx.task, "Starting HTML Structure formatting...", step=STEP_HTML_STRUCT)
-    save_step_result(ctx.db, ctx.task, STEP_HTML_STRUCT, result=None, status="running")
+    mark_step_running(ctx.db, ctx.task, STEP_HTML_STRUCT)
     structured_html, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
         ctx, "html_structure", html_struct_context, variables=ctx.template_vars
     )
@@ -1784,7 +1881,7 @@ def phase_content_fact_check(ctx: PipelineContext):
     )
     
     add_log(ctx.db, ctx.task, "Starting Fact-Checking...", step=STEP_CONTENT_FACT_CHECK)
-    save_step_result(ctx.db, ctx.task, STEP_CONTENT_FACT_CHECK, result=None, status="running")
+    mark_step_running(ctx.db, ctx.task, STEP_CONTENT_FACT_CHECK)
     
     try:
         fact_check_json_str, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
@@ -1804,7 +1901,7 @@ def phase_meta_generation(ctx: PipelineContext):
     structured_html = ctx.task.step_results.get(STEP_HTML_STRUCT, {}).get("result", "")
     meta_context = f"Article HTML:\n{structured_html}"
     add_log(ctx.db, ctx.task, "Generating Meta Tags (JSON)...", step=STEP_META_GEN)
-    save_step_result(ctx.db, ctx.task, STEP_META_GEN, result=None, status="running")
+    mark_step_running(ctx.db, ctx.task, STEP_META_GEN)
     meta_json_str, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
         ctx, "meta_generation", meta_context,
         response_format={"type": "json_object"}, variables=ctx.template_vars

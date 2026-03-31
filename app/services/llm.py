@@ -1,7 +1,7 @@
-import os
 import time
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, Callable
 from openai import OpenAI
+import httpx
 from app.config import settings
 
 _openai_client = None
@@ -13,6 +13,7 @@ def get_openai_client() -> OpenAI:
         _openai_client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=settings.OPENROUTER_API_KEY,
+            timeout=settings.LLM_REQUEST_TIMEOUT,
         )
     return _openai_client
 
@@ -26,7 +27,9 @@ def generate_text(
     top_p: float = 1.0,
     max_tokens: Optional[int] = None,
     max_retries: int = 3,
-    response_format: Optional[Dict[str, str]] = None
+    response_format: Optional[Dict[str, str]] = None,
+    timeout: int = settings.LLM_REQUEST_TIMEOUT,
+    progress_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
 ) -> Tuple[str, float, str, Optional[Dict[str, Any]]]:
     """
     Generic LLM call with retry policy. Returns (generated_text, estimated_cost, actual_model, usage_or_none).
@@ -41,7 +44,20 @@ def generate_text(
     last_error = None
     retries = 0
     while retries < max_retries:
+        attempt_start = time.monotonic()
+        print(f"[LLM] Attempt {retries+1}/{max_retries}, model={model}, timeout={timeout}s")
         try:
+            if progress_callback:
+                progress_callback(
+                    "request_start",
+                    {
+                        "attempt": retries + 1,
+                        "max_retries": max_retries,
+                        "model": model,
+                        "max_tokens": max_tokens,
+                        "timeout": timeout,
+                    },
+                )
             kwargs = {
                 "model": model,
                 "messages": messages,
@@ -52,7 +68,8 @@ def generate_text(
                 "extra_headers": {
                     "HTTP-Referer": "https://example.com", # Update logically later
                     "X-Title": "SEO-Generator"
-                }
+                },
+                "timeout": timeout,
             }
             if max_tokens is not None and max_tokens > 0:
                 kwargs["max_tokens"] = max_tokens
@@ -93,21 +110,49 @@ def generate_text(
                     "completion_tokens": response.usage.completion_tokens,
                     "total_tokens": response.usage.total_tokens,
                 }
+            if progress_callback:
+                progress_callback(
+                    "response_received",
+                    {
+                        "attempt": retries + 1,
+                        "cost": cost,
+                        "usage": usage_info or {},
+                        "model": actual_model,
+                    },
+                )
+            elapsed = time.monotonic() - attempt_start
+            print(f"[LLM] Response OK in {elapsed:.1f}s, model={actual_model}, tokens={usage_info}")
             return response.choices[0].message.content, cost, actual_model, usage_info
             
         except Exception as e:
             last_error = str(e)
             error_msg = str(e)
-            print(f"LLM Error (Attempt {retries+1}/{max_retries}): {error_msg}")
-            
+            elapsed = time.monotonic() - attempt_start
+            print(f"[LLM] Error after {elapsed:.1f}s (Attempt {retries+1}/{max_retries}): {error_msg}")
+            sleep_seconds = 5
+            reason = "unknown"
+            is_timeout = isinstance(e, (httpx.TimeoutException, TimeoutError)) or "timeout" in error_msg.lower()
+
             # Rate limit or server error logic
             if "429" in error_msg or "rate limit" in error_msg.lower():
-                time.sleep(60 * (retries + 1))  # Exponential backoff: 60s, 120s, 180s
-            elif "502" in error_msg or "504" in error_msg or "timeout" in error_msg.lower():
-                time.sleep((retries + 1) * 15)  # 15s, 30s, 45s
-            else:
-                 # If unexpected error, maybe retry faster
-                 time.sleep(5)
+                reason = "rate_limit"
+                sleep_seconds = 60 * (retries + 1)  # Exponential backoff: 60s, 120s, 180s
+            elif "502" in error_msg or "504" in error_msg or is_timeout:
+                reason = "upstream_timeout_or_gateway"
+                sleep_seconds = (retries + 1) * 15  # 15s, 30s, 45s
+            if progress_callback:
+                progress_callback(
+                    "retry_wait",
+                    {
+                        "attempt": retries + 1,
+                        "max_retries": max_retries,
+                        "reason": reason,
+                        "sleep_seconds": sleep_seconds,
+                        "error": error_msg,
+                        "is_timeout": is_timeout,
+                    },
+                )
+            time.sleep(sleep_seconds)
                  
             retries += 1
             

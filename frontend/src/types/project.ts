@@ -51,7 +51,7 @@ export interface Project {
   country: string;
   language: string;
   author_id?: string;
-  status: "pending" | "generating" | "stopped" | "completed" | "failed";
+  status: "pending" | "generating" | "stopped" | "completed" | "failed" | "awaiting_page_approval";
   progress: number;
   error_log?: string | null;
   created_at: string;
@@ -64,6 +64,7 @@ export interface Project {
   total_cost?: number;
   avg_cost_per_page?: number;
   started_at?: string | null;
+  generation_started_at?: string | null;
   completed_at?: string | null;
   duration_seconds?: number | null;
   avg_seconds_per_page?: number | null;

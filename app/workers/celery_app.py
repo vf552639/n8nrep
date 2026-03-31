@@ -17,13 +17,14 @@ celery_app.conf.update(
     enable_utc=True,
     worker_concurrency=settings.CELERY_CONCURRENCY,
     task_time_limit=settings.CELERY_TASK_TIME_LIMIT,
+    task_soft_time_limit=settings.CELERY_SOFT_TIME_LIMIT,
     task_reject_on_worker_lost=True,
     task_acks_late=True,
 )
 
 celery_app.conf.beat_schedule = {
-    'cleanup-stale-tasks-every-hour': {
+    'cleanup-stale-tasks-every-10min': {
         'task': 'app.workers.tasks.cleanup_stale_tasks',
-        'schedule': crontab(minute=0, hour='*'), # every hour
+        'schedule': crontab(minute='*/10'),
     },
 }

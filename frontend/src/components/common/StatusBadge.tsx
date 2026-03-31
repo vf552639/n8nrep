@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 
-export type TaskStatus = "pending" | "processing" | "completed" | "failed" | "stale" | "stopped";
+export type TaskStatus = "pending" | "processing" | "completed" | "failed" | "stale" | "stopped" | "awaiting_page_approval";
 
 interface Props {
   status: TaskStatus | string;
@@ -13,6 +13,7 @@ const STATUS_COLORS: Record<string, string> = {
   failed: "bg-red-200 text-red-800",
   stale: "bg-yellow-200 text-yellow-800",
   stopped: "bg-orange-200 text-orange-800",
+  awaiting_page_approval: "bg-amber-100 text-amber-700",
 };
 
 export default function StatusBadge({ status }: Props) {
@@ -20,7 +21,7 @@ export default function StatusBadge({ status }: Props) {
   
   return (
     <span className={cn("px-2.5 py-0.5 rounded-full text-xs font-medium uppercase tracking-wider", colorClass)}>
-      {status}
+      {status.toLowerCase() === "awaiting_page_approval" ? "Awaiting Approval" : status}
     </span>
   );
 }

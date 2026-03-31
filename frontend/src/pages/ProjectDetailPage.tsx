@@ -80,10 +80,10 @@ export default function ProjectDetailPage() {
 
   useEffect(() => {
     const p = project;
-    if (!p || (p.status !== "generating" && p.status !== "pending")) return;
+    if (!p || (p.status !== "generating" && p.status !== "pending" && p.status !== "awaiting_page_approval")) return;
     const t = setInterval(() => setNowTick(Date.now()), 1000);
     return () => clearInterval(t);
-  }, [project?.status, project?.started_at]);
+  }, [project?.status, project?.started_at, project?.generation_started_at]);
 
   const actionMutation = useMutation({
     mutationFn: (action: "stop" | "resume") => api.post(`/projects/${id}/${action}`),
@@ -129,13 +129,24 @@ export default function ProjectDetailPage() {
     },
   });
 
+  const approvePageMutation = useMutation({
+    mutationFn: () => projectsApi.approvePage(id!),
+    onSuccess: () => {
+      toast.success("Page approved, generation resumed");
+      queryClient.invalidateQueries({ queryKey: ["project", id] });
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
+    onError: () => toast.error("Approval failed"),
+  });
+
   const etaEstimate = useMemo(() => {
     const p = project;
     if (!p || p.status !== "generating") return null;
     const completed = p.completed_tasks ?? 0;
     const rem = p.remaining_pages ?? 0;
-    if (p.started_at == null || completed <= 0 || rem <= 0) return null;
-    const elapsed = (nowTick - new Date(p.started_at).getTime()) / 1000;
+    const startTs = p.generation_started_at ?? p.started_at;
+    if (startTs == null || completed <= 0 || rem <= 0) return null;
+    const elapsed = (nowTick - new Date(startTs).getTime()) / 1000;
     return (elapsed / completed) * rem;
   }, [project, nowTick]);
 
@@ -143,8 +154,8 @@ export default function ProjectDetailPage() {
   if (!project) return <div className="p-6 text-red-500">Project not found</div>;
 
   const elapsedSec =
-    project.started_at != null
-      ? (nowTick - new Date(project.started_at).getTime()) / 1000
+    (project.generation_started_at ?? project.started_at) != null
+      ? (nowTick - new Date(project.generation_started_at ?? project.started_at!).getTime()) / 1000
       : null;
 
   const failedCount = project.failed_count ?? 0;
@@ -307,6 +318,25 @@ export default function ProjectDetailPage() {
           )}
         </div>
       </div>
+
+      {project.status === "awaiting_page_approval" && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-between gap-4">
+          <div>
+            <p className="font-semibold text-amber-900">Page completed - waiting for approval</p>
+            <p className="text-sm text-amber-700 mt-1">
+              Review the generated page, then approve to continue.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => approvePageMutation.mutate()}
+            disabled={approvePageMutation.isPending}
+            className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-60"
+          >
+            Approve & Continue
+          </button>
+        </div>
+      )}
 
       {project.status === "failed" && project.error_log && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-4">
