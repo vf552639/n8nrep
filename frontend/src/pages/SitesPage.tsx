@@ -87,8 +87,8 @@ export default function SitesPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-5 rounded-xl border shadow-sm">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 border-l-4 border-blue-500 pl-3">Sites Management</h1>
-          <p className="text-sm text-slate-500 mt-1 pl-4">Manage target websites and their HTML templates.</p>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900 border-l-4 border-blue-500 pl-3">Templates Management</h1>
+          <p className="text-sm text-slate-500 mt-1 pl-4">Manage HTML templates by target site.</p>
         </div>
         <button 
           onClick={() => setIsCreateOpen(true)}

@@ -1563,9 +1563,9 @@ def render_projects():
                         key_prefix="proj"
                     )
 
-# ----- TAB: SITES -----
-def render_sites():
-    st.header("🌐 Управление Сайтами")
+# ----- TAB: TEMPLATES -----
+def render_templates():
+    st.header("🎨 Шаблоны")
     
     with st.expander("Добавить новый сайт"):
         with st.form("new_site_form"):
@@ -1668,14 +1668,14 @@ def render_sites():
                         st.error("Пожалуйста, укажите название и загрузите/вставьте HTML-код.")
 
 # ----- MAIN UI ROUTING -----
-tabs = st.tabs(["📊 Дашборд", "📁 Проекты", "🏗️ Блупринты", "✅ Задачи", "📝 Статьи", "🌐 Сайты", "👥 Авторы", "🤖 Промпты", "📜 Логи", "⚙️ Настройки"])
+tabs = st.tabs(["📊 Дашборд", "📁 Проекты", "🏗️ Блупринты", "✅ Задачи", "📝 Статьи", "🎨 Шаблоны", "👥 Авторы", "🤖 Промпты", "📜 Логи", "⚙️ Настройки"])
 
 with tabs[0]: render_dashboard()
 with tabs[1]: render_projects()
 with tabs[2]: render_blueprints()
 with tabs[3]: render_tasks()
 with tabs[4]: render_articles()
-with tabs[5]: render_sites()
+with tabs[5]: render_templates()
 with tabs[6]: render_authors()
 with tabs[7]: render_prompts()
 with tabs[8]: render_logs()

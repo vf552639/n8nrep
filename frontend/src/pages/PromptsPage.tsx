@@ -152,6 +152,28 @@ function normalizePrompt(p: Partial<Prompt> | null) {
   };
 }
 
+/** Snapshot from API for editing; keeps rounding consistent with previous behavior. */
+function buildCleanPromptFromServer(p: Prompt): Prompt {
+  const cleanPrompt = { ...p };
+  if (cleanPrompt.temperature !== undefined) cleanPrompt.temperature = Math.round(cleanPrompt.temperature * 10) / 10;
+  if (cleanPrompt.frequency_penalty !== undefined)
+    cleanPrompt.frequency_penalty = Math.round(cleanPrompt.frequency_penalty * 10) / 10;
+  if (cleanPrompt.presence_penalty !== undefined)
+    cleanPrompt.presence_penalty = Math.round(cleanPrompt.presence_penalty * 10) / 10;
+  if (cleanPrompt.top_p !== undefined) cleanPrompt.top_p = Math.round(cleanPrompt.top_p * 10) / 10;
+  return cleanPrompt;
+}
+
+function paramsEnabledFromPrompt(p: Prompt) {
+  return {
+    maxTokens: p.max_tokens != null && p.max_tokens > 0,
+    temp: (p.temperature ?? 0.7) !== 1.0,
+    freq: (p.frequency_penalty ?? 0) !== 0.0,
+    pres: (p.presence_penalty ?? 0) !== 0.0,
+    top: (p.top_p ?? 1) !== 1.0,
+  };
+}
+
 function isPromptDirty(
   edit: Partial<Prompt> | null,
   saved: Prompt | null | undefined,
@@ -261,25 +283,22 @@ export default function PromptsPage() {
     }
   }, [activePromptId, derivedActiveId]);
 
+  /**
+   * Hydrate editState + paramsEnabled only when switching prompts or after save cleared state.
+   * On React Query refetch of the same prompt id, keep local edits (e.g. model change) intact.
+   */
   useEffect(() => {
-    if (!fullPrompt) return;
-    if (fullPrompt.id !== editState?.id) {
-      const cleanPrompt = { ...fullPrompt };
-      if (cleanPrompt.temperature !== undefined) cleanPrompt.temperature = Math.round(cleanPrompt.temperature * 10) / 10;
-      if (cleanPrompt.frequency_penalty !== undefined) cleanPrompt.frequency_penalty = Math.round(cleanPrompt.frequency_penalty * 10) / 10;
-      if (cleanPrompt.presence_penalty !== undefined) cleanPrompt.presence_penalty = Math.round(cleanPrompt.presence_penalty * 10) / 10;
-      if (cleanPrompt.top_p !== undefined) cleanPrompt.top_p = Math.round(cleanPrompt.top_p * 10) / 10;
-
-      setEditState(cleanPrompt);
-      setParamsEnabled({
-        maxTokens: cleanPrompt.max_tokens != null && cleanPrompt.max_tokens > 0,
-        temp: (cleanPrompt.temperature ?? 0.7) !== 1.0,
-        freq: (cleanPrompt.frequency_penalty ?? 0) !== 0.0,
-        pres: (cleanPrompt.presence_penalty ?? 0) !== 0.0,
-        top: (cleanPrompt.top_p ?? 1) !== 1.0,
-      });
+    if (!fullPrompt || fullPrompt.id !== derivedActiveId) return;
+    let hydrated = false;
+    setEditState((prev) => {
+      if (prev && prev.id === fullPrompt.id) return prev;
+      hydrated = true;
+      return buildCleanPromptFromServer(fullPrompt);
+    });
+    if (hydrated) {
+      setParamsEnabled(paramsEnabledFromPrompt(fullPrompt));
     }
-  }, [fullPrompt, editState?.id]);
+  }, [derivedActiveId, fullPrompt]);
 
   const isDirty = useMemo(
     () => isPromptDirty(editState, fullPrompt ?? null, paramsEnabled),
@@ -726,7 +745,7 @@ export default function PromptsPage() {
                     type="checkbox"
                     className="rounded border-orange-300 text-orange-500 focus:ring-orange-500"
                     checked={editState.skip_in_pipeline || false}
-                    onChange={(e) => setEditState((prev) => (prev ? { ...prev, skip_in_pipeline: e.target.checked } : null))}
+                    onChange={(e) => setEditState((prev) => (prev ? { ...prev, skip_in_pipeline: e.target.checked } : prev))}
                   />
                   Skip in pipeline
                 </label>
@@ -744,7 +763,7 @@ export default function PromptsPage() {
                         language="markdown"
                         theme="vs"
                         value={editState.system_prompt || ""}
-                        onChange={(val) => setEditState((prev) => (prev ? { ...prev, system_prompt: val || "" } : null))}
+                        onChange={(val) => setEditState((prev) => (prev ? { ...prev, system_prompt: val || "" } : prev))}
                         onMount={(ed) => attachVarDrop(ed)}
                         options={{
                           minimap: { enabled: false },
@@ -766,7 +785,7 @@ export default function PromptsPage() {
                         language="markdown"
                         theme="vs"
                         value={editState.user_prompt || ""}
-                        onChange={(val) => setEditState((prev) => (prev ? { ...prev, user_prompt: val || "" } : null))}
+                        onChange={(val) => setEditState((prev) => (prev ? { ...prev, user_prompt: val || "" } : prev))}
                         onMount={(ed) => attachVarDrop(ed)}
                         options={{
                           minimap: { enabled: false },

@@ -182,7 +182,7 @@ export default function SiteDetailPage() {
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">{site.name}</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900">Templates: {site.name}</h1>
             <div className="text-sm text-slate-500 mt-1 flex flex-wrap gap-3">
               <span>
                 Domain:{" "}

@@ -20,7 +20,7 @@ const navItems = [
   { name: "Dashboard", path: "/", icon: LayoutDashboard },
   { name: "Tasks", path: "/tasks", icon: CheckSquare },
   { name: "Articles", path: "/articles", icon: FileText },
-  { name: "Sites", path: "/sites", icon: Globe },
+  { name: "Templates", path: "/sites", icon: Globe },
   { name: "Authors", path: "/authors", icon: Users },
   { name: "Prompts", path: "/prompts", icon: MessageSquare },
   { name: "Blueprints", path: "/blueprints", icon: FileBox },
