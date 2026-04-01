@@ -139,6 +139,21 @@ export default function ProjectDetailPage() {
     onError: () => toast.error("Approval failed"),
   });
 
+  const rebuildZipMutation = useMutation({
+    mutationFn: () => projectsApi.rebuildZip(id!),
+    onSuccess: () => {
+      toast.success("ZIP rebuilt successfully");
+      queryClient.invalidateQueries({ queryKey: ["project", id] });
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
+    onError: (e: unknown) => {
+      const ax = e as { response?: { data?: { detail?: unknown } }; message?: string };
+      toast.error(
+        formatApiErrorDetail(ax.response?.data?.detail) || ax.message || "ZIP rebuild failed"
+      );
+    },
+  });
+
   const etaEstimate = useMemo(() => {
     const p = project;
     if (!p || p.status !== "generating") return null;
@@ -308,13 +323,23 @@ export default function ProjectDetailPage() {
             </button>
           )}
           {project.status === "completed" && (
-            <a
-              href={`${import.meta.env.VITE_API_URL || "http://localhost:8000/api"}/projects/${id}/download`}
-              download
-              className="flex items-center gap-2 bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2 rounded-md text-sm font-medium shadow-sm transition-colors"
-            >
-              <Download className="w-4 h-4" /> Download ZIP
-            </a>
+            <>
+              <button
+                type="button"
+                onClick={() => rebuildZipMutation.mutate()}
+                disabled={rebuildZipMutation.isPending}
+                className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 px-4 py-2 rounded-md text-sm font-medium shadow-sm transition-colors disabled:opacity-60"
+              >
+                <RefreshCw className="w-4 h-4" /> Rebuild ZIP
+              </button>
+              <a
+                href={`${import.meta.env.VITE_API_URL || "http://localhost:8000/api"}/projects/${id}/download`}
+                download
+                className="flex items-center gap-2 bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2 rounded-md text-sm font-medium shadow-sm transition-colors"
+              >
+                <Download className="w-4 h-4" /> Download ZIP
+              </a>
+            </>
           )}
         </div>
       </div>

@@ -65,6 +65,10 @@ export const projectsApi = {
     api.post<{ msg: string; project_id: string; retried_count: number }>(`/projects/${id}/retry-failed`).then((res) => res.data),
   approvePage: (id: string) =>
     api.post<{ msg: string; project_id: string }>(`/projects/${id}/approve-page`).then((res) => res.data),
+  rebuildZip: (id: string) =>
+    api
+      .post<{ msg: string; zip_path: string }>(`/projects/${id}/rebuild-zip`)
+      .then((res) => res.data),
 
   stopProject: (id: string) => api.post(`/projects/${id}/stop`).then((res) => res.data),
 

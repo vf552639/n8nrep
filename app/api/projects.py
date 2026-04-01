@@ -905,6 +905,25 @@ def approve_page(id: str, db: Session = Depends(get_db)):
     advance_project.delay(str(project.id), True)
     return {"msg": "Page approved, generation resumed", "project_id": str(project.id)}
 
+@router.post("/{id}/rebuild-zip")
+def rebuild_project_zip(id: str, db: Session = Depends(get_db)):
+    project = db.query(SiteProject).filter(SiteProject.id == id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.status not in ("completed", "failed"):
+        raise HTTPException(
+            status_code=400,
+            detail="Project must be completed or failed to rebuild ZIP",
+        )
+
+    from app.services.site_builder import build_site
+
+    try:
+        zip_path = build_site(db, str(project.id))
+        return {"msg": "ZIP rebuilt successfully", "zip_path": zip_path}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/{id}/download")
 def download_project_zip(id: str, db: Session = Depends(get_db)):
     project = db.query(SiteProject).filter(SiteProject.id == id).first()

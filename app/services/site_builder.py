@@ -1,12 +1,16 @@
 import os
 import zipfile
 import tempfile
+import logging
+import shutil
 from sqlalchemy.orm import Session
 
 from app.models.project import SiteProject
 from app.models.task import Task
 from app.models.article import GeneratedArticle
 from app.models.blueprint import BlueprintPage
+
+logger = logging.getLogger(__name__)
 
 def build_site(db: Session, project_id: str) -> str:
     """
@@ -22,10 +26,13 @@ def build_site(db: Session, project_id: str) -> str:
     task_ids = [t.id for t in tasks]
     
     articles = db.query(GeneratedArticle).filter(GeneratedArticle.task_id.in_(task_ids)).all()
-    article_by_task = {a.task_id: a for a in articles}
+    article_by_task = {str(a.task_id): a for a in articles}
     
     # We need blueprint pages to know filenames and navigation labels
     pages = db.query(BlueprintPage).filter(BlueprintPage.blueprint_id == project.blueprint_id).order_by(BlueprintPage.sort_order).all()
+    logger.info(
+        f"[build_site] project={project_id}: {len(tasks)} tasks, {len(articles)} articles, {len(pages)} blueprint pages"
+    )
     
     # Build navigation HTML
     nav_links = []
@@ -53,9 +60,11 @@ def build_site(db: Session, project_id: str) -> str:
         if not page:
             continue
             
-        article = article_by_task.get(task.id)
+        article = article_by_task.get(str(task.id))
         if not article or not article.full_page_html:
-            print(f"Warning: No generated article found for task {task.id}")
+            logger.warning(
+                f"[build_site] No article/full_page_html for task {task.id} (keyword: {task.main_keyword})"
+            )
             continue
             
         html_content = article.full_page_html
@@ -67,6 +76,7 @@ def build_site(db: Session, project_id: str) -> str:
         file_path = os.path.join(tmp_dir, page.filename)
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(html_content)
+        logger.info(f"[build_site] Written: {page.filename} ({len(html_content)} chars)")
     
     # Ensure export directory exists
     export_dir = os.path.join(os.getcwd(), "data", "exports")
@@ -74,6 +84,15 @@ def build_site(db: Session, project_id: str) -> str:
     
     zip_filename = f"project_{project.id}.zip"
     zip_path = os.path.join(export_dir, zip_filename)
+
+    written_files = os.listdir(tmp_dir)
+    logger.info(
+        f"[build_site] {len(written_files)} HTML files in temp dir, creating ZIP..."
+    )
+    if not written_files:
+        logger.error(
+            f"[build_site] EMPTY ZIP will be created for project {project_id}! No HTML files were written."
+        )
     
     # Create ZIP archive
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
@@ -82,9 +101,19 @@ def build_site(db: Session, project_id: str) -> str:
                 file_path = os.path.join(root, file)
                 arcname = file
                 zipf.write(file_path, arcname)
-                
-    # Cleanup temp dir (optional, can leave for debugging but good practice)
-    import shutil
+
+    with zipfile.ZipFile(zip_path, "r") as check_zip:
+        if len(check_zip.namelist()) == 0:
+            logger.error(
+                f"[build_site] ZIP is empty for project {project_id}. Possible type mismatch or missing articles."
+            )
+            project.build_zip_url = None
+            db.commit()
+            raise Exception(
+                f"build_site failed: ZIP archive is empty. {len(tasks)} tasks, {len(articles)} articles found, but 0 HTML files matched."
+            )
+
+    # Cleanup temp dir in success case; keep it for empty ZIP debugging.
     shutil.rmtree(tmp_dir, ignore_errors=True)
                 
     project.build_zip_url = zip_path
