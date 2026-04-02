@@ -82,6 +82,23 @@ export default function TaskDetailPage() {
     }
   };
 
+  const finalEditingStep = task?.step_results?.final_editing;
+  const finalEditingResult =
+    finalEditingStep && typeof finalEditingStep === "object"
+      ? String((finalEditingStep as { result?: unknown }).result ?? "").trim()
+      : "";
+  const canExportDocx = task?.status === "completed" || Boolean(finalEditingResult);
+
+  const handleExportDocx = async () => {
+    if (!id) return;
+    try {
+      await tasksApi.exportDocx(id);
+      toast.success("DOCX downloaded");
+    } catch {
+      toast.error("Export DOCX failed");
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex h-64 items-center justify-center p-6 text-slate-500">Loading task details...</div>
@@ -123,6 +140,15 @@ export default function TaskDetailPage() {
               Force Fail
             </button>
           </div>
+          {canExportDocx && (
+            <button
+              type="button"
+              onClick={handleExportDocx}
+              className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50"
+            >
+              Export DOCX
+            </button>
+          )}
           <StatusBadge status={task.status} />
         </div>
       </div>

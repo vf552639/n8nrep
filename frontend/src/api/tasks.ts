@@ -64,5 +64,19 @@ export const tasksApi = {
     api.post<{ image: any }>(
       `/tasks/${id}/regenerate-image`, { image_id: imageId, new_prompt: newPrompt || "" }
     ).then(res => res.data),
+
+  exportDocx: async (id: string) => {
+    const res = await api.get<Blob>(`/tasks/${id}/export-docx`, { responseType: "blob" });
+    const url = URL.createObjectURL(res.data);
+    const a = document.createElement("a");
+    a.href = url;
+    const disp = res.headers["content-disposition"] as string | undefined;
+    const m = disp?.match(/filename="?([^";]+)"?/);
+    a.download = m?.[1]?.trim() || `task_${id}.docx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
 };
 

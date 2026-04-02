@@ -103,6 +103,136 @@ def _get_all_meta_from_task(task: Task, article: Optional[GeneratedArticle]) -> 
     return result
 
 
+def content_from_step_results_fallback(task: Task) -> Tuple[str, str]:
+    """
+    Body text when there is no saved article row — priority:
+    html_structure > final_editing > primary_generation.
+    """
+    sr = task.step_results or {}
+    for key in ("html_structure", "final_editing", "primary_generation"):
+        step = sr.get(key)
+        if isinstance(step, dict) and step.get("result"):
+            raw = str(step.get("result") or "")
+            if raw.strip():
+                return (raw, "html" if _is_html_content(raw) else "plain")
+    return ("", "plain")
+
+
+def _resolve_single_article_body(
+    article: GeneratedArticle, task: Optional[Task]
+) -> Tuple[str, str]:
+    if task:
+        body, mode = _get_content_from_task(task, article)
+        if body.strip():
+            return (body, mode)
+        fb, fb_mode = content_from_step_results_fallback(task)
+        if fb.strip():
+            return (fb, fb_mode)
+    raw = (article.html_content or "").strip() or (article.full_page_html or "").strip()
+    if not raw:
+        return ("", "plain")
+    return (raw, "html" if _is_html_content(raw) else "plain")
+
+
+def _add_simple_article_meta_table(
+    doc: Document, keyword: str, word_count: int, description: str
+) -> None:
+    rows_data: List[Tuple[str, str]] = [
+        ("Keyword", keyword or ""),
+        ("Word Count", str(int(word_count or 0))),
+        ("Description", description or ""),
+    ]
+    table = doc.add_table(rows=len(rows_data), cols=2)
+    try:
+        table.style = "Light Shading Accent 1"
+    except Exception:
+        table.style = "Table Grid"
+    for i, (label, value) in enumerate(rows_data):
+        c0 = table.rows[i].cells[0]
+        c1 = table.rows[i].cells[1]
+        c0.text = label
+        c1.text = value
+        for p in c0.paragraphs:
+            for r in p.runs:
+                r.bold = True
+        for p in c1.paragraphs:
+            p.paragraph_format.space_after = Pt(3)
+
+
+def build_single_article_docx(
+    article: GeneratedArticle, task: Optional[Task] = None
+) -> bytes:
+    """
+    One article → .docx: title, keyword/word count/description table, HTML or plain body.
+    """
+    content, mode = _resolve_single_article_body(article, task)
+    if not content.strip():
+        raise ValueError("No article content to export")
+
+    display_title = (article.title or "").strip()
+    if not display_title and task:
+        display_title = (task.main_keyword or "").strip()
+    if not display_title:
+        display_title = "Article"
+
+    description = (article.description or "").strip()
+    if task and not description:
+        meta = _get_all_meta_from_task(task, article)
+        description = str(meta.get("description") or "")
+
+    keyword = (task.main_keyword if task else "") or ""
+
+    wc = article.word_count
+    if wc is None or wc == 0:
+        wc = count_content_words(content)
+
+    doc = Document()
+    t = doc.add_paragraph(display_title)
+    t.runs[0].font.size = Pt(22)
+    t.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    doc.add_paragraph()
+
+    _add_simple_article_meta_table(doc, keyword, int(wc or 0), description)
+    doc.add_paragraph()
+
+    if mode == "html":
+        _html_to_docx_body(doc, content)
+    else:
+        _add_plain_text_content(doc, content)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def build_task_export_docx(db: Session, task: Task) -> bytes:
+    """
+    Export one task to .docx: prefers saved GeneratedArticle; otherwise
+    html_structure > final_editing > primary_generation from step_results.
+    """
+    article = (
+        db.query(GeneratedArticle)
+        .filter(GeneratedArticle.task_id == task.id)
+        .first()
+    )
+    if article:
+        return build_single_article_docx(article, task)
+
+    content, _mode = content_from_step_results_fallback(task)
+    if not content.strip():
+        raise ValueError("No article or draft content to export")
+
+    meta = _get_all_meta_from_task(task, None)
+    synthetic = GeneratedArticle(
+        task_id=task.id,
+        title=meta.get("title") or task.main_keyword or "Article",
+        description=str(meta.get("description") or ""),
+        html_content=content,
+        word_count=count_content_words(content),
+    )
+    return build_single_article_docx(synthetic, task)
+
+
 def _get_content_from_task(
     task: Task, article: Optional[GeneratedArticle]
 ) -> Tuple[str, str]:

@@ -2,6 +2,7 @@ from typing import List, Optional
 import csv
 import io
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from sqlalchemy.sql import func
@@ -142,6 +143,32 @@ def get_task_steps(task_id: str, db: Session = Depends(get_db)):
         "step_results": task.step_results or {},
         "current_step": next((k for k, v in (task.step_results or {}).items() if isinstance(v, dict) and v.get("status") == "running"), None)
     }
+
+
+@router.get("/{task_id}/export-docx")
+def export_task_docx(task_id: str, db: Session = Depends(get_db)):
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    from app.services.docx_builder import build_task_export_docx
+
+    try:
+        docx_bytes = build_task_export_docx(db, task)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    safe_name = (
+        "".join(c for c in (task.main_keyword or "task") if c.isalnum() or c in " -_").strip()
+        or "task"
+    )
+    filename = f"{safe_name}.docx"
+    return StreamingResponse(
+        iter([docx_bytes]),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
 
 @router.post("/")
 def create_task(task_in: TaskCreate, db: Session = Depends(get_db)):

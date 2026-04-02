@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -129,19 +129,44 @@ def preview_article(article_id: str, db: Session = Depends(get_db)):
     return article.full_page_html or article.html_content
 
 @router.get("/{article_id}/download")
-def download_article(article_id: str, db: Session = Depends(get_db)):
+def download_article(
+    article_id: str,
+    file_format: Optional[str] = Query(None, alias="format"),
+    db: Session = Depends(get_db),
+):
     article = db.query(GeneratedArticle).filter(GeneratedArticle.id == article_id).first()
     if not article:
         raise HTTPException(status_code=404, detail="Article not found")
-        
-    content = article.full_page_html or article.html_content
+
+    fmt = (file_format or "html").strip().lower()
+    if fmt not in ("html", "docx"):
+        raise HTTPException(
+            status_code=400, detail="Unsupported format; use html or docx"
+        )
+
+    safe_title = "".join(x for x in (article.title or "article") if x.isalnum() or x in " -_") or "article"
+
+    if fmt == "docx":
+        from app.services.docx_builder import build_single_article_docx
+
+        task = db.query(Task).filter(Task.id == article.task_id).first()
+        try:
+            docx_bytes = build_single_article_docx(article, task)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        filename = f"{safe_title}.docx"
+        return StreamingResponse(
+            iter([docx_bytes]),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    content = article.full_page_html or article.html_content or ""
     file_like = io.BytesIO(content.encode("utf-8"))
-    
-    safe_title = "".join(x for x in (article.title or "article") if x.isalnum() or x in " -_")
     filename = f"{safe_title}.html"
-    
+
     return StreamingResponse(
-        iter([file_like.getvalue()]), 
-        media_type="text/html", 
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
+        iter([file_like.getvalue()]),
+        media_type="text/html",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

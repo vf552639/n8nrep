@@ -15,8 +15,11 @@ export const articlesApi = {
   resolveIssue: (id: string, issueIndex: number) =>
     api.post(`/articles/${id}/issues/${issueIndex}/resolve`).then((res) => res.data),
 
-  downloadBlob: async (id: string) => {
-    const res = await api.get<Blob>(`/articles/${id}/download`, { responseType: "blob" });
+  downloadBlob: async (id: string, format: "html" | "docx" = "html") => {
+    const res = await api.get<Blob>(`/articles/${id}/download`, {
+      params: format === "docx" ? { format: "docx" } : {},
+      responseType: "blob",
+    });
     return res.data;
   },
 };

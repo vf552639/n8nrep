@@ -100,7 +100,7 @@ export default function ArticleDetailPage() {
   const handleDownload = async () => {
     if (!id) return;
     try {
-      const blob = await articlesApi.downloadBlob(id);
+      const blob = await articlesApi.downloadBlob(id, "html");
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -110,6 +110,23 @@ export default function ArticleDetailPage() {
       URL.revokeObjectURL(url);
     } catch {
       toast.error("Download failed");
+    }
+  };
+
+  const handleExportDocx = async () => {
+    if (!id) return;
+    try {
+      const blob = await articlesApi.downloadBlob(id, "docx");
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const safe = (article?.title || "article").replace(/[^\w\s-]/g, "").trim() || "article";
+      a.download = `${safe}.docx`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("DOCX downloaded");
+    } catch {
+      toast.error("Export DOCX failed");
     }
   };
 
@@ -148,6 +165,13 @@ export default function ArticleDetailPage() {
             className="bg-white hover:bg-slate-50 shadow-sm text-slate-800 px-4 py-2 rounded-md transition-colors text-sm font-medium border"
           >
             Download HTML
+          </button>
+          <button
+            type="button"
+            onClick={handleExportDocx}
+            className="bg-white hover:bg-slate-50 shadow-sm text-slate-800 px-4 py-2 rounded-md transition-colors text-sm font-medium border"
+          >
+            Export DOCX
           </button>
           {!editingHtml ? (
             <button
