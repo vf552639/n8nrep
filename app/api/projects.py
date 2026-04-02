@@ -16,7 +16,8 @@ from app.database import get_db
 from app.api.tasks import calculate_progress
 from app.models.project import SiteProject
 from app.models.blueprint import SiteBlueprint, BlueprintPage
-from app.models.site import Site, SiteTemplate
+from app.models.site import Site
+from app.models.template import Template
 from app.models.author import Author
 from app.models.task import Task
 from app.models.article import GeneratedArticle
@@ -24,6 +25,7 @@ from app.workers.celery_app import celery_app
 
 # Imported to defer circular dep issues, will verify app.workers.tasks is available
 from app.workers.tasks import process_site_project, advance_project
+from app.config import settings
 
 router = APIRouter()
 
@@ -185,6 +187,12 @@ class SiteProjectCreate(BaseModel):
     language: str
     author_id: Optional[int] = None
     serp_config: Optional[Dict[str, Any]] = None
+    project_keywords: Optional[Dict[str, Any]] = None
+
+
+class ClusterKeywordsRequest(BaseModel):
+    keywords: List[str]
+    blueprint_id: str
 
 
 class ProjectPreviewRequest(BaseModel):
@@ -301,15 +309,17 @@ def preview_project(body: ProjectPreviewRequest, db: Session = Depends(get_db)):
         )
 
     has_template = False
-    if site is not None:
+    if site is not None and site.template_id:
         tpl = (
-            db.query(SiteTemplate)
-            .filter(SiteTemplate.site_id == site.id, SiteTemplate.is_active == True)  # noqa: E712
+            db.query(Template)
+            .filter(Template.id == site.template_id, Template.is_active == True)  # noqa: E712
             .first()
         )
         has_template = tpl is not None
         if not has_template:
-            warnings.append("Site has no HTML template. Articles will be generated without site wrapper.")
+            warnings.append("Site template_id is set but template is missing or inactive.")
+    elif site is not None:
+        warnings.append("Site has no HTML template. Articles will be generated without site wrapper.")
 
     author_source = "none"
     author_id: Optional[int] = None
@@ -423,6 +433,45 @@ def preview_project(body: ProjectPreviewRequest, db: Session = Depends(get_db)):
     }
 
 
+@router.post("/cluster-keywords")
+def cluster_project_keywords(body: ClusterKeywordsRequest, db: Session = Depends(get_db)):
+    if len(body.keywords) == 0:
+        raise HTTPException(status_code=400, detail="At least 1 keyword required")
+    if len(body.keywords) > settings.MAX_PROJECT_KEYWORDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Maximum {settings.MAX_PROJECT_KEYWORDS} keywords allowed",
+        )
+
+    blueprint = db.query(SiteBlueprint).filter(SiteBlueprint.id == body.blueprint_id).first()
+    if not blueprint:
+        raise HTTPException(status_code=404, detail="Blueprint not found")
+
+    pages = (
+        db.query(BlueprintPage)
+        .filter(BlueprintPage.blueprint_id == body.blueprint_id)
+        .order_by(BlueprintPage.sort_order)
+        .all()
+    )
+    if not pages:
+        raise HTTPException(status_code=400, detail="Blueprint has no pages")
+
+    from app.services.keyword_clusterer import cluster_keywords
+
+    return cluster_keywords(
+        keywords=body.keywords,
+        pages=[
+            {
+                "slug": p.page_slug,
+                "title": p.page_title,
+                "keyword_template": p.keyword_template,
+                "page_type": p.page_type,
+            }
+            for p in pages
+        ],
+    )
+
+
 @router.post("/")
 def create_project(project_in: SiteProjectCreate, db: Session = Depends(get_db)):
     # Verify blueprint
@@ -459,6 +508,18 @@ def create_project(project_in: SiteProjectCreate, db: Session = Depends(get_db))
     if project_in.serp_config is not None:
         serp_normalized = _validate_serp_config(project_in.serp_config)
 
+    pk_val: Optional[Dict[str, Any]] = None
+    if project_in.project_keywords is not None:
+        d = project_in.project_keywords
+        if isinstance(d, dict):
+            raw = d.get("raw")
+            if isinstance(raw, list) and len(raw) > settings.MAX_PROJECT_KEYWORDS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Maximum {settings.MAX_PROJECT_KEYWORDS} keywords allowed",
+                )
+        pk_val = project_in.project_keywords
+
     # Auto-assign author
     final_author_id = project_in.author_id
     if not final_author_id:
@@ -480,6 +541,7 @@ def create_project(project_in: SiteProjectCreate, db: Session = Depends(get_db))
         seed_is_brand=project_in.seed_is_brand,
         status="pending",
         serp_config=serp_normalized or {},
+        project_keywords=pk_val,
     )
     db.add(new_project)
     db.commit()
@@ -611,6 +673,35 @@ def export_project_csv(id: str, db: Session = Depends(get_db)):
     )
 
 
+@router.get("/{id}/export-docx")
+def export_project_docx(id: str, db: Session = Depends(get_db)):
+    project = db.query(SiteProject).filter(SiteProject.id == id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    n_done = (
+        db.query(func.count(Task.id))
+        .filter(Task.project_id == id, Task.status == "completed")
+        .scalar()
+        or 0
+    )
+    if n_done == 0:
+        raise HTTPException(status_code=400, detail="No completed pages to export")
+
+    from app.services.docx_builder import build_project_docx
+
+    docx_bytes = build_project_docx(db, str(project.id))
+    safe_name = (
+        "".join(c for c in project.name if c.isalnum() or c in " -_").strip() or "project"
+    )
+    filename = f"{safe_name}.docx"
+    return StreamingResponse(
+        iter([docx_bytes]),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/{id}")
 def get_project_details(id: str, db: Session = Depends(get_db)):
     project = db.query(SiteProject).filter(SiteProject.id == id).first()
@@ -652,6 +743,9 @@ def get_project_details(id: str, db: Session = Depends(get_db)):
         "total_tasks": total_tasks,
         "completed_tasks": completed_tasks,
         "serp_config": getattr(project, "serp_config", None) or {},
+        "project_keywords": project.project_keywords
+        if isinstance(getattr(project, "project_keywords", None), dict)
+        else None,
         **extras,
         "tasks": [
             {
@@ -758,6 +852,7 @@ def clone_project(id: str, body: SiteProjectCloneBody, db: Session = Depends(get
         completed_at=None,
         logs=[],
         serp_config=getattr(src, "serp_config", None) or {},
+        project_keywords=getattr(src, "project_keywords", None),
     )
     db.add(new_p)
     db.commit()

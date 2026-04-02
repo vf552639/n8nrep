@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import tasks, articles, sites, authors, prompts, dashboard, settings_api, blueprints, projects, health, logs
+from app.api import tasks, articles, sites, authors, prompts, dashboard, settings_api, blueprints, projects, health, logs, templates, legal_pages
 from app.database import engine, Base
 from app.config import settings
 from app.api.deps import verify_api_key
@@ -45,6 +45,8 @@ app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"]
 app.include_router(tasks.router, prefix="/api/tasks", tags=["Tasks"])
 app.include_router(articles.router, prefix="/api/articles", tags=["Articles"])
 app.include_router(sites.router, prefix="/api/sites", tags=["Sites"])
+app.include_router(templates.router, prefix="/api/templates", tags=["Templates"])
+app.include_router(legal_pages.router, prefix="/api/legal-pages", tags=["Legal Pages"])
 app.include_router(authors.router, prefix="/api/authors", tags=["Authors"])
 app.include_router(prompts.router, prefix="/api/prompts", tags=["Prompts"])
 app.include_router(settings_api.router, prefix="/api/settings", tags=["Settings"])

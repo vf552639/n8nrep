@@ -22,6 +22,28 @@ export interface SiteProjectCreatePayload {
     device?: "mobile" | "desktop";
     os?: string;
   };
+  project_keywords?: {
+    raw?: string[];
+    clustered?: Record<
+      string,
+      { page_title: string; keyword: string; assigned_keywords: string[] }
+    >;
+    unassigned?: string[];
+    clustering_model?: string;
+    clustering_cost?: number;
+  };
+}
+
+export interface ClusterKeywordsResult {
+  clustered: Record<
+    string,
+    { page_title: string; keyword: string; assigned_keywords: string[] }
+  >;
+  unassigned: string[];
+  total_keywords: number;
+  total_assigned: number;
+  cost: number;
+  model?: string;
 }
 
 export interface ProjectCreateResponse {
@@ -96,6 +118,23 @@ export const projectsApi = {
     const disp = res.headers["content-disposition"] as string | undefined;
     const m = disp?.match(/filename="?([^";]+)"?/);
     a.download = m?.[1]?.trim() || `project_${id}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
+  clusterKeywords: (body: { keywords: string[]; blueprint_id: string }) =>
+    api.post<ClusterKeywordsResult>("/projects/cluster-keywords", body).then((res) => res.data),
+
+  exportDocx: async (id: string) => {
+    const res = await api.get<Blob>(`/projects/${id}/export-docx`, { responseType: "blob" });
+    const url = URL.createObjectURL(res.data);
+    const a = document.createElement("a");
+    a.href = url;
+    const disp = res.headers["content-disposition"] as string | undefined;
+    const m = disp?.match(/filename="?([^";]+)"?/);
+    a.download = m?.[1]?.trim() || `project_${id}.docx`;
     document.body.appendChild(a);
     a.click();
     a.remove();

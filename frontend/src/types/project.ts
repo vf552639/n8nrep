@@ -73,6 +73,16 @@ export interface Project {
   logs?: ProjectLogEntry[];
   celery_task_id?: string | null;
   serp_config?: Record<string, unknown>;
+  project_keywords?: {
+    raw?: string[];
+    clustered?: Record<
+      string,
+      { page_title: string; keyword: string; assigned_keywords: string[] }
+    >;
+    unassigned?: string[];
+    clustering_model?: string;
+    clustering_cost?: number;
+  } | null;
 }
 
 export interface ProjectTaskExpanded {

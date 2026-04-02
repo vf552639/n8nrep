@@ -198,6 +198,7 @@ export default function ProjectDetailPage() {
   }
   const taskCount = project.total_tasks ?? project.tasks?.length ?? 0;
   const canExportCsv = taskCount > 0 && project.status !== "pending";
+  const canExportDocx = (project.completed_tasks ?? 0) > 0;
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
@@ -320,6 +321,22 @@ export default function ProjectDetailPage() {
               className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-md text-sm font-medium shadow-sm transition-colors"
             >
               <FileSpreadsheet className="w-4 h-4" /> Export Summary (CSV)
+            </button>
+          )}
+          {canExportDocx && (
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await projectsApi.exportDocx(project.id);
+                  toast.success("DOCX download started");
+                } catch {
+                  toast.error("DOCX export failed");
+                }
+              }}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium shadow-sm transition-colors"
+            >
+              <FileText className="w-4 h-4" /> Export DOCX
             </button>
           )}
           {project.status === "completed" && (
@@ -606,7 +623,7 @@ function CloneProjectModal({
 
   const { data: sites } = useQuery({
     queryKey: ["sites"],
-    queryFn: () => sitesApi.getAll({ limit: 200 }),
+    queryFn: () => sitesApi.getAll(),
   });
   const { data: authors } = useQuery({
     queryKey: ["authors"],

@@ -5,22 +5,28 @@ export interface Site {
   country: string;
   language: string;
   is_active: boolean;
+  template_id?: string | null;
+  template_name?: string | null;
+  legal_info?: Record<string, string>;
   niche?: string;
 }
 
-export interface SiteTemplate {
-  id: string;
-  site_id?: string;
-  template_name: string;
-  html_template: string;
-  pages_config?: Record<string, unknown> | null;
-  usage_count: number;
-  is_active: boolean;
+export interface SiteCreateInput {
+  name: string;
+  domain: string;
+  country: string;
+  language: string;
+  is_active?: boolean;
+  template_id?: string | null;
+  legal_info?: Record<string, string>;
 }
 
-export interface SiteTemplateInput {
-  template_name: string;
-  html_template: string;
-  pages_config?: Record<string, unknown> | null;
+export interface SiteUpdateInput {
+  name?: string;
+  domain?: string;
+  country?: string;
+  language?: string;
   is_active?: boolean;
+  template_id?: string | null;
+  legal_info?: Record<string, string>;
 }

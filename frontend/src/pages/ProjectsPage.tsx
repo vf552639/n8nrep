@@ -2,7 +2,11 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
-import { projectsApi } from "@/api/projects";
+import {
+  projectsApi,
+  type ClusterKeywordsResult,
+  type SiteProjectCreatePayload,
+} from "@/api/projects";
 import { formatApiErrorDetail } from "@/lib/apiErrorMessage";
 import { sitesApi } from "@/api/sites";
 import { blueprintsApi } from "@/api/blueprints";
@@ -10,8 +14,28 @@ import { Author } from "@/types/author";
 import { Site } from "@/types/site";
 import { ReactTable } from "@/components/common/ReactTable";
 import StatusBadge from "@/components/common/StatusBadge";
-import { Plus, FolderGit2, X, Archive, ArchiveRestore, Search, Eye, ChevronDown, ChevronUp } from "lucide-react";
+import {
+  Plus,
+  FolderGit2,
+  X,
+  Archive,
+  ArchiveRestore,
+  Search,
+  Eye,
+  ChevronDown,
+  ChevronUp,
+  Shuffle,
+} from "lucide-react";
 import type { Project, ProjectPreview } from "@/types/project";
+
+function parseKeywords(raw: string): string[] {
+  if (!raw.trim()) return [];
+  return raw
+    .split(/[\n,]/)
+    .map((kw) => kw.trim())
+    .filter((kw) => kw.length > 0)
+    .slice(0, 100);
+}
 
 const STATUS_OPTIONS = [
   { value: "", label: "All statuses" },
@@ -303,9 +327,20 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
     serp_depth: 10 as number,
     serp_device: "mobile" as "mobile" | "desktop",
     serp_os: "android" as "android" | "ios" | "windows" | "macos",
+    additional_keywords_raw: "",
   });
   const [serpAdvancedOpen, setSerpAdvancedOpen] = useState(false);
   const [preview, setPreview] = useState<ProjectPreview | null>(null);
+  const [clusterResult, setClusterResult] = useState<ClusterKeywordsResult | null>(null);
+
+  const parsedKeywords = useMemo(
+    () => parseKeywords(formData.additional_keywords_raw),
+    [formData.additional_keywords_raw]
+  );
+
+  useEffect(() => {
+    setClusterResult(null);
+  }, [formData.additional_keywords_raw, formData.blueprint_id]);
 
   const { data: authors } = useQuery({
     queryKey: ["authors"],
@@ -314,7 +349,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
   const { data: sites } = useQuery({
     queryKey: ["sites"],
-    queryFn: async () => sitesApi.getAll({ limit: 100 }),
+    queryFn: async () => sitesApi.getAll(),
   });
 
   const selectedSite = (sites || []).find((s: Site) => s.id === formData.site_id);
@@ -398,6 +433,29 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
     },
   });
 
+  const clusterMutation = useMutation({
+    mutationFn: (kw: string[]) =>
+      projectsApi.clusterKeywords({
+        keywords: kw,
+        blueprint_id: formData.blueprint_id,
+      }),
+    onSuccess: (data) => {
+      setClusterResult(data);
+      toast.success("Keywords clustered");
+    },
+    onError: (error: unknown) => {
+      const ax = error as {
+        response?: { data?: { detail?: unknown } };
+        message?: string;
+      };
+      toast.error(
+        formatApiErrorDetail(ax.response?.data?.detail) ||
+          ax.message ||
+          "Clustering failed"
+      );
+    },
+  });
+
   const canPreview =
     Boolean(formData.blueprint_id) &&
     Boolean(formData.site_id) &&
@@ -448,6 +506,22 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
         ? Number(formData.author_id)
         : undefined;
     const serp = buildSerpConfig();
+
+    let project_keywords: SiteProjectCreatePayload["project_keywords"];
+    if (clusterResult && parsedKeywords.length > 0) {
+      project_keywords = {
+        raw: parsedKeywords,
+        clustered: clusterResult.clustered,
+        unassigned: clusterResult.unassigned,
+        clustering_model: clusterResult.model,
+        clustering_cost: clusterResult.cost,
+      };
+    } else if (parsedKeywords.length > 0) {
+      project_keywords = { raw: parsedKeywords };
+    } else {
+      project_keywords = undefined;
+    }
+
     mutation.mutate({
       name: formData.name,
       blueprint_id: formData.blueprint_id,
@@ -458,6 +532,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
       language: formData.language,
       ...(authorId != null && !Number.isNaN(authorId) ? { author_id: authorId } : {}),
       ...(serp ? { serp_config: serp } : {}),
+      ...(project_keywords ? { project_keywords } : {}),
     });
   };
 
@@ -549,6 +624,91 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 Brand seed
               </label>
             </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Additional Keywords (optional, max 100)
+              </label>
+              <textarea
+                rows={4}
+                placeholder={
+                  "One per line or comma-separated\ncasino bonus codes\nfree spins no deposit"
+                }
+                value={formData.additional_keywords_raw}
+                onChange={(e) =>
+                  setFormData({ ...formData, additional_keywords_raw: e.target.value })
+                }
+                className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              />
+              <div className="flex flex-wrap items-center justify-between gap-2 mt-1">
+                <p className="text-xs text-slate-400">{parsedKeywords.length} / 100 keywords</p>
+                {parsedKeywords.length > 0 && formData.blueprint_id && (
+                  <button
+                    type="button"
+                    onClick={() => clusterMutation.mutate(parsedKeywords)}
+                    disabled={clusterMutation.isPending}
+                    className="flex items-center gap-2 px-3 py-1.5 border border-slate-300 bg-white text-slate-800 rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    <Shuffle className="w-3.5 h-3.5" />
+                    {clusterMutation.isPending ? "Clustering..." : "Cluster Keywords"}
+                  </button>
+                )}
+              </div>
+            </div>
+            {clusterResult && clusterResult.total_assigned === 0 && clusterResult.total_keywords > 0 && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                Keywords don&apos;t match any page well — all keywords were left unassigned. Try
+                editing the list or blueprint.
+              </div>
+            )}
+            {clusterResult && (
+              <div className="border rounded-lg p-4 bg-slate-50 space-y-3">
+                <div className="flex justify-between items-center gap-2 flex-wrap">
+                  <h4 className="font-semibold text-sm text-slate-800">Keyword Distribution Preview</h4>
+                  <span className="text-xs text-slate-500">
+                    {clusterResult.total_assigned}/{clusterResult.total_keywords} assigned
+                    {clusterResult.cost != null && ` · Cost: $${clusterResult.cost.toFixed(4)}`}
+                  </span>
+                </div>
+                {Object.entries(clusterResult.clustered).map(([slug, data]) => (
+                  <div key={slug} className="bg-white rounded border p-3">
+                    <div className="flex justify-between gap-2">
+                      <span className="font-medium text-sm">{data.page_title}</span>
+                      <span className="text-xs text-slate-400">{data.assigned_keywords.length} kw</span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">Main: {data.keyword}</p>
+                    {data.assigned_keywords.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {data.assigned_keywords.map((kw, i) => (
+                          <span
+                            key={i}
+                            className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs"
+                          >
+                            {kw}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {clusterResult.unassigned.length > 0 && (
+                  <div className="bg-amber-50 rounded border border-amber-200 p-3">
+                    <span className="font-medium text-sm text-amber-800">
+                      Unassigned ({clusterResult.unassigned.length})
+                    </span>
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {clusterResult.unassigned.map((kw, i) => (
+                        <span
+                          key={i}
+                          className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded text-xs"
+                        >
+                          {kw}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Country *</label>

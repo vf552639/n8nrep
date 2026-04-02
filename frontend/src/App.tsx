@@ -16,6 +16,8 @@ const ArticlesPage = lazy(() => import("./pages/ArticlesPage"));
 const ArticleDetailPage = lazy(() => import("./pages/ArticleDetailPage"));
 const SitesPage = lazy(() => import("./pages/SitesPage"));
 const SiteDetailPage = lazy(() => import("./pages/SiteDetailPage"));
+const TemplatesPage = lazy(() => import("./pages/TemplatesPage"));
+const LegalPagesPage = lazy(() => import("./pages/LegalPagesPage"));
 const AuthorsPage = lazy(() => import("./pages/AuthorsPage"));
 const PromptsPage = lazy(() => import("./pages/PromptsPage"));
 const BlueprintsPage = lazy(() => import("./pages/BlueprintsPage"));
@@ -47,8 +49,10 @@ function App() {
             <Route path="tasks/:id" element={<TaskDetailPage />} />
             <Route path="articles" element={<ArticlesPage />} />
             <Route path="articles/:id" element={<ArticleDetailPage />} />
+            <Route path="templates" element={<TemplatesPage />} />
             <Route path="sites" element={<SitesPage />} />
             <Route path="sites/:id" element={<SiteDetailPage />} />
+            <Route path="legal-pages" element={<LegalPagesPage />} />
             <Route path="authors" element={<AuthorsPage />} />
             <Route path="prompts" element={<PromptsPage />} />
             <Route path="blueprints" element={<BlueprintsPage />} />

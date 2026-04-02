@@ -3,7 +3,8 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import { sitesApi } from "@/api/sites";
-import { Site } from "@/types/site";
+import { templatesApi } from "@/api/templates";
+import { SiteCreateInput } from "@/types/site";
 import { ReactTable } from "@/components/common/ReactTable";
 import { Plus, Globe, X, Trash2 } from "lucide-react";
 
@@ -53,6 +54,13 @@ export default function SitesPage() {
     },
     { accessorKey: "country", header: "Country" },
     { accessorKey: "language", header: "Language" },
+    {
+      accessorKey: "template_name",
+      header: "Template",
+      cell: ({ row }: any) => (
+        <span className="text-slate-600">{row.original.template_name || "—"}</span>
+      ),
+    },
     { 
       accessorKey: "is_active", 
       header: "Status", 
@@ -87,8 +95,8 @@ export default function SitesPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-5 rounded-xl border shadow-sm">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 border-l-4 border-blue-500 pl-3">Templates Management</h1>
-          <p className="text-sm text-slate-500 mt-1 pl-4">Manage HTML templates by target site.</p>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900 border-l-4 border-blue-500 pl-3">Sites</h1>
+          <p className="text-sm text-slate-500 mt-1 pl-4">Target sites (domain, GEO, language). Assign an HTML template per site.</p>
         </div>
         <button 
           onClick={() => setIsCreateOpen(true)}
@@ -113,9 +121,7 @@ export default function SitesPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4 border">
             <h2 className="text-lg font-semibold text-slate-900">Delete site?</h2>
-            <p className="text-sm text-slate-600">
-              Вы уверены? Будут удалены все шаблоны этого сайта.
-            </p>
+            <p className="text-sm text-slate-600">Вы уверены? Сайт будет удалён (если нет задач и проектов).</p>
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
@@ -147,6 +153,11 @@ function CreateSiteModal({ onClose }: { onClose: () => void }) {
     queryFn: () => import("@/api/authors").then((m) => m.authorsApi.getAll()),
   });
 
+  const { data: tplList } = useQuery({
+    queryKey: ["html-templates"],
+    queryFn: () => templatesApi.getAll(),
+  });
+
   const countries = Array.from(
     new Set((authors || []).map((a: { country: string }) => a.country).filter(Boolean))
   ).sort();
@@ -159,10 +170,11 @@ function CreateSiteModal({ onClose }: { onClose: () => void }) {
     domain: "",
     country: "",
     language: "",
+    template_id: "" as string | "",
   });
 
   const mutation = useMutation({
-    mutationFn: (data: Partial<Site>) => sitesApi.create(data),
+    mutationFn: (data: SiteCreateInput) => sitesApi.create(data),
     onSuccess: () => {
       toast.success("Site created successfully");
       queryClient.invalidateQueries({ queryKey: ["sites"] });
@@ -177,7 +189,13 @@ function CreateSiteModal({ onClose }: { onClose: () => void }) {
       toast.error("Name, Domain, Country, and Language are required");
       return;
     }
-    mutation.mutate(formData);
+    mutation.mutate({
+      name: formData.name,
+      domain: formData.domain,
+      country: formData.country,
+      language: formData.language,
+      template_id: formData.template_id || undefined,
+    });
   };
 
   return (
@@ -247,6 +265,21 @@ function CreateSiteModal({ onClose }: { onClose: () => void }) {
                   ))}
                 </select>
              </div>
+           </div>
+           <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">HTML Template</label>
+              <select
+                className="w-full border outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-sm bg-white"
+                value={formData.template_id}
+                onChange={(e) => setFormData({ ...formData, template_id: e.target.value })}
+              >
+                <option value="">— Optional —</option>
+                {(tplList || []).map((t: { id: string; name: string }) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
            </div>
            <div className="flex justify-end gap-3 mt-8 pt-4 border-t">
              <button 

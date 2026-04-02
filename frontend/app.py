@@ -970,6 +970,8 @@ div[data-testid="stHorizontalBlock"] {
                         ("site_name", "Название целевого сайта"),
                         ("site_template_html", "HTML-шаблон целевого сайта"),
                         ("site_template_name", "Название шаблона сайта"),
+                        ("legal_reference_html", "Образец legal-страницы для GEO (без SERP)"),
+                        ("legal_variables", "JSON переменных legal"),
                     ]),
                     ("Автор и Стилистика", [
                         ("author", "Имя автора"),

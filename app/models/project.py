@@ -34,6 +34,11 @@ class SiteProject(Base):
         default=dict,
         comment="SERP config: search_engine, depth, device, os",
     )
+    project_keywords = Column(
+        JSONB,
+        nullable=True,
+        comment="Additional keywords pool + clustering: raw, clustered, unassigned, etc.",
+    )
     created_at = Column(DateTime, default=datetime.utcnow)
 
     blueprint = relationship("SiteBlueprint", back_populates="projects")

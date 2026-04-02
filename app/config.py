@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     SELF_CHECK_MAX_RETRIES: int = 1
     SELF_CHECK_MAX_COST_PER_STEP: float = 0.10
 
+    # Keyword clustering (project additional keywords → blueprint pages)
+    CLUSTERING_MODEL: str = "openai/gpt-4o"
+    MAX_PROJECT_KEYWORDS: int = 100
+
     # Image Generation (optional) — OpenRouter image models + ImgBB hosting
     IMAGE_GEN_ENABLED: bool = False
     IMGBB_API_KEY: str = ""

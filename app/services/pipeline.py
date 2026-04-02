@@ -15,6 +15,7 @@ from app.services.serp import fetch_serp_data
 from app.services.scraper import scrape_urls
 from app.services.llm import generate_text
 from app.services.template_engine import generate_full_page, get_template_for_reference
+from app.services.legal_reference import inject_legal_template_vars
 from app.services.notifier import notify_task_success, notify_task_failed
 from app.services.deduplication import ContentDeduplicator
 from app.config import settings
@@ -765,6 +766,8 @@ def setup_template_vars(ctx: PipelineContext):
     site_template_html, site_template_name = get_template_for_reference(ctx.db, str(ctx.task.target_site_id))
     ctx.template_vars["site_template_html"] = site_template_html or ""
     ctx.template_vars["site_template_name"] = site_template_name or ""
+
+    inject_legal_template_vars(ctx)
 
 def run_phase(db: Session, task: Task, step_key: str, phase_func, *args, **kwargs):
     """Wrapper that skips phase_func if already completed."""

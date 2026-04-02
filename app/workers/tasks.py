@@ -2,6 +2,7 @@ import json
 import time as time_module
 import traceback
 from datetime import datetime, timedelta
+from typing import List, Optional
 
 from celery.exceptions import SoftTimeLimitExceeded
 from sqlalchemy.orm.attributes import flag_modified
@@ -39,6 +40,29 @@ def _save_failed_page(project, failed_page: dict) -> None:
     failed_pages = _load_failed_pages(project)
     failed_pages.append(failed_page)
     project.error_log = json.dumps(failed_pages, ensure_ascii=False)
+
+
+def _merge_additional_keywords(existing: Optional[str], new_list: List[str]) -> str:
+    parts: List[str] = []
+    seen = set()
+    if existing:
+        for x in existing.split(","):
+            t = x.strip()
+            if not t:
+                continue
+            low = t.lower()
+            if low not in seen:
+                parts.append(t)
+                seen.add(low)
+    for k in new_list:
+        kl = k.strip()
+        if not kl:
+            continue
+        low = kl.lower()
+        if low not in seen:
+            parts.append(kl)
+            seen.add(low)
+    return ", ".join(parts)
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -194,6 +218,21 @@ def process_project_page(self, project_id: str, page_index: int):
             db.add(project_task)
             db.commit()
             db.refresh(project_task)
+
+        db.refresh(project)
+        pk_data = getattr(project, "project_keywords", None) or {}
+        clustered_data = pk_data.get("clustered") if isinstance(pk_data, dict) else {}
+        page_cluster = (
+            clustered_data.get(page.page_slug, {}) if isinstance(clustered_data, dict) else {}
+        )
+        assigned = page_cluster.get("assigned_keywords") if isinstance(page_cluster, dict) else []
+        if isinstance(assigned, list) and assigned:
+            clustered_kws = [str(x).strip() for x in assigned if str(x).strip()]
+            merged = _merge_additional_keywords(project_task.additional_keywords, clustered_kws)
+            if merged != (project_task.additional_keywords or ""):
+                project_task.additional_keywords = merged
+                db.commit()
+                db.refresh(project_task)
 
         _append_project_log(
             db,

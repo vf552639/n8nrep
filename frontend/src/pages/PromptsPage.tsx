@@ -69,6 +69,8 @@ const PROMPT_VARIABLES = [
       { name: "site_name", desc: "Название целевого сайта" },
       { name: "site_template_html", desc: "HTML-шаблон целевого сайта" },
       { name: "site_template_name", desc: "Название шаблона сайта" },
+      { name: "legal_reference_html", desc: "Образец legal-страницы для GEO (без SERP)" },
+      { name: "legal_variables", desc: "JSON переменных legal (company_name, email, …)" },
     ],
   },
   {
