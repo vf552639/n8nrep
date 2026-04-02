@@ -1,17 +1,23 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
-from sqlalchemy.sql import func
 from typing import Optional
 import io
-import datetime
 
 from app.database import get_db
 from app.models.article import GeneratedArticle
 from app.models.task import Task
+from app.services.word_counter import count_content_words
 
 router = APIRouter()
+
+
+class ArticleUpdate(BaseModel):
+    html_content: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
 
 @router.get("/")
 def get_articles(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
@@ -43,6 +49,7 @@ def get_article(article_id: str, db: Session = Depends(get_db)):
         "description": article.description,
         "meta_data": article.meta_data,
         "html_content": article.html_content,
+        "full_page_html": article.full_page_html,
         "word_count": article.word_count,
         "fact_check_status": article.fact_check_status,
         "fact_check_issues": article.fact_check_issues,
@@ -52,6 +59,47 @@ def get_article(article_id: str, db: Session = Depends(get_db)):
         "char_count": len(html),
         "main_keyword": task.main_keyword if task else "",
     }
+
+
+@router.patch("/{article_id}")
+def update_article(article_id: str, body: ArticleUpdate, db: Session = Depends(get_db)):
+    article = db.query(GeneratedArticle).filter(GeneratedArticle.id == article_id).first()
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    data = body.model_dump(exclude_unset=True)
+    if "html_content" in data and data["html_content"] is not None:
+        article.html_content = data["html_content"]
+        article.word_count = count_content_words(data["html_content"])
+        article.full_page_html = None
+    if "title" in data:
+        article.title = data["title"]
+    if "description" in data:
+        article.description = data["description"]
+
+    db.commit()
+    db.refresh(article)
+
+    task = db.query(Task).filter(Task.id == article.task_id).first()
+    html = article.html_content or ""
+    return {
+        "id": str(article.id),
+        "task_id": str(article.task_id),
+        "title": article.title,
+        "description": article.description,
+        "meta_data": article.meta_data,
+        "html_content": article.html_content,
+        "full_page_html": article.full_page_html,
+        "word_count": article.word_count,
+        "fact_check_status": article.fact_check_status,
+        "fact_check_issues": article.fact_check_issues,
+        "needs_review": article.needs_review,
+        "created_at": article.created_at.isoformat(),
+        "total_cost": float(task.total_cost) if task and task.total_cost is not None else 0.0,
+        "char_count": len(html),
+        "main_keyword": task.main_keyword if task else "",
+    }
+
 
 @router.post("/{article_id}/issues/{issue_index}/resolve")
 def resolve_issue(article_id: str, issue_index: int, db: Session = Depends(get_db)):

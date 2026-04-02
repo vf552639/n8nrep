@@ -1,5 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+} from "recharts";
 import { dashboardApi } from "@/api/dashboard";
 import { tasksApi } from "@/api/tasks";
 import { DashboardStats, QueueStatus } from "@/types/common";
@@ -25,11 +34,12 @@ export default function DashboardPage() {
     refetchInterval: 300000,
   });
 
-  const { data: latestTasks, isLoading: tasksLoading } = useQuery({
+  const { data: latestTasksRes, isLoading: tasksLoading } = useQuery({
     queryKey: ["dashboard-latest-tasks"],
-    queryFn: () => tasksApi.getAll({ limit: 10 }),
-    refetchInterval: 10000
+    queryFn: () => tasksApi.getAll({ limit: 10, skip: 0 }),
+    refetchInterval: 10000,
   });
+  const latestTasks = latestTasksRes?.items;
 
   const isLoading = statsLoading || queueLoading || tasksLoading;
 
@@ -117,6 +127,29 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {stats?.cost_by_day && stats.cost_by_day.length > 0 && (
+        <div className="rounded-lg border bg-white p-6 shadow-sm">
+          <h2 className="mb-4 text-lg font-semibold text-slate-900">Pipeline cost (completed tasks, last 30 days)</h2>
+          <p className="mb-4 text-sm text-slate-500">
+            Sum of <span className="font-mono">total_cost</span> by UTC day when tasks reached completed status.
+          </p>
+          <div className="h-64 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={stats.cost_by_day}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="date" tick={{ fontSize: 10 }} stroke="#64748b" />
+                <YAxis tickFormatter={(v) => `$${Number(v).toFixed(2)}`} stroke="#64748b" width={56} />
+                <Tooltip
+                  formatter={(v: number | string) => [`$${Number(v).toFixed(4)}`, "Cost"]}
+                  labelFormatter={(label) => `Date: ${label}`}
+                />
+                <Bar dataKey="cost" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={48} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
       <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b flex justify-between items-center bg-slate-50">
           <h2 className="text-lg font-semibold flex items-center gap-2"><Activity className="w-5 h-5"/> Latest 10 Tasks</h2>
@@ -124,7 +157,7 @@ export default function DashboardPage() {
         </div>
         <div className="divide-y">
           {latestTasks?.length === 0 && <div className="p-6 text-center text-slate-500">No tasks found</div>}
-          {latestTasks?.map(task => (
+          {latestTasks?.map((task) => (
             <Link key={task.id} to={`/tasks/${task.id}`} className="flex items-center justify-between p-4 hover:bg-slate-50 transition-colors">
               <div>
                 <div className="font-medium text-slate-900">{task.main_keyword}</div>

@@ -58,7 +58,7 @@ export default function TaskDetailPage() {
   const { data: imageData, refetch: refetchImages } = useQuery({
     queryKey: ["task-images", id],
     queryFn: () => tasksApi.getImages(id!),
-    enabled: !!id && !!hasImages,
+    enabled: !!id && (!!hasImages || isImagePaused),
   });
 
   // Auto-switch to review tab when waiting for approval

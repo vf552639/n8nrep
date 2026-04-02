@@ -61,28 +61,43 @@ class TaskResponse(BaseModel):
         from_attributes = True
 
 @router.get("/")
-def get_tasks(skip: int = 0, limit: int = 50, status: Optional[str] = None, db: Session = Depends(get_db)):
+def get_tasks(
+    skip: int = 0,
+    limit: int = 50,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+    site_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
     query = db.query(Task)
     if status:
         query = query.filter(Task.status == status)
-    
+    if site_id:
+        query = query.filter(Task.target_site_id == site_id)
+    if search and search.strip():
+        q = f"%{search.strip()}%"
+        query = query.filter(Task.main_keyword.ilike(q))
+
+    total = query.count()
     tasks = query.order_by(desc(Task.created_at)).offset(skip).limit(limit).all()
-    
-    # Quick formatting
-    return [{
-        "id": str(t.id),
-        "main_keyword": t.main_keyword,
-        "country": t.country,
-        "language": t.language,
-        "page_type": t.page_type,
-        "page_type": t.page_type,
-        "status": t.status,
-        "total_cost": t.total_cost or 0.0,
-        "target_site_id": str(t.target_site_id),
-        "created_at": t.created_at.isoformat(),
-        "serp_config": t.serp_config or {},
-        "error_log": t.error_log
-    } for t in tasks]
+
+    items = [
+        {
+            "id": str(t.id),
+            "main_keyword": t.main_keyword,
+            "country": t.country,
+            "language": t.language,
+            "page_type": t.page_type,
+            "status": t.status,
+            "total_cost": t.total_cost or 0.0,
+            "target_site_id": str(t.target_site_id),
+            "created_at": t.created_at.isoformat(),
+            "serp_config": t.serp_config or {},
+            "error_log": t.error_log,
+        }
+        for t in tasks
+    ]
+    return {"items": items, "total": total}
 
 @router.get("/{task_id}")
 def get_task(task_id: str, db: Session = Depends(get_db)):

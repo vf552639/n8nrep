@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import toast from "react-hot-toast";
 import api from "@/api/client";
 import { projectsApi } from "@/api/projects";
+import { tasksApi } from "@/api/tasks";
 import { formatApiErrorDetail } from "@/lib/apiErrorMessage";
 import { Project } from "@/types/project";
 import StatusBadge from "@/components/common/StatusBadge";
@@ -102,6 +103,16 @@ export default function ProjectDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
     },
     onError: () => toast.error("Retry failed"),
+  });
+
+  const retryOneTaskMutation = useMutation({
+    mutationFn: (taskId: string) => tasksApi.retry(taskId),
+    onSuccess: () => {
+      toast.success("Task queued for retry");
+      queryClient.invalidateQueries({ queryKey: ["project", id] });
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
+    onError: () => toast.error("Could not retry task"),
   });
 
   const deleteMutation = useMutation({
@@ -554,6 +565,19 @@ export default function ProjectDetailPage() {
                     </div>
                     <div className="flex items-center gap-6">
                       <div className="text-sm font-medium text-slate-500">{Math.round(task.progress)}%</div>
+                      {task.status === "failed" && (
+                        <button
+                          type="button"
+                          className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+                          disabled={retryOneTaskMutation.isPending}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            retryOneTaskMutation.mutate(task.id);
+                          }}
+                        >
+                          Retry page
+                        </button>
+                      )}
                       <Link 
                         to={`/tasks/${task.id}`}
                         className="flex items-center justify-center p-2 text-blue-600 hover:bg-blue-50 border border-transparent hover:border-blue-200 rounded-md transition-all text-xs font-semibold"

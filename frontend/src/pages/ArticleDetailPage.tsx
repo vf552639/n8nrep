@@ -1,7 +1,10 @@
 import { useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useMemo } from "react";
+import Editor from "@monaco-editor/react";
+import toast from "react-hot-toast";
 import api from "@/api/client";
+import { articlesApi } from "@/api/articles";
 import { Article } from "@/types/article";
 import ArticleFactCheck from "@/components/articles/ArticleFactCheck";
 
@@ -56,7 +59,10 @@ function MetaFieldBlock({ fieldKey, value }: { fieldKey: string; value: unknown 
 
 export default function ArticleDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("preview");
+  const [editingHtml, setEditingHtml] = useState(false);
+  const [htmlDraft, setHtmlDraft] = useState("");
 
   const { data: article, isLoading } = useQuery({
     queryKey: ["article", id],
@@ -66,6 +72,46 @@ export default function ArticleDetailPage() {
     },
     enabled: !!id,
   });
+
+  const saveMutation = useMutation({
+    mutationFn: () => articlesApi.update(id!, { html_content: htmlDraft }),
+    onSuccess: () => {
+      toast.success("Article saved");
+      setEditingHtml(false);
+      queryClient.invalidateQueries({ queryKey: ["article", id] });
+    },
+    onError: (e: unknown) => {
+      const ax = e as { response?: { data?: { detail?: string } } };
+      toast.error(ax.response?.data?.detail || "Save failed");
+    },
+  });
+
+  const startEdit = () => {
+    const src = article?.html_content || "";
+    setHtmlDraft(src);
+    setEditingHtml(true);
+    setActiveTab("html");
+  };
+
+  const cancelEdit = () => {
+    setEditingHtml(false);
+  };
+
+  const handleDownload = async () => {
+    if (!id) return;
+    try {
+      const blob = await articlesApi.downloadBlob(id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const safe = (article?.title || "article").replace(/[^\w\s-]/g, "").trim() || "article";
+      a.download = `${safe}.html`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error("Download failed");
+    }
+  };
 
   const metaEntries = useMemo(() => {
     const m = article?.meta_data;
@@ -95,21 +141,41 @@ export default function ArticleDetailPage() {
             <span className="pl-4">{new Date(article.created_at).toLocaleString()}</span>
           </div>
         </div>
-        <div className="flex gap-2">
-          <a
-            href={`${import.meta.env.VITE_API_URL || "http://localhost:8000/api"}/articles/${id}/download`}
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={handleDownload}
             className="bg-white hover:bg-slate-50 shadow-sm text-slate-800 px-4 py-2 rounded-md transition-colors text-sm font-medium border"
-            download
           >
             Download HTML
-          </a>
-          <a
-            href={`${import.meta.env.VITE_API_URL || "http://localhost:8000/api"}/articles/${id}/download?format=docx`}
-            className="bg-blue-600 hover:bg-blue-700 shadow-sm text-white px-4 py-2 rounded-md transition-colors text-sm font-medium border border-blue-600"
-            download
-          >
-            Export Word
-          </a>
+          </button>
+          {!editingHtml ? (
+            <button
+              type="button"
+              onClick={startEdit}
+              className="bg-slate-800 hover:bg-slate-900 shadow-sm text-white px-4 py-2 rounded-md transition-colors text-sm font-medium"
+            >
+              Edit HTML
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => saveMutation.mutate()}
+                disabled={saveMutation.isPending}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-md text-sm font-medium disabled:opacity-50"
+              >
+                {saveMutation.isPending ? "Saving…" : "Save"}
+              </button>
+              <button
+                type="button"
+                onClick={cancelEdit}
+                className="border border-slate-300 bg-white px-4 py-2 rounded-md text-sm hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -137,11 +203,25 @@ export default function ArticleDetailPage() {
             sandbox="allow-same-origin"
           />
         )}
-        {activeTab === "html" && (
-          <div className="p-6 overflow-auto h-full flex-1 bg-slate-900 min-h-[600px] font-mono text-sm">
-            <pre className="whitespace-pre-wrap text-emerald-400">{article.full_page_html || article.html_content}</pre>
-          </div>
-        )}
+        {activeTab === "html" &&
+          (editingHtml ? (
+            <div className="min-h-[600px] flex-1 border-t border-slate-200">
+              <Editor
+                height="640px"
+                defaultLanguage="html"
+                theme="vs-dark"
+                value={htmlDraft}
+                onChange={(v) => setHtmlDraft(v || "")}
+                options={{ minimap: { enabled: true }, wordWrap: "on" }}
+              />
+            </div>
+          ) : (
+            <div className="p-6 overflow-auto h-full flex-1 bg-slate-900 min-h-[600px] font-mono text-sm">
+              <pre className="whitespace-pre-wrap text-emerald-400">
+                {article.full_page_html || article.html_content}
+              </pre>
+            </div>
+          ))}
         {activeTab === "metadata" && (
           <div className="p-8 space-y-6 max-w-4xl">
             <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">

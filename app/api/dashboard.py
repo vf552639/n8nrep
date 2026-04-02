@@ -1,11 +1,15 @@
+from datetime import datetime, timedelta
+
 from fastapi import APIRouter, Depends
+from sqlalchemy import cast, Date, func
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+
 from app.database import get_db
 from app.models.task import Task
 from app.models.site import Site
 
 router = APIRouter()
+
 
 @router.get("/stats")
 def get_dashboard_stats(db: Session = Depends(get_db)):
@@ -14,21 +18,32 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     failed_tasks = db.query(Task).filter(Task.status == "failed").count()
     processing_tasks = db.query(Task).filter(Task.status == "processing").count()
     pending_tasks = db.query(Task).filter(Task.status == "pending").count()
-    
+
     total_sites = db.query(Site).count()
-    
+
     from app.config import settings
-    
+
+    cutoff = datetime.utcnow() - timedelta(days=30)
+    cost_rows = (
+        db.query(cast(Task.updated_at, Date).label("d"), func.coalesce(func.sum(Task.total_cost), 0.0))
+        .filter(Task.status == "completed", Task.updated_at >= cutoff, Task.total_cost.isnot(None))
+        .group_by("d")
+        .order_by("d")
+        .all()
+    )
+    cost_by_day = [{"date": str(r[0]), "cost": float(r[1] or 0)} for r in cost_rows]
+
     return {
         "tasks": {
             "total": total_tasks,
             "completed": completed_tasks,
             "failed": failed_tasks,
             "processing": processing_tasks,
-            "pending": pending_tasks
+            "pending": pending_tasks,
         },
         "sites": total_sites,
-        "sequential_mode": settings.SEQUENTIAL_MODE
+        "sequential_mode": settings.SEQUENTIAL_MODE,
+        "cost_by_day": cost_by_day,
     }
 
 @router.get("/queue")

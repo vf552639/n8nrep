@@ -25,8 +25,6 @@ const ProjectsPage = lazy(() => import("./pages/ProjectsPage"));
 const ProjectDetailPage = lazy(() => import("./pages/ProjectDetailPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const LogsPage = lazy(() => import("./pages/LogsPage"));
-const SeoSetupPage = lazy(() => import("./pages/SeoSetupPage"));
-
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -60,7 +58,6 @@ function App() {
             <Route path="projects/:id" element={<ProjectDetailPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="logs" element={<LogsPage />} />
-            <Route path="seo-setup" element={<SeoSetupPage />} />
             <Route path="*" element={<div className="p-8 text-center text-slate-500">404 - Page not found</div>} />
           </Route>
         </Routes>

@@ -12,7 +12,6 @@ import {
   FolderKanban,
   Settings,
   ScrollText,
-  Wrench,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
@@ -69,7 +68,7 @@ export default function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) 
           collapsed ? "flex-col gap-2 px-2 py-3" : "justify-between gap-2 px-3 py-3"
         )}
       >
-        {!collapsed && <div className="min-w-0 truncate text-lg font-bold text-white">SEO Setup</div>}
+        {!collapsed && <div className="min-w-0 truncate text-lg font-bold text-white">SEO Content</div>}
         <button
           type="button"
           onClick={onToggleCollapsed}
@@ -104,23 +103,6 @@ export default function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) 
           </NavLink>
         ))}
       </nav>
-
-      <div className="shrink-0 border-t border-slate-800 p-2">
-        <NavLink
-          to="/seo-setup"
-          title="SEO Setup"
-          className={({ isActive }) =>
-            cn(
-              "flex items-center rounded-md py-2.5 transition-colors hover:bg-slate-800",
-              collapsed ? "justify-center px-0" : "space-x-3 px-3",
-              isActive ? "bg-slate-800 font-medium text-white" : ""
-            )
-          }
-        >
-          <Wrench className="h-5 w-5 shrink-0" />
-          {!collapsed && <span>SEO Setup</span>}
-        </NavLink>
-      </div>
     </div>
   );
 }

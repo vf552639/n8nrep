@@ -15,6 +15,8 @@ export interface DashboardStats {
   };
   sites: number;
   sequential_mode: boolean;
+  /** Last ~30 days, completed tasks only — sum of total_cost per UTC day */
+  cost_by_day?: { date: string; cost: number }[];
 }
 
 export interface QueueStatus {

@@ -8,7 +8,7 @@ import json
 import logging
 import re
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 from docx import Document
@@ -43,44 +43,64 @@ def _strip_boilerplate_html(soup: BeautifulSoup) -> None:
             t.decompose()
 
 
-def _parse_meta_json(raw: Any) -> Tuple[str, str]:
-    if raw is None:
-        return "", ""
-    if isinstance(raw, dict):
-        title = str(raw.get("title") or raw.get("meta_title") or "").strip()
-        desc = str(raw.get("description") or raw.get("meta_description") or "").strip()
-        return title, desc
-    if isinstance(raw, str) and raw.strip():
-        try:
-            d = json.loads(raw)
-            if isinstance(d, dict):
-                return _parse_meta_json(d)
-        except json.JSONDecodeError:
-            pass
-    return "", ""
+def _get_all_meta_from_task(task: Task, article: Optional[GeneratedArticle]) -> Dict[str, Any]:
+    """
+    Title/description/H1 from first variant; all_variants for DOCX expansion.
+    Supports {"results": [{Title, Description, H1, Trigger}, ...]} and flat dicts.
+    """
+    result: Dict[str, Any] = {
+        "title": "",
+        "description": "",
+        "h1": "",
+        "all_variants": [],
+    }
 
+    meta_data: Optional[Dict[str, Any]] = None
+    if article and article.meta_data and isinstance(article.meta_data, dict):
+        meta_data = article.meta_data
 
-def _get_meta_from_task(task: Task, article: Optional[GeneratedArticle]) -> Tuple[str, str]:
-    title, desc = "", ""
-    if article and article.meta_data:
-        title, desc = _parse_meta_json(article.meta_data)
+    if not meta_data:
+        sr = task.step_results or {}
+        mg = sr.get("meta_generation", {})
+        if isinstance(mg, dict):
+            raw = mg.get("result", "")
+            if isinstance(raw, str) and raw.strip():
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, dict):
+                        meta_data = parsed
+                except json.JSONDecodeError:
+                    pass
+            elif isinstance(raw, dict):
+                meta_data = raw
 
-    sr = task.step_results or {}
-    mg = sr.get("meta_generation")
-    if isinstance(mg, dict):
-        res = mg.get("result")
-        t2, d2 = _parse_meta_json(res)
-        if not title and t2:
-            title = t2
-        if not desc and d2:
-            desc = d2
+    if not meta_data:
+        meta_data = {}
+
+    results = meta_data.get("results")
+    if isinstance(results, list) and len(results) > 0:
+        result["all_variants"] = results
+        first = results[0]
+        if isinstance(first, dict):
+            result["title"] = str(first.get("Title") or first.get("title") or "").strip()
+            result["description"] = str(
+                first.get("Description") or first.get("description") or ""
+            ).strip()
+            result["h1"] = str(first.get("H1") or first.get("h1") or "").strip()
+    else:
+        result["title"] = str(meta_data.get("title") or meta_data.get("Title") or "").strip()
+        result["description"] = str(
+            meta_data.get("description") or meta_data.get("Description") or ""
+        ).strip()
+        result["h1"] = str(meta_data.get("H1") or meta_data.get("h1") or "").strip()
 
     if article:
-        if not title and article.title:
-            title = article.title
-        if not desc and article.description:
-            desc = article.description or ""
-    return title, desc
+        if not result["title"] and article.title:
+            result["title"] = article.title
+        if not result["description"] and article.description:
+            result["description"] = article.description or ""
+
+    return result
 
 
 def _get_content_from_task(
@@ -257,21 +277,34 @@ def _add_meta_table(
     doc: Document,
     slug: str,
     filename: str,
-    meta_title: str,
-    meta_desc: str,
+    meta_info: Dict[str, Any],
     main_keyword: str,
     word_count: int,
     additional_keywords: List[str],
 ) -> None:
-    rows_data = [
+    rows_data: List[Tuple[str, str]] = [
         ("Slug", slug),
         ("Filename", filename),
-        ("Meta Title", meta_title),
-        ("Meta Description", meta_desc),
+        ("Meta Title", str(meta_info.get("title", "") or "")),
+        ("Meta Description", str(meta_info.get("description", "") or "")),
+        ("H1", str(meta_info.get("h1", "") or "")),
         ("Keyword", main_keyword),
         ("Additional Keywords", ", ".join(additional_keywords)),
         ("Word Count", str(word_count)),
     ]
+    all_variants = meta_info.get("all_variants") or []
+    if isinstance(all_variants, list) and len(all_variants) > 1:
+        for i, variant in enumerate(all_variants):
+            if not isinstance(variant, dict):
+                continue
+            v_title = str(variant.get("Title") or variant.get("title") or "")
+            v_desc = str(variant.get("Description") or variant.get("description") or "")
+            v_h1 = str(variant.get("H1") or variant.get("h1") or "")
+            v_trigger = str(variant.get("Trigger") or variant.get("trigger") or "")
+            rows_data.append((f"Variant {i + 1} Title", v_title))
+            rows_data.append((f"Variant {i + 1} Description", v_desc))
+            rows_data.append((f"Variant {i + 1} H1", v_h1))
+            rows_data.append((f"Variant {i + 1} Trigger", v_trigger))
     table = doc.add_table(rows=len(rows_data), cols=2)
     try:
         table.style = "Light Shading Accent 1"
@@ -375,7 +408,7 @@ def build_project_docx(db: Session, project_id: str) -> bytes:
             doc.add_page_break()
             continue
 
-        meta_title, meta_desc = _get_meta_from_task(task, article)
+        meta_info = _get_all_meta_from_task(task, article)
         content, mode = _get_content_from_task(task, article)
 
         if task.status != "completed" or not content.strip():
@@ -395,8 +428,7 @@ def build_project_docx(db: Session, project_id: str) -> bytes:
                 doc,
                 _fmt_slug(bp.page_slug),
                 bp.filename or "",
-                meta_title,
-                meta_desc,
+                meta_info,
                 task.main_keyword or "",
                 wc,
                 add_kw,
@@ -410,8 +442,7 @@ def build_project_docx(db: Session, project_id: str) -> bytes:
             doc,
             _fmt_slug(bp.page_slug),
             bp.filename or "",
-            meta_title,
-            meta_desc,
+            meta_info,
             task.main_keyword or "",
             int(wc or 0),
             add_kw,

@@ -1,9 +1,16 @@
 import api from "./client";
 import { Task, TaskCreate, TaskStepResponse } from "@/types/task";
 
+export type TasksListResponse = { items: Task[]; total: number };
+
 export const tasksApi = {
-  getAll: (params?: { skip?: number; limit?: number; status?: string }) => 
-    api.get<Task[]>("/tasks", { params }).then(res => res.data),
+  getAll: (params?: {
+    skip?: number;
+    limit?: number;
+    status?: string;
+    search?: string;
+    site_id?: string;
+  }) => api.get<TasksListResponse>("/tasks", { params }).then((res) => res.data),
   
   getOne: (id: string) => 
     api.get<Task>(`/tasks/${id}`).then(res => res.data),

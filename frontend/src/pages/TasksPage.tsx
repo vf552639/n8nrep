@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import type { RowSelectionState } from "@tanstack/react-table";
@@ -6,10 +6,12 @@ import toast from "react-hot-toast";
 import { tasksApi } from "@/api/tasks";
 import { ReactTable } from "@/components/common/ReactTable";
 import StatusBadge from "@/components/common/StatusBadge";
-import { Plus, Upload, Play, X, Search, Filter, Trash2, RotateCcw } from "lucide-react";
+import { Plus, Upload, Play, Search, Filter, Trash2, RotateCcw, X } from "lucide-react";
 import QueueControls from "@/components/tasks/QueueControls";
 import { sitesApi } from "@/api/sites";
 import type { Task, TaskCreate, SerpConfig } from "@/types/task";
+
+const PAGE_SIZE = 50;
 
 export default function TasksPage() {
   const navigate = useNavigate();
@@ -17,29 +19,47 @@ export default function TasksPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [siteFilter, setSiteFilter] = useState("");
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [page, setPage] = useState(0);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
 
-  const { data: tasks, isLoading } = useQuery({
-    queryKey: ["tasks", { status: statusFilter, site: siteFilter }],
-    queryFn: async () => {
-      return tasksApi.getAll({ status: statusFilter || undefined, limit: 1000 });
-    },
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 350);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  useEffect(() => {
+    setPage(0);
+  }, [statusFilter, siteFilter, debouncedSearch]);
+
+  const listParams = useMemo(
+    () => ({
+      skip: page * PAGE_SIZE,
+      limit: PAGE_SIZE,
+      status: statusFilter || undefined,
+      site_id: siteFilter || undefined,
+      search: debouncedSearch || undefined,
+    }),
+    [page, statusFilter, siteFilter, debouncedSearch]
+  );
+
+  const { data: tasksRes, isLoading } = useQuery({
+    queryKey: ["tasks", listParams],
+    queryFn: () => tasksApi.getAll(listParams),
   });
+
+  const tasks = tasksRes?.items ?? [];
+  const total = tasksRes?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const { data: sites } = useQuery({
     queryKey: ["sites"],
     queryFn: () => sitesApi.getAll(),
   });
 
-  const filteredTasks = useMemo(() => {
-    return (tasks || []).filter((t) => {
-      if (siteFilter && t.target_site_id !== siteFilter) return false;
-      if (search && !t.main_keyword.toLowerCase().includes(search.toLowerCase())) return false;
-      return true;
-    });
-  }, [tasks, siteFilter, search]);
+  const filteredTasks = tasks;
 
   const selectedIds = useMemo(
     () => Object.keys(rowSelection).filter((id) => rowSelection[id]),
@@ -318,6 +338,37 @@ export default function TasksPage() {
         getRowId={(row) => row.id}
         onRowClick={(task: Task) => navigate(`/tasks/${task.id}`)}
       />
+
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-white px-4 py-3 text-sm text-slate-600">
+        <span>
+          Showing{" "}
+          <span className="font-medium text-slate-800">
+            {total === 0 ? 0 : page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)}
+          </span>{" "}
+          of <span className="font-medium text-slate-800">{total}</span>
+        </span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled={page <= 0}
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+            className="rounded-md border px-3 py-1.5 hover:bg-slate-50 disabled:opacity-40"
+          >
+            Previous
+          </button>
+          <span className="tabular-nums">
+            Page {page + 1} / {pageCount}
+          </span>
+          <button
+            type="button"
+            disabled={page + 1 >= pageCount}
+            onClick={() => setPage((p) => p + 1)}
+            className="rounded-md border px-3 py-1.5 hover:bg-slate-50 disabled:opacity-40"
+          >
+            Next
+          </button>
+        </div>
+      </div>
 
       {isCreateOpen && <CreateTaskModal onClose={() => setIsCreateOpen(false)} />}
 

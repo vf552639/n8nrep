@@ -2083,13 +2083,43 @@ def run_pipeline(db: Session, task_id: str, auto_mode: bool = False):
             structured_html = ctx.task.step_results.get(STEP_IMAGE_INJECT, {}).get("result") or ctx.task.step_results.get(STEP_HTML_STRUCT, {}).get("result", "")
             meta_json_str = ctx.task.step_results.get(STEP_META_GEN, {}).get("result", "{}")
             meta_data = clean_and_parse_json(meta_json_str)
-            
-            title = meta_data.get("title", f"{ctx.task.main_keyword} Guide")
-            description = meta_data.get("description", "")
+
+            title = ""
+            description = ""
+            if isinstance(meta_data.get("results"), list) and len(meta_data["results"]) > 0:
+                first_variant = meta_data["results"][0]
+                if isinstance(first_variant, dict):
+                    title = (
+                        first_variant.get("Title") or first_variant.get("title") or ""
+                    ).strip()
+                    description = (
+                        first_variant.get("Description") or first_variant.get("description") or ""
+                    ).strip()
+            else:
+                title = str(meta_data.get("title") or meta_data.get("Title") or "").strip()
+                description = str(
+                    meta_data.get("description") or meta_data.get("Description") or ""
+                ).strip()
+
             if not title:
                 title = ctx.task.main_keyword.title()
+                add_log(
+                    db,
+                    ctx.task,
+                    "⚠️ meta_generation не вернул Title — используется keyword как fallback",
+                    level="warn",
+                    step=STEP_META_GEN,
+                )
+
             if not description:
-                description = f"Read our comprehensive guide about {ctx.task.main_keyword}."
+                description = ""
+                add_log(
+                    db,
+                    ctx.task,
+                    "⚠️ meta_generation не вернул Description",
+                    level="warn",
+                    step=STEP_META_GEN,
+                )
 
             word_count = count_content_words(structured_html)
             full_page = generate_full_page(db, str(ctx.task.target_site_id), structured_html, title, description)
