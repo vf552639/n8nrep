@@ -33,6 +33,20 @@ class PromptCreate(BaseModel):
     top_p: Optional[float] = 1.0
     skip_in_pipeline: bool = False
 
+
+class PromptUpdate(BaseModel):
+    """In-place update of the existing prompt row (no new version)."""
+
+    system_prompt: str
+    user_prompt: str = ""
+    model: str
+    max_tokens: Optional[int] = None
+    temperature: Optional[float] = 0.7
+    frequency_penalty: Optional[float] = 0.0
+    presence_penalty: Optional[float] = 0.0
+    top_p: Optional[float] = 1.0
+    skip_in_pipeline: bool = False
+
 class PromptTest(BaseModel):
     system_prompt: str
     user_prompt: str
@@ -132,11 +146,7 @@ def restore_prompt_version(
     return {"id": str(new_prompt.id), "version": next_version}
 
 
-@router.get("/{prompt_id}")
-def get_prompt(prompt_id: str, db: Session = Depends(get_db)):
-    prompt = db.query(Prompt).filter(Prompt.id == prompt_id).first()
-    if not prompt:
-        raise HTTPException(status_code=404, detail="Prompt not found")
+def _prompt_to_response(prompt: Prompt) -> Dict[str, Any]:
     return {
         "id": str(prompt.id),
         "agent_name": prompt.agent_name,
@@ -150,8 +160,39 @@ def get_prompt(prompt_id: str, db: Session = Depends(get_db)):
         "temperature": prompt.temperature if prompt.temperature is not None else 0.7,
         "frequency_penalty": prompt.frequency_penalty if prompt.frequency_penalty is not None else 0.0,
         "presence_penalty": prompt.presence_penalty if prompt.presence_penalty is not None else 0.0,
-        "top_p": prompt.top_p if prompt.top_p is not None else 1.0
+        "top_p": prompt.top_p if prompt.top_p is not None else 1.0,
+        "updated_at": prompt.updated_at.isoformat() if prompt.updated_at else None,
     }
+
+
+@router.get("/{prompt_id}")
+def get_prompt(prompt_id: str, db: Session = Depends(get_db)):
+    prompt = db.query(Prompt).filter(Prompt.id == prompt_id).first()
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    return _prompt_to_response(prompt)
+
+
+@router.put("/{prompt_id}")
+def update_prompt_in_place(
+    prompt_id: str, body: PromptUpdate, db: Session = Depends(get_db)
+):
+    prompt = db.query(Prompt).filter(Prompt.id == prompt_id).first()
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    prompt.system_prompt = _sanitize(body.system_prompt)
+    prompt.user_prompt = _sanitize(body.user_prompt or "")
+    prompt.model = body.model
+    prompt.max_tokens = body.max_tokens
+    prompt.temperature = body.temperature
+    prompt.frequency_penalty = body.frequency_penalty
+    prompt.presence_penalty = body.presence_penalty
+    prompt.top_p = body.top_p
+    prompt.skip_in_pipeline = body.skip_in_pipeline
+    db.commit()
+    db.refresh(prompt)
+    return _prompt_to_response(prompt)
+
 
 @router.post("/")
 def create_prompt(prompt_in: PromptCreate, db: Session = Depends(get_db)):

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Editor from "@monaco-editor/react";
 import toast from "react-hot-toast";
@@ -6,6 +6,7 @@ import api from "@/api/client";
 import { promptsApi } from "@/api/prompts";
 import { Prompt } from "@/types/prompt";
 import { ModelSelector } from "@/components/ModelSelector";
+import { ToggleSwitch } from "@/components/ToggleSwitch";
 import CopyButton from "@/components/common/CopyButton";
 import {
   Play,
@@ -139,21 +140,6 @@ const DEFAULT_TEST_JSON = `{
   "country": "us"
 }`;
 
-function normalizePrompt(p: Partial<Prompt> | null) {
-  if (!p) return null;
-  return {
-    system_prompt: p.system_prompt ?? "",
-    user_prompt: p.user_prompt ?? "",
-    model: p.model ?? "",
-    max_tokens: p.max_tokens ?? null,
-    temperature: p.temperature ?? 0.7,
-    frequency_penalty: p.frequency_penalty ?? 0,
-    presence_penalty: p.presence_penalty ?? 0,
-    top_p: p.top_p ?? 1,
-    skip_in_pipeline: !!p.skip_in_pipeline,
-  };
-}
-
 /** Snapshot from API for editing; keeps rounding consistent with previous behavior. */
 function buildCleanPromptFromServer(p: Prompt): Prompt {
   const cleanPrompt = { ...p };
@@ -180,34 +166,40 @@ function isPromptDirty(
   edit: Partial<Prompt> | null,
   saved: Prompt | null | undefined,
   params: { maxTokens: boolean; temp: boolean; freq: boolean; pres: boolean; top: boolean }
-) {
+): boolean {
   if (!edit || !saved) return false;
-  const e = normalizePrompt(edit);
-  const s = normalizePrompt(saved);
-  if (!e || !s) return false;
-  if (e.system_prompt !== s.system_prompt || e.user_prompt !== s.user_prompt) return true;
-  if (e.model !== s.model) return true;
-  if (e.skip_in_pipeline !== s.skip_in_pipeline) return true;
 
-  const savMaxOn = s.max_tokens != null && s.max_tokens > 0;
-  if (params.maxTokens !== savMaxOn) return true;
-  if (params.maxTokens && (e.max_tokens ?? null) !== (s.max_tokens ?? null)) return true;
+  if ((edit.system_prompt ?? "") !== (saved.system_prompt ?? "")) return true;
+  if ((edit.user_prompt ?? "") !== (saved.user_prompt ?? "")) return true;
+  if ((edit.model ?? "") !== (saved.model ?? "")) return true;
+  if (!!edit.skip_in_pipeline !== !!saved.skip_in_pipeline) return true;
 
-  const savTempOn = (saved.temperature ?? 0.7) !== 1.0;
-  if (params.temp !== savTempOn) return true;
-  const effTemp = params.temp ? e.temperature : 1.0;
-  if (effTemp !== (saved.temperature ?? 0.7)) return true;
+  const savedMaxOn = saved.max_tokens != null && saved.max_tokens > 0;
+  if (params.maxTokens !== savedMaxOn) return true;
+  if (params.maxTokens && (edit.max_tokens ?? null) !== (saved.max_tokens ?? null)) return true;
 
-  const savFreq = (saved.frequency_penalty ?? 0) !== 0.0;
-  const savPres = (saved.presence_penalty ?? 0) !== 0.0;
-  const savTop = (saved.top_p ?? 1) !== 1.0;
-  if (params.freq !== savFreq || params.pres !== savPres || params.top !== savTop) return true;
-  const effFreq = params.freq ? e.frequency_penalty : 0;
-  const effPres = params.pres ? e.presence_penalty : 0;
-  const effTop = params.top ? e.top_p : 1;
-  if (effFreq !== (saved.frequency_penalty ?? 0)) return true;
-  if (effPres !== (saved.presence_penalty ?? 0)) return true;
-  if (effTop !== (saved.top_p ?? 1)) return true;
+  const savedTempOn = (saved.temperature ?? 0.7) !== 1.0;
+  if (params.temp !== savedTempOn) return true;
+  if (params.temp) {
+    const editTemp = Math.round((edit.temperature ?? 0.7) * 10) / 10;
+    const savedTemp = Math.round((saved.temperature ?? 0.7) * 10) / 10;
+    if (editTemp !== savedTemp) return true;
+  }
+
+  const savedFreqOn = (saved.frequency_penalty ?? 0) !== 0;
+  const savedPresOn = (saved.presence_penalty ?? 0) !== 0;
+  const savedTopOn = (saved.top_p ?? 1) !== 1;
+  if (params.freq !== savedFreqOn) return true;
+  if (params.pres !== savedPresOn) return true;
+  if (params.top !== savedTopOn) return true;
+
+  const effFreq = params.freq ? Math.round((edit.frequency_penalty ?? 0) * 10) / 10 : 0;
+  const effPres = params.pres ? Math.round((edit.presence_penalty ?? 0) * 10) / 10 : 0;
+  const effTop = params.top ? Math.round((edit.top_p ?? 1) * 10) / 10 : 1;
+  if (effFreq !== Math.round((saved.frequency_penalty ?? 0) * 10) / 10) return true;
+  if (effPres !== Math.round((saved.presence_penalty ?? 0) * 10) / 10) return true;
+  if (effTop !== Math.round((saved.top_p ?? 1) * 10) / 10) return true;
+
   return false;
 }
 
@@ -229,6 +221,7 @@ interface TestResultShape {
 
 export default function PromptsPage() {
   const queryClient = useQueryClient();
+  const justSavedRef = useRef(false);
   const [activePromptId, setActivePromptId] = useState<string | null>(null);
   const [editState, setEditState] = useState<Partial<Prompt> | null>(null);
   const [isTestOpen, setIsTestOpen] = useState(false);
@@ -291,6 +284,10 @@ export default function PromptsPage() {
    */
   useEffect(() => {
     if (!fullPrompt || fullPrompt.id !== derivedActiveId) return;
+    if (justSavedRef.current) {
+      justSavedRef.current = false;
+      return;
+    }
     let hydrated = false;
     setEditState((prev) => {
       if (prev && prev.id === fullPrompt.id) return prev;
@@ -311,23 +308,27 @@ export default function PromptsPage() {
 
   const saveMutation = useMutation({
     mutationFn: (data: Partial<Prompt>) => {
-      const payload: Partial<Prompt> = {
-        ...data,
+      if (!data.id) throw new Error("Missing prompt id");
+      return promptsApi.updateInPlace(data.id, {
+        system_prompt: data.system_prompt ?? "",
+        user_prompt: data.user_prompt ?? "",
+        model: data.model ?? "",
         max_tokens: paramsEnabled.maxTokens ? (data.max_tokens ?? null) : null,
         temperature: paramsEnabled.temp ? (data.temperature ?? 0.7) : 1.0,
         frequency_penalty: paramsEnabled.freq ? (data.frequency_penalty ?? 0.0) : 0.0,
         presence_penalty: paramsEnabled.pres ? (data.presence_penalty ?? 0.0) : 0.0,
         top_p: paramsEnabled.top ? (data.top_p ?? 1.0) : 1.0,
-      };
-      return promptsApi.update(payload);
+        skip_in_pipeline: !!data.skip_in_pipeline,
+      });
     },
-    onSuccess: (data) => {
+    onSuccess: (fullUpdatedPrompt) => {
       toast.success("Prompt saved successfully");
-      setActivePromptId(data.id);
-      setEditState(null);
+      justSavedRef.current = true;
+      const clean = buildCleanPromptFromServer(fullUpdatedPrompt);
+      setEditState(clean);
+      setParamsEnabled(paramsEnabledFromPrompt(fullUpdatedPrompt));
+      queryClient.setQueryData(["prompt", fullUpdatedPrompt.id], fullUpdatedPrompt);
       queryClient.invalidateQueries({ queryKey: ["prompts"] });
-      queryClient.invalidateQueries({ queryKey: ["prompt", data.id] });
-      queryClient.invalidateQueries({ queryKey: ["prompt-versions", data.id] });
     },
     onError: () => toast.error("Failed to save prompt"),
   });
@@ -451,44 +452,22 @@ export default function PromptsPage() {
       <h1 className="shrink-0 text-xl font-bold text-slate-900">SEO Workflow Optimizer</h1>
 
       {activePromptListInfo && editState && !isLoadingPrompt && (
-        <div className="w-full min-w-0 shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
-          <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
-            <div className="w-[280px] shrink-0 min-w-0">
-              <span className="mb-0.5 block text-xs font-medium text-slate-600">Model</span>
+        <div className="w-full min-w-0 shrink-0 rounded-xl border border-slate-300/80 bg-gradient-to-b from-[#e8ebef] to-[#d5d9df] px-4 py-2.5 shadow-md">
+          <div className="mb-2 text-[13px] font-semibold text-slate-700">Model Settings</div>
+
+          <div className="flex items-start gap-5 overflow-x-auto pb-1">
+            <div className="shrink-0">
               <ModelSelector
-                className="w-full min-w-0"
+                className="w-[240px]"
                 value={editState.model || "openai/gpt-4o"}
                 models={orModels || ["openai/gpt-4o"]}
                 onChange={(m) => setEditState((prev) => (prev ? { ...prev, model: m } : null))}
               />
             </div>
 
-            <div className="w-[160px] shrink-0">
-              <span className="mb-0.5 block text-xs font-medium text-slate-600">Max tokens</span>
-              <label className="flex items-center gap-1.5 text-xs text-slate-700">
-                <input
-                  type="checkbox"
-                  className="rounded border-slate-300 text-blue-600"
-                  checked={paramsEnabled.maxTokens}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setParamsEnabled((p) => ({ ...p, maxTokens: checked }));
-                    if (!checked) {
-                      setEditState((prev) => (prev ? { ...prev, max_tokens: null } : null));
-                    } else {
-                      setEditState((prev) => {
-                        if (!prev) return null;
-                        const fromPrev =
-                          prev.max_tokens != null && prev.max_tokens > 0 ? prev.max_tokens : null;
-                        const fromDb =
-                          fullPrompt && fullPrompt.max_tokens != null && fullPrompt.max_tokens > 0
-                            ? fullPrompt.max_tokens
-                            : null;
-                        return { ...prev, max_tokens: fromPrev ?? fromDb ?? 4000 };
-                      });
-                    }
-                  }}
-                />
+            <div className="w-[170px] shrink-0">
+              <div className="flex items-center gap-1.5">
+                <span className="whitespace-nowrap text-[12px] font-semibold text-slate-600">Max. Tokens:</span>
                 <input
                   type="number"
                   min={1}
@@ -508,73 +487,76 @@ export default function PromptsPage() {
                         : null
                     );
                   }}
-                  className="min-w-0 flex-1 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-right font-mono text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                  className="w-[80px] border-none bg-transparent text-right text-[12px] font-semibold font-mono text-slate-800 outline-none focus:rounded focus:ring-1 focus:ring-blue-400 disabled:text-slate-400"
                 />
-              </label>
-            </div>
-
-            <div className="w-[180px] shrink-0">
-              <span className="mb-0.5 block text-xs font-medium text-slate-600">Temperature</span>
-              <div className="flex flex-col gap-1">
-                <label className="flex items-center gap-1.5 text-xs text-slate-700">
-                  <input
-                    type="checkbox"
-                    className="rounded border-slate-300 text-blue-600"
-                    checked={paramsEnabled.temp}
-                    onChange={(e) => {
-                      const checked = e.target.checked;
-                      setParamsEnabled((p) => ({ ...p, temp: checked }));
-                      if (!checked) setEditState((prev) => (prev ? { ...prev, temperature: 1.0 } : null));
-                    }}
-                  />
-                  <span className="whitespace-nowrap">Custom</span>
-                </label>
-                <div className="flex min-w-0 items-center gap-1">
-                  <input
-                    type="range"
-                    min={0}
-                    max={2}
-                    step={0.1}
-                    disabled={!paramsEnabled.temp}
-                    value={editState.temperature ?? 0.7}
-                    onChange={(e) =>
-                      setEditState((prev) => (prev ? { ...prev, temperature: parseFloat(e.target.value) } : null))
+                <ToggleSwitch
+                  checked={paramsEnabled.maxTokens}
+                  onChange={(checked) => {
+                    setParamsEnabled((p) => ({ ...p, maxTokens: checked }));
+                    if (!checked) {
+                      setEditState((prev) => (prev ? { ...prev, max_tokens: null } : null));
+                    } else {
+                      setEditState((prev) => {
+                        if (!prev) return null;
+                        const fromPrev =
+                          prev.max_tokens != null && prev.max_tokens > 0 ? prev.max_tokens : null;
+                        const fromDb =
+                          fullPrompt && fullPrompt.max_tokens != null && fullPrompt.max_tokens > 0
+                            ? fullPrompt.max_tokens
+                            : null;
+                        return { ...prev, max_tokens: fromPrev ?? fromDb ?? 4000 };
+                      });
                     }
-                    className="h-1 min-w-0 flex-1 cursor-pointer accent-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
-                  />
-                  <input
-                    type="number"
-                    step={0.1}
-                    min={0}
-                    max={2}
-                    disabled={!paramsEnabled.temp}
-                    value={editState.temperature ?? 0.7}
-                    onChange={(e) =>
-                      setEditState((prev) => (prev ? { ...prev, temperature: parseFloat(e.target.value) } : null))
-                    }
-                    onBlur={(e) => {
-                      const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, 0), 2);
-                      setEditState((prev) => (prev ? { ...prev, temperature: val } : null));
-                    }}
-                    className="w-14 shrink-0 rounded border border-slate-200 bg-white px-1 py-0.5 text-right font-mono text-xs disabled:opacity-40"
-                  />
-                </div>
+                  }}
+                />
               </div>
             </div>
 
-            <div className="w-[160px] shrink-0">
-              <span className="mb-0.5 block text-xs font-medium text-slate-600">Freq. Penalty</span>
-              <label className="flex items-center gap-1.5 text-xs text-slate-700">
+            <div className="w-[170px] shrink-0">
+              <div className="flex items-center gap-1.5">
+                <span className="whitespace-nowrap text-[12px] font-semibold text-slate-600">Temperature:</span>
                 <input
-                  type="checkbox"
-                  className="rounded border-slate-300 text-blue-600"
-                  checked={paramsEnabled.freq}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setParamsEnabled((p) => ({ ...p, freq: checked }));
-                    if (!checked) setEditState((prev) => (prev ? { ...prev, frequency_penalty: 0.0 } : null));
+                  type="number"
+                  step={0.1}
+                  min={0}
+                  max={2}
+                  disabled={!paramsEnabled.temp}
+                  value={paramsEnabled.temp ? (editState.temperature ?? 0.7) : 1.0}
+                  onChange={(e) =>
+                    setEditState((prev) => (prev ? { ...prev, temperature: parseFloat(e.target.value) } : null))
+                  }
+                  onBlur={(e) => {
+                    const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, 0), 2);
+                    setEditState((prev) => (prev ? { ...prev, temperature: val } : null));
+                  }}
+                  className="w-[70px] border-none bg-transparent text-right text-[12px] font-semibold font-mono text-slate-800 outline-none focus:rounded focus:ring-1 focus:ring-blue-400 disabled:text-slate-400"
+                />
+                <ToggleSwitch
+                  checked={paramsEnabled.temp}
+                  onChange={(checked) => {
+                    setParamsEnabled((p) => ({ ...p, temp: checked }));
+                    if (!checked) setEditState((prev) => (prev ? { ...prev, temperature: 1.0 } : null));
                   }}
                 />
+              </div>
+              {paramsEnabled.temp && (
+                <input
+                  type="range"
+                  className="model-slider mt-1 w-full cursor-pointer"
+                  min={0}
+                  max={2}
+                  step={0.1}
+                  value={editState.temperature ?? 0.7}
+                  onChange={(e) =>
+                    setEditState((prev) => (prev ? { ...prev, temperature: parseFloat(e.target.value) } : null))
+                  }
+                />
+              )}
+            </div>
+
+            <div className="w-[145px] shrink-0">
+              <div className="flex items-center gap-1.5">
+                <span className="whitespace-nowrap text-[12px] font-semibold text-slate-600">Freq.:</span>
                 <input
                   type="number"
                   step={0.1}
@@ -589,24 +571,34 @@ export default function PromptsPage() {
                     const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, -2), 2);
                     setEditState((prev) => (prev ? { ...prev, frequency_penalty: val } : null));
                   }}
-                  className="min-w-0 flex-1 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-right font-mono text-xs disabled:opacity-40"
+                  className="w-[70px] border-none bg-transparent text-right text-[12px] font-semibold font-mono text-slate-800 outline-none focus:rounded focus:ring-1 focus:ring-blue-400 disabled:text-slate-400"
                 />
-              </label>
-            </div>
-
-            <div className="w-[160px] shrink-0">
-              <span className="mb-0.5 block text-xs font-medium text-slate-600">Pres. Penalty</span>
-              <label className="flex items-center gap-1.5 text-xs text-slate-700">
-                <input
-                  type="checkbox"
-                  className="rounded border-slate-300 text-blue-600"
-                  checked={paramsEnabled.pres}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setParamsEnabled((p) => ({ ...p, pres: checked }));
-                    if (!checked) setEditState((prev) => (prev ? { ...prev, presence_penalty: 0.0 } : null));
+                <ToggleSwitch
+                  checked={paramsEnabled.freq}
+                  onChange={(checked) => {
+                    setParamsEnabled((p) => ({ ...p, freq: checked }));
+                    if (!checked) setEditState((prev) => (prev ? { ...prev, frequency_penalty: 0.0 } : null));
                   }}
                 />
+              </div>
+              {paramsEnabled.freq && (
+                <input
+                  type="range"
+                  className="model-slider mt-1 w-full cursor-pointer"
+                  min={-2}
+                  max={2}
+                  step={0.1}
+                  value={editState.frequency_penalty ?? 0.0}
+                  onChange={(e) =>
+                    setEditState((prev) => (prev ? { ...prev, frequency_penalty: parseFloat(e.target.value) } : null))
+                  }
+                />
+              )}
+            </div>
+
+            <div className="w-[145px] shrink-0">
+              <div className="flex items-center gap-1.5">
+                <span className="whitespace-nowrap text-[12px] font-semibold text-slate-600">Pres.:</span>
                 <input
                   type="number"
                   step={0.1}
@@ -621,24 +613,34 @@ export default function PromptsPage() {
                     const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, -2), 2);
                     setEditState((prev) => (prev ? { ...prev, presence_penalty: val } : null));
                   }}
-                  className="min-w-0 flex-1 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-right font-mono text-xs disabled:opacity-40"
+                  className="w-[70px] border-none bg-transparent text-right text-[12px] font-semibold font-mono text-slate-800 outline-none focus:rounded focus:ring-1 focus:ring-blue-400 disabled:text-slate-400"
                 />
-              </label>
-            </div>
-
-            <div className="w-[140px] shrink-0">
-              <span className="mb-0.5 block text-xs font-medium text-slate-600">Top P</span>
-              <label className="flex items-center gap-1.5 text-xs text-slate-700">
-                <input
-                  type="checkbox"
-                  className="rounded border-slate-300 text-blue-600"
-                  checked={paramsEnabled.top}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setParamsEnabled((p) => ({ ...p, top: checked }));
-                    if (!checked) setEditState((prev) => (prev ? { ...prev, top_p: 1.0 } : null));
+                <ToggleSwitch
+                  checked={paramsEnabled.pres}
+                  onChange={(checked) => {
+                    setParamsEnabled((p) => ({ ...p, pres: checked }));
+                    if (!checked) setEditState((prev) => (prev ? { ...prev, presence_penalty: 0.0 } : null));
                   }}
                 />
+              </div>
+              {paramsEnabled.pres && (
+                <input
+                  type="range"
+                  className="model-slider mt-1 w-full cursor-pointer"
+                  min={-2}
+                  max={2}
+                  step={0.1}
+                  value={editState.presence_penalty ?? 0.0}
+                  onChange={(e) =>
+                    setEditState((prev) => (prev ? { ...prev, presence_penalty: parseFloat(e.target.value) } : null))
+                  }
+                />
+              )}
+            </div>
+
+            <div className="w-[135px] shrink-0">
+              <div className="flex items-center gap-1.5">
+                <span className="whitespace-nowrap text-[12px] font-semibold text-slate-600">Top P:</span>
                 <input
                   type="number"
                   step={0.1}
@@ -651,25 +653,44 @@ export default function PromptsPage() {
                     const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, 0), 1);
                     setEditState((prev) => (prev ? { ...prev, top_p: val } : null));
                   }}
-                  className="min-w-0 flex-1 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-right font-mono text-xs disabled:opacity-40"
+                  className="w-[70px] border-none bg-transparent text-right text-[12px] font-semibold font-mono text-slate-800 outline-none focus:rounded focus:ring-1 focus:ring-blue-400 disabled:text-slate-400"
                 />
-              </label>
+                <ToggleSwitch
+                  checked={paramsEnabled.top}
+                  onChange={(checked) => {
+                    setParamsEnabled((p) => ({ ...p, top: checked }));
+                    if (!checked) setEditState((prev) => (prev ? { ...prev, top_p: 1.0 } : null));
+                  }}
+                />
+              </div>
+              {paramsEnabled.top && (
+                <input
+                  type="range"
+                  className="model-slider mt-1 w-full cursor-pointer"
+                  min={0}
+                  max={1}
+                  step={0.1}
+                  value={editState.top_p ?? 1.0}
+                  onChange={(e) => setEditState((prev) => (prev ? { ...prev, top_p: parseFloat(e.target.value) } : null))}
+                />
+              )}
             </div>
 
-            <div className="ml-auto flex shrink-0 items-center gap-2">
-              <button
-                type="button"
-                onClick={() => saveMutation.mutate(editState)}
-                disabled={saveMutation.isPending || !isDirty}
-                className="relative inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 disabled:opacity-70"
-              >
-                {isDirty && (
-                  <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-amber-300 ring-2 ring-white" aria-hidden />
-                )}
-                <Save className="h-4 w-4" />
-                {isDirty ? "Save*" : "Save"}
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => saveMutation.mutate(editState)}
+              disabled={saveMutation.isPending || !isDirty}
+              className="relative ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-[7px] text-[13px] font-medium text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isDirty && (
+                <span
+                  className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-amber-400 ring-2 ring-white"
+                  aria-hidden
+                />
+              )}
+              <Save className="h-4 w-4" />
+              Save
+            </button>
           </div>
         </div>
       )}

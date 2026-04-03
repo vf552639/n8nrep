@@ -34,16 +34,14 @@ export function ModelSelector({ value, models, onChange, className }: ModelSelec
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between bg-white border border-slate-200 hover:border-blue-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-md px-3 py-1.5 text-sm text-slate-800 transition-colors shadow-sm"
+        className="flex w-full min-w-[220px] max-w-[260px] items-center justify-between rounded-lg border border-slate-300 bg-white px-3 py-[7px] text-left text-[13px] font-medium font-mono text-slate-800 shadow-inner transition-colors hover:border-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
       >
-        <span className="truncate flex items-center gap-2">
-          <span className="text-slate-400">🤖</span> {value || "Select a model..."}
-        </span>
-        <ChevronDown className="w-4 h-4 text-slate-400" />
+        <span className="min-w-0 flex-1 truncate">{value || "Select a model..."}</span>
+        <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
       </button>
 
       {isOpen && (
-        <div className="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-64 flex flex-col overflow-hidden">
+        <div className="absolute z-50 mt-1 flex max-h-64 w-full flex-col overflow-hidden rounded-xl border border-slate-300 bg-white shadow-xl">
           <div className="sticky top-0 bg-white border-b border-slate-100 p-2 shrink-0">
             <div className="relative">
               <Search className="absolute left-2.5 top-2 h-4 w-4 text-slate-400" />
