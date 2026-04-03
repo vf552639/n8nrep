@@ -24,10 +24,15 @@ export const promptsApi = {
       user_prompt: string;
       model: string;
       max_tokens?: number | null;
+      max_tokens_enabled: boolean;
       temperature: number;
+      temperature_enabled: boolean;
       frequency_penalty?: number;
+      frequency_penalty_enabled: boolean;
       presence_penalty?: number;
+      presence_penalty_enabled: boolean;
       top_p?: number;
+      top_p_enabled: boolean;
       skip_in_pipeline: boolean;
     }
   ) => api.put<Prompt>(`/prompts/${id}`, data).then((res) => res.data),
@@ -40,6 +45,19 @@ export const promptsApi = {
     
   testPrompt: (
     id: string,
-    data: { context: Record<string, unknown>; model: string; max_tokens?: number | null }
+    data: {
+      context: Record<string, unknown>;
+      model: string;
+      max_tokens?: number | null;
+      max_tokens_enabled: boolean;
+      temperature: number;
+      temperature_enabled: boolean;
+      frequency_penalty: number;
+      frequency_penalty_enabled: boolean;
+      presence_penalty: number;
+      presence_penalty_enabled: boolean;
+      top_p: number;
+      top_p_enabled: boolean;
+    }
   ) => api.post(`/prompts/${id}/test`, data).then((res) => res.data),
 };

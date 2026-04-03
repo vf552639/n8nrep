@@ -6,6 +6,7 @@ from app.database import get_db
 from app.models.prompt import Prompt
 from app.services.llm import generate_text
 from app.services.pipeline import apply_template_vars
+from app.services.prompt_llm_kwargs import llm_sampling_kwargs_from_prompt
 
 router = APIRouter()
 
@@ -41,10 +42,15 @@ class PromptUpdate(BaseModel):
     user_prompt: str = ""
     model: str
     max_tokens: Optional[int] = None
+    max_tokens_enabled: bool = False
     temperature: Optional[float] = 0.7
+    temperature_enabled: bool = False
     frequency_penalty: Optional[float] = 0.0
+    frequency_penalty_enabled: bool = False
     presence_penalty: Optional[float] = 0.0
+    presence_penalty_enabled: bool = False
     top_p: Optional[float] = 1.0
+    top_p_enabled: bool = False
     skip_in_pipeline: bool = False
 
 class PromptTest(BaseModel):
@@ -62,6 +68,15 @@ class PromptTestContext(BaseModel):
     context: Dict[str, Any]
     model: Optional[str] = None
     max_tokens: Optional[int] = None
+    max_tokens_enabled: Optional[bool] = None
+    temperature: Optional[float] = None
+    temperature_enabled: Optional[bool] = None
+    frequency_penalty: Optional[float] = None
+    frequency_penalty_enabled: Optional[bool] = None
+    presence_penalty: Optional[float] = None
+    presence_penalty_enabled: Optional[bool] = None
+    top_p: Optional[float] = None
+    top_p_enabled: Optional[bool] = None
 
 @router.get("/")
 def get_prompts(active_only: bool = Query(True), db: Session = Depends(get_db)):
@@ -135,10 +150,15 @@ def restore_prompt_version(
         user_prompt=_sanitize(source.user_prompt or ""),
         model=source.model,
         max_tokens=source.max_tokens,
+        max_tokens_enabled=getattr(source, "max_tokens_enabled", False),
         temperature=source.temperature,
+        temperature_enabled=getattr(source, "temperature_enabled", False),
         frequency_penalty=source.frequency_penalty,
+        frequency_penalty_enabled=getattr(source, "frequency_penalty_enabled", False),
         presence_penalty=source.presence_penalty,
+        presence_penalty_enabled=getattr(source, "presence_penalty_enabled", False),
         top_p=source.top_p,
+        top_p_enabled=getattr(source, "top_p_enabled", False),
     )
     db.add(new_prompt)
     db.commit()
@@ -157,10 +177,15 @@ def _prompt_to_response(prompt: Prompt) -> Dict[str, Any]:
         "skip_in_pipeline": prompt.skip_in_pipeline,
         "model": prompt.model,
         "max_tokens": prompt.max_tokens,
+        "max_tokens_enabled": bool(getattr(prompt, "max_tokens_enabled", False)),
         "temperature": prompt.temperature if prompt.temperature is not None else 0.7,
+        "temperature_enabled": bool(getattr(prompt, "temperature_enabled", False)),
         "frequency_penalty": prompt.frequency_penalty if prompt.frequency_penalty is not None else 0.0,
+        "frequency_penalty_enabled": bool(getattr(prompt, "frequency_penalty_enabled", False)),
         "presence_penalty": prompt.presence_penalty if prompt.presence_penalty is not None else 0.0,
+        "presence_penalty_enabled": bool(getattr(prompt, "presence_penalty_enabled", False)),
         "top_p": prompt.top_p if prompt.top_p is not None else 1.0,
+        "top_p_enabled": bool(getattr(prompt, "top_p_enabled", False)),
         "updated_at": prompt.updated_at.isoformat() if prompt.updated_at else None,
     }
 
@@ -184,10 +209,15 @@ def update_prompt_in_place(
     prompt.user_prompt = _sanitize(body.user_prompt or "")
     prompt.model = body.model
     prompt.max_tokens = body.max_tokens
+    prompt.max_tokens_enabled = body.max_tokens_enabled
     prompt.temperature = body.temperature
+    prompt.temperature_enabled = body.temperature_enabled
     prompt.frequency_penalty = body.frequency_penalty
+    prompt.frequency_penalty_enabled = body.frequency_penalty_enabled
     prompt.presence_penalty = body.presence_penalty
+    prompt.presence_penalty_enabled = body.presence_penalty_enabled
     prompt.top_p = body.top_p
+    prompt.top_p_enabled = body.top_p_enabled
     prompt.skip_in_pipeline = body.skip_in_pipeline
     db.commit()
     db.refresh(prompt)
@@ -202,6 +232,10 @@ def create_prompt(prompt_in: PromptCreate, db: Session = Depends(get_db)):
     
     db.query(Prompt).filter(Prompt.agent_name == prompt_in.agent_name).update({"is_active": False})
     
+    t_val = prompt_in.temperature if prompt_in.temperature is not None else 0.7
+    f_val = prompt_in.frequency_penalty if prompt_in.frequency_penalty is not None else 0.0
+    p_val = prompt_in.presence_penalty if prompt_in.presence_penalty is not None else 0.0
+    tp_val = prompt_in.top_p if prompt_in.top_p is not None else 1.0
     new_prompt = Prompt(
         agent_name=prompt_in.agent_name,
         version=next_version,
@@ -211,10 +245,15 @@ def create_prompt(prompt_in: PromptCreate, db: Session = Depends(get_db)):
         user_prompt=_sanitize(prompt_in.user_prompt),
         model=prompt_in.model,
         max_tokens=prompt_in.max_tokens,
-        temperature=prompt_in.temperature,
-        frequency_penalty=prompt_in.frequency_penalty,
-        presence_penalty=prompt_in.presence_penalty,
-        top_p=prompt_in.top_p
+        max_tokens_enabled=prompt_in.max_tokens is not None and prompt_in.max_tokens > 0,
+        temperature=t_val,
+        temperature_enabled=abs(float(t_val) - 0.7) > 0.0001,
+        frequency_penalty=f_val,
+        frequency_penalty_enabled=abs(float(f_val)) > 0.0001,
+        presence_penalty=p_val,
+        presence_penalty_enabled=abs(float(p_val)) > 0.0001,
+        top_p=tp_val,
+        top_p_enabled=abs(float(tp_val) - 1.0) > 0.0001,
     )
     db.add(new_prompt)
     db.commit()
@@ -255,19 +294,26 @@ def test_prompt_by_id(prompt_id: str, test_ctx: PromptTestContext, db: Session =
         user_text, _ = apply_template_vars(prompt.user_prompt or "", test_ctx.context)
         
         target_model = test_ctx.model if test_ctx.model else prompt.model
-        max_tokens = (
-            test_ctx.max_tokens if test_ctx.max_tokens is not None else prompt.max_tokens
+
+        sampling = llm_sampling_kwargs_from_prompt(
+            prompt,
+            max_tokens_enabled=test_ctx.max_tokens_enabled,
+            max_tokens=test_ctx.max_tokens,
+            temperature_enabled=test_ctx.temperature_enabled,
+            temperature=test_ctx.temperature,
+            frequency_penalty_enabled=test_ctx.frequency_penalty_enabled,
+            frequency_penalty=test_ctx.frequency_penalty,
+            presence_penalty_enabled=test_ctx.presence_penalty_enabled,
+            presence_penalty=test_ctx.presence_penalty,
+            top_p_enabled=test_ctx.top_p_enabled,
+            top_p=test_ctx.top_p,
         )
 
         text, cost, actual_model, usage = generate_text(
             system_prompt=system_text,
             user_prompt=user_text,
             model=target_model,
-            max_tokens=max_tokens,
-            temperature=prompt.temperature,
-            frequency_penalty=prompt.frequency_penalty,
-            presence_penalty=prompt.presence_penalty,
-            top_p=prompt.top_p
+            **sampling,
         )
         usage_out: Dict[str, Any] = {}
         if usage:

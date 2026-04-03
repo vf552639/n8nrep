@@ -154,11 +154,11 @@ function buildCleanPromptFromServer(p: Prompt): Prompt {
 
 function paramsEnabledFromPrompt(p: Prompt) {
   return {
-    maxTokens: p.max_tokens != null && p.max_tokens > 0,
-    temp: (p.temperature ?? 0.7) !== 1.0,
-    freq: (p.frequency_penalty ?? 0) !== 0.0,
-    pres: (p.presence_penalty ?? 0) !== 0.0,
-    top: (p.top_p ?? 1) !== 1.0,
+    maxTokens: !!p.max_tokens_enabled,
+    temp: !!p.temperature_enabled,
+    freq: !!p.frequency_penalty_enabled,
+    pres: !!p.presence_penalty_enabled,
+    top: !!p.top_p_enabled,
   };
 }
 
@@ -174,31 +174,36 @@ function isPromptDirty(
   if ((edit.model ?? "") !== (saved.model ?? "")) return true;
   if (!!edit.skip_in_pipeline !== !!saved.skip_in_pipeline) return true;
 
-  const savedMaxOn = saved.max_tokens != null && saved.max_tokens > 0;
-  if (params.maxTokens !== savedMaxOn) return true;
-  if (params.maxTokens && (edit.max_tokens ?? null) !== (saved.max_tokens ?? null)) return true;
+  const savedParams = paramsEnabledFromPrompt(saved as Prompt);
+  if (params.maxTokens !== savedParams.maxTokens) return true;
+  if (params.temp !== savedParams.temp) return true;
+  if (params.freq !== savedParams.freq) return true;
+  if (params.pres !== savedParams.pres) return true;
+  if (params.top !== savedParams.top) return true;
 
-  const savedTempOn = (saved.temperature ?? 0.7) !== 1.0;
-  if (params.temp !== savedTempOn) return true;
-  if (params.temp) {
-    const editTemp = Math.round((edit.temperature ?? 0.7) * 10) / 10;
-    const savedTemp = Math.round((saved.temperature ?? 0.7) * 10) / 10;
-    if (editTemp !== savedTemp) return true;
+  if (params.maxTokens) {
+    if ((edit.max_tokens ?? null) !== (saved.max_tokens ?? null)) return true;
   }
-
-  const savedFreqOn = (saved.frequency_penalty ?? 0) !== 0;
-  const savedPresOn = (saved.presence_penalty ?? 0) !== 0;
-  const savedTopOn = (saved.top_p ?? 1) !== 1;
-  if (params.freq !== savedFreqOn) return true;
-  if (params.pres !== savedPresOn) return true;
-  if (params.top !== savedTopOn) return true;
-
-  const effFreq = params.freq ? Math.round((edit.frequency_penalty ?? 0) * 10) / 10 : 0;
-  const effPres = params.pres ? Math.round((edit.presence_penalty ?? 0) * 10) / 10 : 0;
-  const effTop = params.top ? Math.round((edit.top_p ?? 1) * 10) / 10 : 1;
-  if (effFreq !== Math.round((saved.frequency_penalty ?? 0) * 10) / 10) return true;
-  if (effPres !== Math.round((saved.presence_penalty ?? 0) * 10) / 10) return true;
-  if (effTop !== Math.round((saved.top_p ?? 1) * 10) / 10) return true;
+  if (params.temp) {
+    const editVal = Math.round((edit.temperature ?? 0.7) * 10) / 10;
+    const savedVal = Math.round((saved.temperature ?? 0.7) * 10) / 10;
+    if (editVal !== savedVal) return true;
+  }
+  if (params.freq) {
+    const editVal = Math.round((edit.frequency_penalty ?? 0) * 10) / 10;
+    const savedVal = Math.round((saved.frequency_penalty ?? 0) * 10) / 10;
+    if (editVal !== savedVal) return true;
+  }
+  if (params.pres) {
+    const editVal = Math.round((edit.presence_penalty ?? 0) * 10) / 10;
+    const savedVal = Math.round((saved.presence_penalty ?? 0) * 10) / 10;
+    if (editVal !== savedVal) return true;
+  }
+  if (params.top) {
+    const editVal = Math.round((edit.top_p ?? 1) * 10) / 10;
+    const savedVal = Math.round((saved.top_p ?? 1) * 10) / 10;
+    if (editVal !== savedVal) return true;
+  }
 
   return false;
 }
@@ -311,10 +316,15 @@ export default function PromptsPage() {
         user_prompt: data.user_prompt ?? "",
         model: data.model ?? "",
         max_tokens: paramsEnabled.maxTokens ? (data.max_tokens ?? null) : null,
-        temperature: paramsEnabled.temp ? (data.temperature ?? 0.7) : 1.0,
+        max_tokens_enabled: paramsEnabled.maxTokens,
+        temperature: paramsEnabled.temp ? (data.temperature ?? 0.7) : 0.7,
+        temperature_enabled: paramsEnabled.temp,
         frequency_penalty: paramsEnabled.freq ? (data.frequency_penalty ?? 0.0) : 0.0,
+        frequency_penalty_enabled: paramsEnabled.freq,
         presence_penalty: paramsEnabled.pres ? (data.presence_penalty ?? 0.0) : 0.0,
+        presence_penalty_enabled: paramsEnabled.pres,
         top_p: paramsEnabled.top ? (data.top_p ?? 1.0) : 1.0,
+        top_p_enabled: paramsEnabled.top,
         skip_in_pipeline: !!data.skip_in_pipeline,
       });
     },
@@ -517,7 +527,7 @@ export default function PromptsPage() {
                   min={0}
                   max={2}
                   disabled={!paramsEnabled.temp}
-                  value={paramsEnabled.temp ? (editState.temperature ?? 0.7) : 1.0}
+                  value={paramsEnabled.temp ? (editState.temperature ?? 0.7) : 0.7}
                   onChange={(e) =>
                     setEditState((prev) => (prev ? { ...prev, temperature: parseFloat(e.target.value) } : prev))
                   }
@@ -531,7 +541,6 @@ export default function PromptsPage() {
                   checked={paramsEnabled.temp}
                   onChange={(checked) => {
                     setParamsEnabled((p) => ({ ...p, temp: checked }));
-                    if (!checked) setEditState((prev) => (prev ? { ...prev, temperature: 1.0 } : prev));
                   }}
                 />
               </div>
@@ -559,7 +568,7 @@ export default function PromptsPage() {
                   min={-2}
                   max={2}
                   disabled={!paramsEnabled.freq}
-                  value={editState.frequency_penalty ?? 0.0}
+                  value={paramsEnabled.freq ? (editState.frequency_penalty ?? 0.0) : 0.0}
                   onChange={(e) =>
                     setEditState((prev) => (prev ? { ...prev, frequency_penalty: parseFloat(e.target.value) } : prev))
                   }
@@ -573,7 +582,6 @@ export default function PromptsPage() {
                   checked={paramsEnabled.freq}
                   onChange={(checked) => {
                     setParamsEnabled((p) => ({ ...p, freq: checked }));
-                    if (!checked) setEditState((prev) => (prev ? { ...prev, frequency_penalty: 0.0 } : prev));
                   }}
                 />
               </div>
@@ -601,7 +609,7 @@ export default function PromptsPage() {
                   min={-2}
                   max={2}
                   disabled={!paramsEnabled.pres}
-                  value={editState.presence_penalty ?? 0.0}
+                  value={paramsEnabled.pres ? (editState.presence_penalty ?? 0.0) : 0.0}
                   onChange={(e) =>
                     setEditState((prev) => (prev ? { ...prev, presence_penalty: parseFloat(e.target.value) } : prev))
                   }
@@ -615,7 +623,6 @@ export default function PromptsPage() {
                   checked={paramsEnabled.pres}
                   onChange={(checked) => {
                     setParamsEnabled((p) => ({ ...p, pres: checked }));
-                    if (!checked) setEditState((prev) => (prev ? { ...prev, presence_penalty: 0.0 } : prev));
                   }}
                 />
               </div>
@@ -643,7 +650,7 @@ export default function PromptsPage() {
                   min={0}
                   max={1}
                   disabled={!paramsEnabled.top}
-                  value={editState.top_p ?? 1.0}
+                  value={paramsEnabled.top ? (editState.top_p ?? 1.0) : 1.0}
                   onChange={(e) => setEditState((prev) => (prev ? { ...prev, top_p: parseFloat(e.target.value) } : prev))}
                   onBlur={(e) => {
                     const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, 0), 1);
@@ -655,7 +662,6 @@ export default function PromptsPage() {
                   checked={paramsEnabled.top}
                   onChange={(checked) => {
                     setParamsEnabled((p) => ({ ...p, top: checked }));
-                    if (!checked) setEditState((prev) => (prev ? { ...prev, top_p: 1.0 } : prev));
                   }}
                 />
               </div>
@@ -821,12 +827,23 @@ export default function PromptsPage() {
                 {isTestOpen && editState.id && (
                   <PromptTestPanel
                     promptId={editState.id}
-                    model={editState.model || "openai/gpt-4o"}
-                    maxTokens={paramsEnabled.maxTokens ? (editState.max_tokens ?? null) : null}
                     agentLabel={AGENT_MAP[activePromptListInfo.agent_name] || activePromptListInfo.agent_name}
                     testTab={testTab}
                     setTestTab={setTestTab}
                     onClose={() => setIsTestOpen(false)}
+                    llm={{
+                      model: editState.model || "openai/gpt-4o",
+                      max_tokens_enabled: paramsEnabled.maxTokens,
+                      max_tokens: editState.max_tokens ?? null,
+                      temperature_enabled: paramsEnabled.temp,
+                      temperature: editState.temperature ?? 0.7,
+                      frequency_penalty_enabled: paramsEnabled.freq,
+                      frequency_penalty: editState.frequency_penalty ?? 0,
+                      presence_penalty_enabled: paramsEnabled.pres,
+                      presence_penalty: editState.presence_penalty ?? 0,
+                      top_p_enabled: paramsEnabled.top,
+                      top_p: editState.top_p ?? 1,
+                    }}
                   />
                 )}
               </div>
@@ -874,18 +891,30 @@ export default function PromptsPage() {
   );
 }
 
+type PromptTestLlmOptions = {
+  model: string;
+  max_tokens_enabled: boolean;
+  max_tokens: number | null;
+  temperature_enabled: boolean;
+  temperature: number;
+  frequency_penalty_enabled: boolean;
+  frequency_penalty: number;
+  presence_penalty_enabled: boolean;
+  presence_penalty: number;
+  top_p_enabled: boolean;
+  top_p: number;
+};
+
 function PromptTestPanel({
   promptId,
-  model,
-  maxTokens,
+  llm,
   agentLabel,
   testTab,
   setTestTab,
   onClose,
 }: {
   promptId: string;
-  model: string;
-  maxTokens: number | null;
+  llm: PromptTestLlmOptions;
   agentLabel: string;
   testTab: TestTab;
   setTestTab: (t: TestTab) => void;
@@ -911,8 +940,17 @@ function PromptTestPanel({
 
       return promptsApi.testPrompt(promptId, {
         context: parsedContext,
-        model,
-        max_tokens: maxTokens,
+        model: llm.model,
+        max_tokens: llm.max_tokens_enabled ? llm.max_tokens : null,
+        max_tokens_enabled: llm.max_tokens_enabled,
+        temperature: llm.temperature,
+        temperature_enabled: llm.temperature_enabled,
+        frequency_penalty: llm.frequency_penalty,
+        frequency_penalty_enabled: llm.frequency_penalty_enabled,
+        presence_penalty: llm.presence_penalty,
+        presence_penalty_enabled: llm.presence_penalty_enabled,
+        top_p: llm.top_p,
+        top_p_enabled: llm.top_p_enabled,
       }) as Promise<TestResultShape>;
     },
     onSuccess: (data) => {

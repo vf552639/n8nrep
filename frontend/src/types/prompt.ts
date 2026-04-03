@@ -7,10 +7,15 @@ export interface Prompt {
   user_prompt: string;
   model: string;
   max_tokens?: number | null;
+  max_tokens_enabled?: boolean;
   temperature: number;
+  temperature_enabled?: boolean;
   frequency_penalty?: number;
+  frequency_penalty_enabled?: boolean;
   presence_penalty?: number;
+  presence_penalty_enabled?: boolean;
   top_p?: number;
+  top_p_enabled?: boolean;
   response_format?: string;
   skip_in_pipeline?: boolean;
   min_output_length?: number;

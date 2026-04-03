@@ -14,6 +14,10 @@ from app.models.project import SiteProject
 from app.services.serp import fetch_serp_data
 from app.services.scraper import scrape_urls
 from app.services.llm import generate_text
+from app.services.prompt_llm_kwargs import (
+    llm_sampling_kwargs_from_prompt,
+    format_llm_params_log_line,
+)
 from app.services.template_engine import generate_full_page, get_template_for_reference
 from app.services.legal_reference import inject_legal_template_vars
 from app.services.notifier import notify_task_success, notify_task_failed
@@ -287,17 +291,13 @@ def call_agent(ctx: PipelineContext, agent_name: str, context: str, response_for
             step=agent_name,
         )
     
+    sampling = llm_sampling_kwargs_from_prompt(prompt)
     kwargs = {
         "system_prompt": system_text,
         "user_prompt": user_msg,
         "model": prompt.model,
-        "temperature": prompt.temperature,
-        "frequency_penalty": prompt.frequency_penalty,
-        "presence_penalty": prompt.presence_penalty,
-        "top_p": prompt.top_p,
+        **sampling,
     }
-    if prompt.max_tokens is not None and prompt.max_tokens > 0:
-        kwargs["max_tokens"] = prompt.max_tokens
     if response_format:
         kwargs["response_format"] = response_format
 
@@ -337,7 +337,7 @@ def call_agent(ctx: PipelineContext, agent_name: str, context: str, response_for
     add_log(
         ctx.db,
         ctx.task,
-        f"[{agent_name}] Sending LLM request (model={prompt.model}, max_tokens={kwargs.get('max_tokens')})",
+        format_llm_params_log_line(agent_name, prompt, kwargs),
         level="info",
         step=agent_name,
     )
