@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Editor from "@monaco-editor/react";
 import toast from "react-hot-toast";
@@ -274,7 +274,8 @@ export default function PromptsPage() {
     enabled: !!derivedActiveId,
   });
 
-
+  /** Tracks which prompt id we already hydrated from the server (avoids refetch clobbering local edits). */
+  const syncedPromptIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!activePromptId && derivedActiveId) {
@@ -282,23 +283,15 @@ export default function PromptsPage() {
     }
   }, [activePromptId, derivedActiveId]);
 
-  /**
-   * Hydrate editState + paramsEnabled when the active prompt id changes or when that prompt
-   * first appears in cache. Depends on stable keys only — not on fullPrompt object identity
-   * (refetch must not reset local edits like model selection).
-   */
   useEffect(() => {
     if (!fullPrompt || fullPrompt.id !== derivedActiveId) return;
-    let shouldSyncParams = false;
-    setEditState((prev) => {
-      if (prev && prev.id === fullPrompt.id) return prev;
-      shouldSyncParams = true;
-      return buildCleanPromptFromServer(fullPrompt);
-    });
-    if (shouldSyncParams) {
+
+    if (syncedPromptIdRef.current !== fullPrompt.id) {
+      setEditState(buildCleanPromptFromServer(fullPrompt));
       setParamsEnabled(paramsEnabledFromPrompt(fullPrompt));
+      syncedPromptIdRef.current = fullPrompt.id;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: avoid reset on RQ refetch (same id, new object ref)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: avoid reset on RQ refetch
   }, [derivedActiveId, fullPrompt?.id]);
 
   const isDirty = useMemo(
