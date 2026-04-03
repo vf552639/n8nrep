@@ -1700,8 +1700,6 @@ def phase_final_editing(ctx: PipelineContext):
     editing_context = (
         f"Improved HTML:\n{improved_html}\n\n"
         f"Original Outline:\n{json.dumps(outline_json, ensure_ascii=False)}\n\n"
-        f"Target word count (competitor average): {avg_words} words\n"
-        f"Current article stats: {input_word_count} words, {input_char_count} characters\n\n"
         f"Review & verify this HTML article matches the outline structure."
     )
     add_log(ctx.db, ctx.task, "Starting Final Editing...", step=STEP_FINAL_EDIT)
