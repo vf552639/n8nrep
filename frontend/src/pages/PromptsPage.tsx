@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Editor from "@monaco-editor/react";
 import toast from "react-hot-toast";
@@ -221,7 +221,6 @@ interface TestResultShape {
 
 export default function PromptsPage() {
   const queryClient = useQueryClient();
-  const justSavedRef = useRef(false);
   const [activePromptId, setActivePromptId] = useState<string | null>(null);
   const [editState, setEditState] = useState<Partial<Prompt> | null>(null);
   const [isTestOpen, setIsTestOpen] = useState(false);
@@ -279,25 +278,23 @@ export default function PromptsPage() {
   }, [activePromptId, derivedActiveId]);
 
   /**
-   * Hydrate editState + paramsEnabled only when switching prompts or after save cleared state.
-   * On React Query refetch of the same prompt id, keep local edits (e.g. model change) intact.
+   * Hydrate editState + paramsEnabled when the active prompt id changes or when that prompt
+   * first appears in cache. Depends on stable keys only — not on fullPrompt object identity
+   * (refetch must not reset local edits like model selection).
    */
   useEffect(() => {
     if (!fullPrompt || fullPrompt.id !== derivedActiveId) return;
-    if (justSavedRef.current) {
-      justSavedRef.current = false;
-      return;
-    }
-    let hydrated = false;
+    let shouldSyncParams = false;
     setEditState((prev) => {
       if (prev && prev.id === fullPrompt.id) return prev;
-      hydrated = true;
+      shouldSyncParams = true;
       return buildCleanPromptFromServer(fullPrompt);
     });
-    if (hydrated) {
+    if (shouldSyncParams) {
       setParamsEnabled(paramsEnabledFromPrompt(fullPrompt));
     }
-  }, [derivedActiveId, fullPrompt]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: avoid reset on RQ refetch (same id, new object ref)
+  }, [derivedActiveId, fullPrompt?.id]);
 
   const isDirty = useMemo(
     () => isPromptDirty(editState, fullPrompt ?? null, paramsEnabled),
@@ -323,7 +320,6 @@ export default function PromptsPage() {
     },
     onSuccess: (fullUpdatedPrompt) => {
       toast.success("Prompt saved successfully");
-      justSavedRef.current = true;
       const clean = buildCleanPromptFromServer(fullUpdatedPrompt);
       setEditState(clean);
       setParamsEnabled(paramsEnabledFromPrompt(fullUpdatedPrompt));
@@ -455,13 +451,13 @@ export default function PromptsPage() {
         <div className="w-full min-w-0 shrink-0 rounded-xl border border-slate-300/80 bg-gradient-to-b from-[#e8ebef] to-[#d5d9df] px-4 py-2.5 shadow-md">
           <div className="mb-2 text-[13px] font-semibold text-slate-700">Model Settings</div>
 
-          <div className="flex items-start gap-5 overflow-x-auto pb-1">
+          <div className="flex min-h-[52px] items-start gap-5 overflow-x-auto overflow-y-visible pb-1">
             <div className="shrink-0">
               <ModelSelector
                 className="w-[240px]"
                 value={editState.model || "openai/gpt-4o"}
                 models={orModels || ["openai/gpt-4o"]}
-                onChange={(m) => setEditState((prev) => (prev ? { ...prev, model: m } : null))}
+                onChange={(m) => setEditState((prev) => (prev ? { ...prev, model: m } : prev))}
               />
             </div>
 
@@ -484,7 +480,7 @@ export default function PromptsPage() {
                             ...prev,
                             max_tokens: raw === "" ? null : parseInt(raw, 10) || null,
                           }
-                        : null
+                        : prev
                     );
                   }}
                   className="w-[80px] border-none bg-transparent text-right text-[12px] font-semibold font-mono text-slate-800 outline-none focus:rounded focus:ring-1 focus:ring-blue-400 disabled:text-slate-400"
@@ -494,10 +490,10 @@ export default function PromptsPage() {
                   onChange={(checked) => {
                     setParamsEnabled((p) => ({ ...p, maxTokens: checked }));
                     if (!checked) {
-                      setEditState((prev) => (prev ? { ...prev, max_tokens: null } : null));
+                      setEditState((prev) => (prev ? { ...prev, max_tokens: null } : prev));
                     } else {
                       setEditState((prev) => {
-                        if (!prev) return null;
+                        if (!prev) return prev;
                         const fromPrev =
                           prev.max_tokens != null && prev.max_tokens > 0 ? prev.max_tokens : null;
                         const fromDb =
@@ -523,11 +519,11 @@ export default function PromptsPage() {
                   disabled={!paramsEnabled.temp}
                   value={paramsEnabled.temp ? (editState.temperature ?? 0.7) : 1.0}
                   onChange={(e) =>
-                    setEditState((prev) => (prev ? { ...prev, temperature: parseFloat(e.target.value) } : null))
+                    setEditState((prev) => (prev ? { ...prev, temperature: parseFloat(e.target.value) } : prev))
                   }
                   onBlur={(e) => {
                     const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, 0), 2);
-                    setEditState((prev) => (prev ? { ...prev, temperature: val } : null));
+                    setEditState((prev) => (prev ? { ...prev, temperature: val } : prev));
                   }}
                   className="w-[70px] border-none bg-transparent text-right text-[12px] font-semibold font-mono text-slate-800 outline-none focus:rounded focus:ring-1 focus:ring-blue-400 disabled:text-slate-400"
                 />
@@ -535,7 +531,7 @@ export default function PromptsPage() {
                   checked={paramsEnabled.temp}
                   onChange={(checked) => {
                     setParamsEnabled((p) => ({ ...p, temp: checked }));
-                    if (!checked) setEditState((prev) => (prev ? { ...prev, temperature: 1.0 } : null));
+                    if (!checked) setEditState((prev) => (prev ? { ...prev, temperature: 1.0 } : prev));
                   }}
                 />
               </div>
@@ -548,7 +544,7 @@ export default function PromptsPage() {
                   step={0.1}
                   value={editState.temperature ?? 0.7}
                   onChange={(e) =>
-                    setEditState((prev) => (prev ? { ...prev, temperature: parseFloat(e.target.value) } : null))
+                    setEditState((prev) => (prev ? { ...prev, temperature: parseFloat(e.target.value) } : prev))
                   }
                 />
               )}
@@ -565,11 +561,11 @@ export default function PromptsPage() {
                   disabled={!paramsEnabled.freq}
                   value={editState.frequency_penalty ?? 0.0}
                   onChange={(e) =>
-                    setEditState((prev) => (prev ? { ...prev, frequency_penalty: parseFloat(e.target.value) } : null))
+                    setEditState((prev) => (prev ? { ...prev, frequency_penalty: parseFloat(e.target.value) } : prev))
                   }
                   onBlur={(e) => {
                     const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, -2), 2);
-                    setEditState((prev) => (prev ? { ...prev, frequency_penalty: val } : null));
+                    setEditState((prev) => (prev ? { ...prev, frequency_penalty: val } : prev));
                   }}
                   className="w-[70px] border-none bg-transparent text-right text-[12px] font-semibold font-mono text-slate-800 outline-none focus:rounded focus:ring-1 focus:ring-blue-400 disabled:text-slate-400"
                 />
@@ -577,7 +573,7 @@ export default function PromptsPage() {
                   checked={paramsEnabled.freq}
                   onChange={(checked) => {
                     setParamsEnabled((p) => ({ ...p, freq: checked }));
-                    if (!checked) setEditState((prev) => (prev ? { ...prev, frequency_penalty: 0.0 } : null));
+                    if (!checked) setEditState((prev) => (prev ? { ...prev, frequency_penalty: 0.0 } : prev));
                   }}
                 />
               </div>
@@ -590,7 +586,7 @@ export default function PromptsPage() {
                   step={0.1}
                   value={editState.frequency_penalty ?? 0.0}
                   onChange={(e) =>
-                    setEditState((prev) => (prev ? { ...prev, frequency_penalty: parseFloat(e.target.value) } : null))
+                    setEditState((prev) => (prev ? { ...prev, frequency_penalty: parseFloat(e.target.value) } : prev))
                   }
                 />
               )}
@@ -607,11 +603,11 @@ export default function PromptsPage() {
                   disabled={!paramsEnabled.pres}
                   value={editState.presence_penalty ?? 0.0}
                   onChange={(e) =>
-                    setEditState((prev) => (prev ? { ...prev, presence_penalty: parseFloat(e.target.value) } : null))
+                    setEditState((prev) => (prev ? { ...prev, presence_penalty: parseFloat(e.target.value) } : prev))
                   }
                   onBlur={(e) => {
                     const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, -2), 2);
-                    setEditState((prev) => (prev ? { ...prev, presence_penalty: val } : null));
+                    setEditState((prev) => (prev ? { ...prev, presence_penalty: val } : prev));
                   }}
                   className="w-[70px] border-none bg-transparent text-right text-[12px] font-semibold font-mono text-slate-800 outline-none focus:rounded focus:ring-1 focus:ring-blue-400 disabled:text-slate-400"
                 />
@@ -619,7 +615,7 @@ export default function PromptsPage() {
                   checked={paramsEnabled.pres}
                   onChange={(checked) => {
                     setParamsEnabled((p) => ({ ...p, pres: checked }));
-                    if (!checked) setEditState((prev) => (prev ? { ...prev, presence_penalty: 0.0 } : null));
+                    if (!checked) setEditState((prev) => (prev ? { ...prev, presence_penalty: 0.0 } : prev));
                   }}
                 />
               </div>
@@ -632,7 +628,7 @@ export default function PromptsPage() {
                   step={0.1}
                   value={editState.presence_penalty ?? 0.0}
                   onChange={(e) =>
-                    setEditState((prev) => (prev ? { ...prev, presence_penalty: parseFloat(e.target.value) } : null))
+                    setEditState((prev) => (prev ? { ...prev, presence_penalty: parseFloat(e.target.value) } : prev))
                   }
                 />
               )}
@@ -648,10 +644,10 @@ export default function PromptsPage() {
                   max={1}
                   disabled={!paramsEnabled.top}
                   value={editState.top_p ?? 1.0}
-                  onChange={(e) => setEditState((prev) => (prev ? { ...prev, top_p: parseFloat(e.target.value) } : null))}
+                  onChange={(e) => setEditState((prev) => (prev ? { ...prev, top_p: parseFloat(e.target.value) } : prev))}
                   onBlur={(e) => {
                     const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, 0), 1);
-                    setEditState((prev) => (prev ? { ...prev, top_p: val } : null));
+                    setEditState((prev) => (prev ? { ...prev, top_p: val } : prev));
                   }}
                   className="w-[70px] border-none bg-transparent text-right text-[12px] font-semibold font-mono text-slate-800 outline-none focus:rounded focus:ring-1 focus:ring-blue-400 disabled:text-slate-400"
                 />
@@ -659,7 +655,7 @@ export default function PromptsPage() {
                   checked={paramsEnabled.top}
                   onChange={(checked) => {
                     setParamsEnabled((p) => ({ ...p, top: checked }));
-                    if (!checked) setEditState((prev) => (prev ? { ...prev, top_p: 1.0 } : null));
+                    if (!checked) setEditState((prev) => (prev ? { ...prev, top_p: 1.0 } : prev));
                   }}
                 />
               </div>
@@ -671,7 +667,7 @@ export default function PromptsPage() {
                   max={1}
                   step={0.1}
                   value={editState.top_p ?? 1.0}
-                  onChange={(e) => setEditState((prev) => (prev ? { ...prev, top_p: parseFloat(e.target.value) } : null))}
+                  onChange={(e) => setEditState((prev) => (prev ? { ...prev, top_p: parseFloat(e.target.value) } : prev))}
                 />
               )}
             </div>
