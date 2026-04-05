@@ -135,11 +135,12 @@ def _resolve_single_article_body(
 
 
 def _add_simple_article_meta_table(
-    doc: Document, keyword: str, word_count: int, description: str
+    doc: Document, keyword: str, word_count: int, title: str, description: str
 ) -> None:
     rows_data: List[Tuple[str, str]] = [
         ("Keyword", keyword or ""),
         ("Word Count", str(int(word_count or 0))),
+        ("Title", title or ""),
         ("Description", description or ""),
     ]
     table = doc.add_table(rows=len(rows_data), cols=2)
@@ -163,7 +164,8 @@ def build_single_article_docx(
     article: GeneratedArticle, task: Optional[Task] = None
 ) -> bytes:
     """
-    One article → .docx: title, keyword/word count/description table, HTML or plain body.
+    One article → .docx: H1 (or article title) as headline, meta table
+    (Keyword, Word Count, Title from meta_generation, Description), then body.
     """
     content, mode = _resolve_single_article_body(article, task)
     if not content.strip():
@@ -176,9 +178,16 @@ def build_single_article_docx(
         display_title = "Article"
 
     description = (article.description or "").strip()
-    if task and not description:
+    headline = display_title
+    table_title = display_title
+    if task:
         meta = _get_all_meta_from_task(task, article)
-        description = str(meta.get("description") or "")
+        if not description:
+            description = str(meta.get("description") or "")
+        h1_value = str(meta.get("h1") or "").strip()
+        meta_title = str(meta.get("title") or "").strip()
+        headline = h1_value or display_title
+        table_title = meta_title or display_title
 
     keyword = (task.main_keyword if task else "") or ""
 
@@ -187,12 +196,12 @@ def build_single_article_docx(
         wc = count_content_words(content)
 
     doc = Document()
-    t = doc.add_paragraph(display_title)
+    t = doc.add_paragraph(headline)
     t.runs[0].font.size = Pt(22)
     t.alignment = WD_ALIGN_PARAGRAPH.CENTER
     doc.add_paragraph()
 
-    _add_simple_article_meta_table(doc, keyword, int(wc or 0), description)
+    _add_simple_article_meta_table(doc, keyword, int(wc or 0), table_title, description)
     doc.add_paragraph()
 
     if mode == "html":

@@ -1,3 +1,4 @@
+import json
 import time
 from typing import Dict, Any, Optional, Tuple, Callable
 from openai import OpenAI
@@ -78,38 +79,55 @@ def generate_text(
                  
             raw_response = client.chat.completions.with_raw_response.create(**kwargs)
             response = raw_response.parse()
-            
-            # Simple fallback cost estimation if headers/model logic isn't perfectly transparent
+
             cost = 0.0
-            
-            # Try to grab exact cost from OpenRouter headers
-            openrouter_cost = raw_response.headers.get("x-openrouter-cost")
-            if openrouter_cost:
-                try:
-                    cost = float(openrouter_cost)
-                except (ValueError, TypeError):
-                    cost = 0.0
-                    
+            usage_info: Optional[Dict[str, Any]] = None
+
+            try:
+                raw_data = json.loads(raw_response.text)
+                if "usage" in raw_data:
+                    usage_raw = raw_data["usage"]
+                    cost = float(usage_raw.get("cost", 0.0))
+
+                    prompt_details = usage_raw.get("prompt_tokens_details", {}) or {}
+                    completion_details = usage_raw.get("completion_tokens_details", {}) or {}
+
+                    usage_info = {
+                        "prompt_tokens": usage_raw.get("prompt_tokens", 0),
+                        "completion_tokens": usage_raw.get("completion_tokens", 0),
+                        "total_tokens": usage_raw.get("total_tokens", 0),
+                        "cached_tokens": prompt_details.get("cached_tokens", 0),
+                        "reasoning_tokens": completion_details.get("reasoning_tokens", 0),
+                    }
+            except Exception:
+                pass
+
+            if cost == 0.0:
+                openrouter_cost = raw_response.headers.get("x-openrouter-cost")
+                if openrouter_cost:
+                    try:
+                        cost = float(openrouter_cost)
+                    except (ValueError, TypeError):
+                        pass
+
             if cost == 0.0 and response.usage:
                 prompt_tokens = response.usage.prompt_tokens
                 completion_tokens = response.usage.completion_tokens
-                # Very rough generic estimation: ~ $0.15/1M input, ~ $0.60/1M output (like gpt-4o-mini rates)
                 if "gpt-4o-mini" in model:
                     cost = (prompt_tokens * 0.15 / 1000000) + (completion_tokens * 0.60 / 1000000)
                 elif "gemini-3" in model or "gemini-2.5" in model:
                     cost = (prompt_tokens * 0.075 / 1000000) + (completion_tokens * 0.30 / 1000000)
-                else: 
-                    # Default tiny rate to still show it's tracking
+                else:
                     cost = (prompt_tokens * 0.1 / 1000000) + (completion_tokens * 0.5 / 1000000)
-                    
-            actual_model = getattr(response, "model", None) or model
-            usage_info: Optional[Dict[str, Any]] = None
-            if response.usage:
+
+            if usage_info is None and response.usage:
                 usage_info = {
                     "prompt_tokens": response.usage.prompt_tokens,
                     "completion_tokens": response.usage.completion_tokens,
                     "total_tokens": response.usage.total_tokens,
                 }
+
+            actual_model = getattr(response, "model", None) or model
             if progress_callback:
                 progress_callback(
                     "response_received",

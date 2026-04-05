@@ -322,12 +322,21 @@ def call_agent(ctx: PipelineContext, agent_name: str, context: str, response_for
             usage = payload.get("usage") or {}
             p = usage.get("prompt_tokens", 0)
             c = usage.get("completion_tokens", 0)
+            cached = usage.get("cached_tokens", 0)
+            reasoning = usage.get("reasoning_tokens", 0)
+
+            tokens_msg = f"{p}+{c} tokens"
+            if cached > 0:
+                tokens_msg += f" | ⚡ {cached} cached"
+            if reasoning > 0:
+                tokens_msg += f" | 🧠 {reasoning} reasoning"
+
             add_log(
                 ctx.db,
                 ctx.task,
                 (
                     f"[{agent_name}] LLM response received "
-                    f"({p}+{c} tokens, ${float(payload.get('cost') or 0.0):.4f})"
+                    f"({tokens_msg}, ${float(payload.get('cost') or 0.0):.5f})"
                 ),
                 level="info",
                 step=agent_name,
