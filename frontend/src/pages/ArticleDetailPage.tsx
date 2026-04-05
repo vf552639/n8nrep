@@ -1,6 +1,6 @@
 import { useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import Editor from "@monaco-editor/react";
 import toast from "react-hot-toast";
 import api from "@/api/client";
@@ -86,12 +86,12 @@ export default function ArticleDetailPage() {
     },
   });
 
-  const startEdit = () => {
-    const src = article?.html_content || "";
-    setHtmlDraft(src);
+  const startEdit = useCallback(() => {
+    if (!article) return;
+    setHtmlDraft(article.full_page_html || article.html_content || "");
     setEditingHtml(true);
     setActiveTab("html");
-  };
+  }, [article]);
 
   const cancelEdit = () => {
     setEditingHtml(false);
@@ -135,6 +135,11 @@ export default function ArticleDetailPage() {
     if (!m || typeof m !== "object" || Array.isArray(m)) return [];
     return Object.entries(m).filter(([, v]) => v != null);
   }, [article?.meta_data]);
+
+  const displayHtml = useMemo(
+    () => article?.full_page_html || article?.html_content || "",
+    [article?.full_page_html, article?.html_content]
+  );
 
   if (isLoading) return <div className="p-6 text-slate-500">Loading article...</div>;
   if (!article) return <div className="p-6 text-red-500">Article not found</div>;
@@ -227,25 +232,26 @@ export default function ArticleDetailPage() {
             sandbox="allow-same-origin"
           />
         )}
-        {activeTab === "html" &&
-          (editingHtml ? (
-            <div className="min-h-[600px] flex-1 border-t border-slate-200">
-              <Editor
-                height="640px"
-                defaultLanguage="html"
-                theme="vs-dark"
-                value={htmlDraft}
-                onChange={(v) => setHtmlDraft(v || "")}
-                options={{ minimap: { enabled: true }, wordWrap: "on" }}
-              />
-            </div>
-          ) : (
-            <div className="p-6 overflow-auto h-full flex-1 bg-slate-900 min-h-[600px] font-mono text-sm">
-              <pre className="whitespace-pre-wrap text-emerald-400">
-                {article.full_page_html || article.html_content}
-              </pre>
-            </div>
-          ))}
+        {activeTab === "html" && (
+          <div className="min-h-[600px] flex-1 overflow-hidden border-t border-slate-200">
+            <Editor
+              height="640px"
+              language="html"
+              theme="vs-dark"
+              value={editingHtml ? htmlDraft : displayHtml}
+              onChange={(v) => {
+                if (editingHtml) setHtmlDraft(v ?? "");
+              }}
+              options={{
+                readOnly: !editingHtml,
+                minimap: { enabled: true },
+                wordWrap: "on",
+                fontSize: 13,
+                scrollBeyondLastLine: false,
+              }}
+            />
+          </div>
+        )}
         {activeTab === "metadata" && (
           <div className="p-8 space-y-6 max-w-4xl">
             <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">

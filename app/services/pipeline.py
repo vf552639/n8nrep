@@ -257,7 +257,14 @@ def call_agent(ctx: PipelineContext, agent_name: str, context: str, response_for
             )
             system_text += schema_instruction
     
-    user_msg = f"{user_template}\n\n[CONTEXT]\n{context}" if user_template else context
+    if user_template:
+        ctx_text = (context or "").strip()
+        if ctx_text:
+            user_msg = f"{user_template}\n\n[CONTEXT]\n{context}"
+        else:
+            user_msg = user_template
+    else:
+        user_msg = context or ""
     
     # --- INJECT RERUN FEEDBACK ---
     step_results = ctx.task.step_results or {}
@@ -770,6 +777,21 @@ def setup_template_vars(ctx: PipelineContext):
         "people_also_search": ctx.analysis_vars.get("people_also_search", ""),
         "structure_fact_checking": ""
     }
+
+    # Completed pipeline steps → {{result_<step_key>}} (only if variable missing or empty)
+    sr = ctx.task.step_results or {}
+    for step_key, step_data in sr.items():
+        if step_key.startswith("_") or not isinstance(step_data, dict):
+            continue
+        if step_data.get("status") != "completed":
+            continue
+        raw_res = step_data.get("result")
+        if raw_res is None:
+            continue
+        var_key = f"result_{step_key}"
+        cur = ctx.template_vars.get(var_key)
+        if cur is None or (isinstance(cur, str) and not str(cur).strip()):
+            ctx.template_vars[var_key] = str(raw_res)
 
     # Fetch HTML template reference for LLM injection
     site_template_html, site_template_name = get_template_for_reference(ctx.db, str(ctx.task.target_site_id))
@@ -1699,18 +1721,15 @@ def phase_final_editing(ctx: PipelineContext):
         improved_html = ctx.task.step_results.get(STEP_IMPROVER, {}).get("result", "")
     else:
         improved_html = ctx.task.step_results.get(STEP_PRIMARY_GEN, {}).get("result", "")
-        
-    outline_json = ctx.task.outline.get("final_outline", {})
-    
+
+    # Prompts use {{result_improver}}; without SERP there is no improver step — alias current HTML.
+    ctx.template_vars["result_improver"] = improved_html or ""
+
     avg_words = ctx.template_vars.get("avg_word_count", "0")
     input_word_count = count_content_words(improved_html)
     input_char_count = len(improved_html)
 
-    editing_context = (
-        f"Improved HTML:\n{improved_html}\n\n"
-        f"Original Outline:\n{json.dumps(outline_json, ensure_ascii=False)}\n\n"
-        f"Review & verify this HTML article matches the outline structure."
-    )
+    editing_context = ""
     add_log(ctx.db, ctx.task, "Starting Final Editing...", step=STEP_FINAL_EDIT)
     mark_step_running(ctx.db, ctx.task, STEP_FINAL_EDIT)
     final_html, step_cost, actual_model, resolved_prompts, variables_snapshot, violations = call_agent_with_exclude_validation(ctx, "final_editing", editing_context, step_constant=STEP_FINAL_EDIT)

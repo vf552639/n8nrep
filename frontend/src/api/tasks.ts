@@ -49,6 +49,14 @@ export const tasksApi = {
   rerunStep: (id: string, cascade: boolean, step_name: string, feedback: string) =>
     api.post(`/tasks/${id}/rerun-step`, { step_name, cascade, feedback }).then(res => res.data),
 
+  updateStepResult: (taskId: string, stepName: string, result: string) =>
+    api
+      .put<{ status: string }>(`/tasks/${taskId}/step-result`, {
+        step_name: stepName,
+        result,
+      })
+      .then((res) => res.data),
+
   approve: (id: string) =>
     api.post<{msg: string}>(`/tasks/${id}/approve`).then(res => res.data),
 

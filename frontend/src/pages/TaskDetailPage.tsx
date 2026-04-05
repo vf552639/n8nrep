@@ -1,12 +1,41 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import Editor from "@monaco-editor/react";
 import toast from "react-hot-toast";
 import { tasksApi } from "@/api/tasks";
 import StatusBadge from "@/components/common/StatusBadge";
 import StepMonitor from "@/components/tasks/StepMonitor";
 import ImageReviewPanel from "@/components/tasks/ImageReviewPanel";
 import { Info, XCircle } from "lucide-react";
+
+const ARTICLE_REVIEW_STEP_ORDER = [
+  "final_editing",
+  "improver",
+  "interlinking_citations",
+  "reader_opinion",
+  "competitor_comparison",
+  "primary_generation",
+] as const;
+
+type ArticleReviewStep = (typeof ARTICLE_REVIEW_STEP_ORDER)[number];
+
+function resolveArticleReviewStep(
+  stepResults: Record<string, unknown> | undefined
+): ArticleReviewStep | null {
+  if (!stepResults) return null;
+  for (const key of ARTICLE_REVIEW_STEP_ORDER) {
+    const s = stepResults[key];
+    if (
+      s &&
+      typeof s === "object" &&
+      (s as { status?: string }).status === "completed"
+    ) {
+      return key;
+    }
+  }
+  return null;
+}
 
 type LogEntry = {
   ts?: string;
@@ -20,6 +49,8 @@ export default function TaskDetailPage() {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("pipeline");
   const [reviewView, setReviewView] = useState<"preview" | "source">("preview");
+  const [reviewEditing, setReviewEditing] = useState(false);
+  const [reviewEditorDraft, setReviewEditorDraft] = useState("");
 
   const { data: task, isLoading } = useQuery({
     queryKey: ["task", id],
@@ -48,12 +79,45 @@ export default function TaskDetailPage() {
 
   const isWaiting = task?.step_results?.waiting_for_approval === true;
   const isImagePaused = task?.step_results?._pipeline_pause?.active && task?.step_results?._pipeline_pause?.reason === "image_review";
-  const hasDraft = task?.step_results?.primary_generation?.status === "completed";
+  const draftSource = useMemo(
+    () => resolveArticleReviewStep(task?.step_results as Record<string, unknown> | undefined),
+    [task?.step_results]
+  );
+  const draftHtml =
+    draftSource && task?.step_results?.[draftSource]
+      ? String(
+          (task.step_results[draftSource as string] as { result?: unknown }).result ?? ""
+        )
+      : "";
+  const hasReviewableDraft = draftSource !== null || isWaiting;
   const hasImages = task?.step_results?.image_generation?.status === "completed";
-  const draftHtml: string = task?.step_results?.primary_generation?.result || "";
-  const wordCount = draftHtml
-    ? draftHtml.replace(/<[^>]*>/g, " ").split(/\s+/).filter(Boolean).length
+
+  useEffect(() => {
+    if (!reviewEditing) {
+      setReviewEditorDraft(draftHtml);
+    }
+  }, [draftHtml, reviewEditing]);
+
+  const wordCount = reviewEditorDraft
+    ? reviewEditorDraft.replace(/<[^>]*>/g, " ").split(/\s+/).filter(Boolean).length
     : 0;
+
+  const saveStepResultMutation = useMutation({
+    mutationFn: () => {
+      if (!id || !draftSource) throw new Error("No step");
+      return tasksApi.updateStepResult(id, draftSource, reviewEditorDraft);
+    },
+    onSuccess: () => {
+      toast.success("Step result saved");
+      setReviewEditing(false);
+      queryClient.invalidateQueries({ queryKey: ["task", id] });
+      queryClient.invalidateQueries({ queryKey: ["task-steps", id] });
+    },
+    onError: (e: unknown) => {
+      const ax = e as { response?: { data?: { detail?: string } } };
+      toast.error(ax.response?.data?.detail || "Save failed");
+    },
+  });
 
   const { data: imageData, refetch: refetchImages } = useQuery({
     queryKey: ["task-images", id],
@@ -109,7 +173,7 @@ export default function TaskDetailPage() {
   const tabs = [
     { id: "pipeline", label: "Pipeline Execution" },
     ...(hasImages || isImagePaused ? [{ id: "images", label: "🖼️ Image Review" }] : []),
-    ...(hasDraft || isWaiting ? [{ id: "review", label: "📝 Article Review" }] : []),
+    ...(hasReviewableDraft ? [{ id: "review", label: "📝 Article Review" }] : []),
     { id: "logs", label: "Execution Logs" },
   ];
 
@@ -236,21 +300,65 @@ export default function TaskDetailPage() {
                 </div>
               )}
 
-              {/* Preview / Source toggle */}
-              <div className="flex gap-1 border-b px-5 pt-3">
-                {(["preview", "source"] as const).map((v) => (
-                  <button
-                    key={v}
-                    onClick={() => setReviewView(v)}
-                    className={`pb-2 px-3 text-sm font-medium capitalize transition-colors border-b-2 ${
-                      reviewView === v
-                        ? "border-blue-600 text-blue-600"
-                        : "border-transparent text-slate-500 hover:text-slate-800"
-                    }`}
-                  >
-                    {v}
-                  </button>
-                ))}
+              {/* Preview / Source + edit controls */}
+              <div className="flex flex-wrap items-center gap-2 border-b px-5 pt-3 pb-2 gap-y-2">
+                <div className="flex gap-1">
+                  {(["preview", "source"] as const).map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => setReviewView(v)}
+                      className={`pb-2 px-3 text-sm font-medium capitalize transition-colors border-b-2 ${
+                        reviewView === v
+                          ? "border-blue-600 text-blue-600"
+                          : "border-transparent text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      {v}
+                    </button>
+                  ))}
+                </div>
+                {draftSource ? (
+                  <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">
+                    Showing: {draftSource}
+                    {draftSource === "primary_generation" ? " (draft)" : ""}
+                  </span>
+                ) : null}
+                <div className="flex-1 min-w-[1rem]" />
+                {draftSource ? (
+                  <>
+                    {!reviewEditing ? (
+                      <button
+                        type="button"
+                        onClick={() => setReviewEditing(true)}
+                        className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
+                      >
+                        Edit
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReviewEditing(false);
+                            setReviewEditorDraft(draftHtml);
+                          }}
+                          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
+                        >
+                          Read only
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => saveStepResultMutation.mutate()}
+                          disabled={saveStepResultMutation.isPending}
+                          className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                        >
+                          {saveStepResultMutation.isPending ? "Saving…" : "Save"}
+                        </button>
+                      </>
+                    )}
+                  </>
+                ) : null}
               </div>
 
               {/* Content area */}
@@ -262,8 +370,22 @@ export default function TaskDetailPage() {
                     sandbox="allow-same-origin"
                   />
                 ) : (
-                  <div className="overflow-auto flex-1 bg-slate-900 min-h-[600px] font-mono text-sm p-6">
-                    <pre className="whitespace-pre-wrap text-emerald-400">{draftHtml}</pre>
+                  <div className="min-h-[600px] flex-1 overflow-hidden border-t border-slate-200">
+                    <Editor
+                      height="600px"
+                      language="html"
+                      theme="vs-dark"
+                      value={reviewEditorDraft}
+                      onChange={(val) => setReviewEditorDraft(val ?? "")}
+                      options={{
+                        readOnly: !reviewEditing,
+                        minimap: { enabled: true },
+                        wordWrap: "on",
+                        padding: { top: 16 },
+                        scrollBeyondLastLine: false,
+                        fontSize: 13,
+                      }}
+                    />
                   </div>
                 )
               ) : (

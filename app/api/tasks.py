@@ -1,9 +1,11 @@
 from typing import List, Optional
+import copy
 import csv
 import io
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy import desc
 from sqlalchemy.sql import func
 from pydantic import BaseModel
@@ -143,6 +145,52 @@ def get_task_steps(task_id: str, db: Session = Depends(get_db)):
         "step_results": task.step_results or {},
         "current_step": next((k for k, v in (task.step_results or {}).items() if isinstance(v, dict) and v.get("status") == "running"), None)
     }
+
+
+class UpdateStepResultRequest(BaseModel):
+    step_name: str
+    result: str
+
+
+@router.put("/{task_id}/step-result")
+def update_task_step_result(
+    task_id: str,
+    payload: UpdateStepResultRequest,
+    db: Session = Depends(get_db),
+):
+    """Update the `result` of a completed pipeline step (manual edit in UI)."""
+    from app.services.word_counter import count_content_words
+
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if payload.step_name not in ALL_STEPS:
+        raise HTTPException(status_code=400, detail=f"Invalid step_name: {payload.step_name}")
+
+    step_results = dict(task.step_results or {})
+    step_data = step_results.get(payload.step_name)
+    if not isinstance(step_data, dict) or step_data.get("status") != "completed":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Step '{payload.step_name}' is not completed or does not exist",
+        )
+
+    prev_key = f"{payload.step_name}_prev_versions"
+    if prev_key not in step_results:
+        step_results[prev_key] = []
+    step_results[prev_key].append(copy.deepcopy(step_data))
+
+    updated = dict(step_data)
+    updated["result"] = payload.result
+    updated["manually_edited"] = True
+    updated["edited_at"] = datetime.utcnow().isoformat()
+    updated["output_word_count"] = count_content_words(payload.result)
+    step_results[payload.step_name] = updated
+    task.step_results = step_results
+    flag_modified(task, "step_results")
+    db.commit()
+    return {"status": "ok"}
 
 
 @router.get("/{task_id}/export-docx")

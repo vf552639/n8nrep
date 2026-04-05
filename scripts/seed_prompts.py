@@ -219,7 +219,7 @@ Improve the HTML text significantly. Ensure you address the feedback. Output pur
         "model": "openai/gpt-4o",
         "max_tokens": 16000,
         "temperature": 0.7,
-        "system_prompt": "You are the final proofreader and formatter. Polish the prose.",
+        "system_prompt": "You are the final proofreader and formatter. Polish the prose and keep the article aligned with the approved outline where it matters for structure.",
         "user_prompt": """Keyword: {{keyword}}
 Language: {{language}}
 Rhythms & Style: {{rhythms_style}}
@@ -227,10 +227,13 @@ Author Style: {{author_style}}
 
 Excluded words: {{exclude_words}}
 
-Text:
+Approved structure (outline) — use for structural alignment; do not paste it into the article:
+{{result_final_structure_analysis}}
+
+Article HTML to polish:
 {{result_improver}}
 
-Conduct a final polish. Ensure rhythms are crisp. Output the final HTML.""",
+Conduct a final polish. Verify headings/sections reflect the outline where applicable. Keep rhythms crisp. Output the final HTML only (no outline repetition).""",
     },
     {
         "agent_name": "content_fact_checking",
