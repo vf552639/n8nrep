@@ -9,8 +9,6 @@ from app.models.site import Site
 from app.models.author import Author
 from app.models.prompt import Prompt
 from app.models.blueprint import BlueprintPage
-from app.models.project import SiteProject
-
 from app.services.serp import fetch_serp_data
 from app.services.scraper import scrape_urls
 from app.services.llm import generate_text
@@ -26,6 +24,11 @@ from app.config import settings
 
 from app.services.json_parser import clean_and_parse_json
 from app.services.pipeline_constants import *
+from app.services.pipeline_presets import (
+    PIPELINE_PRESETS,
+    pipeline_steps_use_serp,
+    resolve_pipeline_steps,
+)
 from app.services.word_counter import count_content_words
 from app.services.html_inserter import programmatic_html_insert
 import re
@@ -49,18 +52,29 @@ class PipelineContext:
         self.page_slug = ""
         self.page_title = ""
         self.use_serp = True
-        
-        if self.task.blueprint_page_id and self.task.project_id:
-            self.blueprint_page = db.query(BlueprintPage).filter(BlueprintPage.id == self.task.blueprint_page_id).first()
+        self.pipeline_steps = None
+
+        if self.task.blueprint_page_id:
+            self.blueprint_page = (
+                db.query(BlueprintPage).filter(BlueprintPage.id == self.task.blueprint_page_id).first()
+            )
             if self.blueprint_page:
                 self.page_slug = self.blueprint_page.page_slug
                 self.page_title = self.blueprint_page.page_title
-                self.use_serp = self.blueprint_page.use_serp
-                
-                project = db.query(SiteProject).filter(SiteProject.id == self.task.project_id).first()
-                if project:
-                    all_pages_db = db.query(BlueprintPage).filter(BlueprintPage.blueprint_id == project.blueprint_id).order_by(BlueprintPage.sort_order).all()
-                    self.all_site_pages = [{"slug": p.page_slug, "title": p.page_title, "type": p.page_type, "url": p.filename} for p in all_pages_db]
+                self.pipeline_steps = resolve_pipeline_steps(self.blueprint_page)
+                self.use_serp = pipeline_steps_use_serp(self.pipeline_steps)
+
+                bid = self.blueprint_page.blueprint_id
+                all_pages_db = (
+                    db.query(BlueprintPage)
+                    .filter(BlueprintPage.blueprint_id == bid)
+                    .order_by(BlueprintPage.sort_order)
+                    .all()
+                )
+                self.all_site_pages = [
+                    {"slug": p.page_slug, "title": p.page_title, "type": p.page_type, "url": p.filename}
+                    for p in all_pages_db
+                ]
                     
         self.analysis_vars = {}
         self.template_vars = {}
@@ -138,6 +152,54 @@ def add_log(db: Session, task: Task, msg: str, level: str = "info", step: str = 
     current_logs.append(entry)
     task.logs = current_logs
     db.commit()
+
+
+def _completed_step_body(task: Task, step_key: str) -> str:
+    sr = task.step_results or {}
+    block = sr.get(step_key, {})
+    if not isinstance(block, dict):
+        return ""
+    st = block.get("status")
+    if st not in ("completed", "completed_with_warnings"):
+        return ""
+    return str(block.get("result") or "").strip()
+
+
+def pick_structured_html_for_assembly(ctx: PipelineContext) -> str:
+    order = [
+        STEP_IMAGE_INJECT,
+        STEP_HTML_STRUCT,
+        STEP_FINAL_EDIT,
+        STEP_IMPROVER,
+        STEP_INTERLINK,
+        STEP_READER_OPINION,
+        STEP_COMP_COMPARISON,
+        STEP_PRIMARY_GEN,
+        STEP_PRIMARY_GEN_ABOUT,
+        STEP_PRIMARY_GEN_LEGAL,
+    ]
+    for key in order:
+        body = _completed_step_body(ctx.task, key)
+        if body:
+            return body
+    return ""
+
+
+def pick_html_for_meta(ctx: PipelineContext) -> str:
+    order = [
+        STEP_HTML_STRUCT,
+        STEP_FINAL_EDIT,
+        STEP_IMPROVER,
+        STEP_PRIMARY_GEN,
+        STEP_PRIMARY_GEN_ABOUT,
+        STEP_PRIMARY_GEN_LEGAL,
+    ]
+    for key in order:
+        body = _completed_step_body(ctx.task, key)
+        if body:
+            return body
+    return ""
+
 
 from typing import Optional, Tuple
 
@@ -1648,6 +1710,80 @@ def phase_primary_gen(ctx: PipelineContext):
     out_wc = count_content_words(draft_html)
     save_step_result(ctx.db, ctx.task, STEP_PRIMARY_GEN, result=draft_html, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts, exclude_words_violations=violations, output_word_count=out_wc)
 
+
+def phase_primary_gen_about(ctx: PipelineContext):
+    setup_template_vars(ctx)
+    gen_context = ""
+    add_log(ctx.db, ctx.task, "Starting Primary Generation (About Page)...", step=STEP_PRIMARY_GEN_ABOUT)
+    mark_step_running(ctx.db, ctx.task, STEP_PRIMARY_GEN_ABOUT)
+    draft_html, step_cost, actual_model, resolved_prompts, variables_snapshot, violations = (
+        call_agent_with_exclude_validation(
+            ctx,
+            "primary_generation_about",
+            gen_context,
+            step_constant=STEP_PRIMARY_GEN_ABOUT,
+        )
+    )
+    ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + step_cost
+    add_log(
+        ctx.db,
+        ctx.task,
+        f"Primary Generation (About) completed ({len(draft_html)} chars)",
+        step=STEP_PRIMARY_GEN_ABOUT,
+    )
+    out_wc = count_content_words(draft_html)
+    save_step_result(
+        ctx.db,
+        ctx.task,
+        STEP_PRIMARY_GEN_ABOUT,
+        result=draft_html,
+        model=actual_model,
+        status="completed",
+        cost=step_cost,
+        variables_snapshot=variables_snapshot,
+        resolved_prompts=resolved_prompts,
+        exclude_words_violations=violations,
+        output_word_count=out_wc,
+    )
+
+
+def phase_primary_gen_legal(ctx: PipelineContext):
+    setup_template_vars(ctx)
+    inject_legal_template_vars(ctx)
+    gen_context = ""
+    add_log(ctx.db, ctx.task, "Starting Primary Generation (Legal Page)...", step=STEP_PRIMARY_GEN_LEGAL)
+    mark_step_running(ctx.db, ctx.task, STEP_PRIMARY_GEN_LEGAL)
+    draft_html, step_cost, actual_model, resolved_prompts, variables_snapshot, violations = (
+        call_agent_with_exclude_validation(
+            ctx,
+            "primary_generation_legal",
+            gen_context,
+            step_constant=STEP_PRIMARY_GEN_LEGAL,
+        )
+    )
+    ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + step_cost
+    add_log(
+        ctx.db,
+        ctx.task,
+        f"Primary Generation (Legal) completed ({len(draft_html)} chars)",
+        step=STEP_PRIMARY_GEN_LEGAL,
+    )
+    out_wc = count_content_words(draft_html)
+    save_step_result(
+        ctx.db,
+        ctx.task,
+        STEP_PRIMARY_GEN_LEGAL,
+        result=draft_html,
+        model=actual_model,
+        status="completed",
+        cost=step_cost,
+        variables_snapshot=variables_snapshot,
+        resolved_prompts=resolved_prompts,
+        exclude_words_violations=violations,
+        output_word_count=out_wc,
+    )
+
+
 def phase_competitor_comparison(ctx: PipelineContext):
     setup_template_vars(ctx)
     draft_html = ctx.task.step_results.get(STEP_PRIMARY_GEN, {}).get("result", "")
@@ -1718,9 +1854,16 @@ def phase_improver(ctx: PipelineContext):
 def phase_final_editing(ctx: PipelineContext):
     setup_template_vars(ctx)
     if ctx.use_serp:
-        improved_html = ctx.task.step_results.get(STEP_IMPROVER, {}).get("result", "")
+        improved_html = ctx.task.step_results.get(STEP_IMPROVER, {}).get("result", "") or ""
+        if not improved_html.strip():
+            improved_html = ctx.task.step_results.get(STEP_PRIMARY_GEN, {}).get("result", "") or ""
     else:
-        improved_html = ctx.task.step_results.get(STEP_PRIMARY_GEN, {}).get("result", "")
+        improved_html = (
+            ctx.task.step_results.get(STEP_PRIMARY_GEN, {}).get("result", "")
+            or ctx.task.step_results.get(STEP_PRIMARY_GEN_ABOUT, {}).get("result", "")
+            or ctx.task.step_results.get(STEP_PRIMARY_GEN_LEGAL, {}).get("result", "")
+            or ""
+        )
 
     # Prompts use {{result_improver}}; without SERP there is no improver step — alias current HTML.
     ctx.template_vars["result_improver"] = improved_html or ""
@@ -1765,7 +1908,12 @@ def phase_final_editing(ctx: PipelineContext):
 
 def phase_html_structure(ctx: PipelineContext):
     setup_template_vars(ctx)
-    final_html = ctx.task.step_results.get(STEP_FINAL_EDIT, {}).get("result", "")
+    final_html = _completed_step_body(ctx.task, STEP_FINAL_EDIT)
+    if not final_html:
+        for key in (STEP_IMPROVER, STEP_PRIMARY_GEN, STEP_PRIMARY_GEN_ABOUT, STEP_PRIMARY_GEN_LEGAL):
+            final_html = _completed_step_body(ctx.task, key)
+            if final_html:
+                break
 
     template_ref = ""
     if ctx.template_vars.get("site_template_html"):
@@ -1894,8 +2042,15 @@ def phase_html_structure(ctx: PipelineContext):
 
 def phase_content_fact_check(ctx: PipelineContext):
     if not settings.FACT_CHECK_ENABLED:
+        save_step_result(
+            ctx.db,
+            ctx.task,
+            STEP_CONTENT_FACT_CHECK,
+            result='{"verification_status": "skipped", "issues": [], "summary": "Fact-check disabled in settings."}',
+            status="completed",
+        )
         return
-        
+
     setup_template_vars(ctx)
     final_html = ctx.task.step_results.get(STEP_FINAL_EDIT, {}).get("result", "")
     
@@ -1927,7 +2082,7 @@ def phase_content_fact_check(ctx: PipelineContext):
 
 def phase_meta_generation(ctx: PipelineContext):
     setup_template_vars(ctx)
-    structured_html = ctx.task.step_results.get(STEP_HTML_STRUCT, {}).get("result", "")
+    structured_html = pick_html_for_meta(ctx)
     meta_context = f"Article HTML:\n{structured_html}"
     add_log(ctx.db, ctx.task, "Generating Meta Tags (JSON)...", step=STEP_META_GEN)
     mark_step_running(ctx.db, ctx.task, STEP_META_GEN)
@@ -1938,6 +2093,31 @@ def phase_meta_generation(ctx: PipelineContext):
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
     add_log(ctx.db, ctx.task, f"Meta Tags Generation completed", step=STEP_META_GEN)
     save_step_result(ctx.db, ctx.task, STEP_META_GEN, result=meta_json_str, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
+
+
+PHASE_REGISTRY = {
+    STEP_SERP: phase_serp,
+    STEP_SCRAPING: phase_scraping,
+    STEP_AI_ANALYSIS: phase_ai_structure,
+    STEP_CHUNK_ANALYSIS: phase_chunk_analysis,
+    STEP_COMP_STRUCTURE: phase_competitor_structure,
+    STEP_FINAL_ANALYSIS: phase_final_structure,
+    STEP_STRUCTURE_FACT_CHECK: phase_structure_fact_check,
+    STEP_IMAGE_PROMPT_GEN: phase_image_prompt_gen,
+    STEP_IMAGE_GEN: phase_image_gen,
+    STEP_PRIMARY_GEN: phase_primary_gen,
+    STEP_PRIMARY_GEN_ABOUT: phase_primary_gen_about,
+    STEP_PRIMARY_GEN_LEGAL: phase_primary_gen_legal,
+    STEP_COMP_COMPARISON: phase_competitor_comparison,
+    STEP_READER_OPINION: phase_reader_opinion,
+    STEP_INTERLINK: phase_interlink,
+    STEP_IMPROVER: phase_improver,
+    STEP_FINAL_EDIT: phase_final_editing,
+    STEP_HTML_STRUCT: phase_html_structure,
+    STEP_IMAGE_INJECT: phase_image_inject,
+    STEP_META_GEN: phase_meta_generation,
+    STEP_CONTENT_FACT_CHECK: phase_content_fact_check,
+}
 
 
 def _auto_approve_images(ctx: PipelineContext) -> None:
@@ -2029,84 +2209,114 @@ def run_pipeline(db: Session, task_id: str, auto_mode: bool = False):
                 ctx.task.step_results = updated
                 db.commit()
 
-        if ctx.use_serp:
-            run_phase(db, ctx.task, STEP_SERP, phase_serp, ctx)
-            run_phase(db, ctx.task, STEP_SCRAPING, phase_scraping, ctx)
-            run_phase(db, ctx.task, STEP_AI_ANALYSIS, phase_ai_structure, ctx)
-            run_phase(db, ctx.task, STEP_CHUNK_ANALYSIS, phase_chunk_analysis, ctx)
-            run_phase(db, ctx.task, STEP_COMP_STRUCTURE, phase_competitor_structure, ctx)
-            run_phase(db, ctx.task, STEP_FINAL_ANALYSIS, phase_final_structure, ctx)
-            run_phase(db, ctx.task, STEP_STRUCTURE_FACT_CHECK, phase_structure_fact_check, ctx)
+        if ctx.pipeline_steps is not None:
+            steps = list(ctx.pipeline_steps)
         else:
+            steps = (
+                list(PIPELINE_PRESETS["full"])
+                if ctx.use_serp
+                else [
+                    STEP_PRIMARY_GEN,
+                    STEP_FINAL_EDIT,
+                    STEP_HTML_STRUCT,
+                    STEP_META_GEN,
+                ]
+            )
+
+        preset_name = (
+            (getattr(ctx.blueprint_page, "pipeline_preset", None) or "full")
+            if ctx.blueprint_page
+            else "standalone"
+        )
+
+        if not pipeline_steps_use_serp(steps):
             if not ctx.task.outline:
-                ctx.task.serp_data = {}
-                ctx.task.competitors_text = ""
-                ctx.task.outline = {"final_outline": {"page_title": ctx.page_title, "sections": []}}
+                ctx.task.serp_data = ctx.task.serp_data or {}
+                ctx.task.competitors_text = ctx.task.competitors_text or ""
+                ctx.task.outline = {
+                    "final_outline": {"page_title": ctx.page_title, "sections": []},
+                }
                 ctx.outline_data = ctx.task.outline
                 db.commit()
 
-        # --- IMAGE GENERATION (optional) ---
-        run_phase(db, ctx.task, STEP_IMAGE_PROMPT_GEN, phase_image_prompt_gen, ctx)
-        run_phase(db, ctx.task, STEP_IMAGE_GEN, phase_image_gen, ctx)
+        merged_plan = dict(ctx.task.step_results or {})
+        merged_plan["_pipeline_plan"] = {"steps": steps}
+        ctx.task.step_results = merged_plan
+        db.commit()
 
-        # Check pause after image_gen
-        step_results = dict(ctx.task.step_results or {})
-        pause_state = step_results.get("_pipeline_pause", {})
-        if isinstance(pause_state, dict) and pause_state.get("active") and pause_state.get("reason") == "image_review":
-            if not step_results.get("_images_approved"):
-                if auto_mode:
-                    _auto_approve_images(ctx)
-                else:
-                    return  # Early exit — resume via /approve-images
+        add_log(
+            db,
+            ctx.task,
+            f"Pipeline preset: {preset_name}, steps: {len(steps)}",
+            step=None,
+        )
 
-        run_phase(db, ctx.task, STEP_PRIMARY_GEN, phase_primary_gen, ctx)
+        for step_name in steps:
+            phase_func = PHASE_REGISTRY.get(step_name)
+            if not phase_func:
+                add_log(
+                    db,
+                    ctx.task,
+                    f"⚠️ Unknown step '{step_name}' — skipped",
+                    level="warn",
+                    step=step_name,
+                )
+                continue
 
-        # TEST MODE BREAKPOINT
-        if settings.TEST_MODE:
-            step_results = ctx.task.step_results or {}
-            if not step_results.get("test_mode_approved"):
-                if auto_mode:
-                    updated = dict(step_results)
-                    updated["test_mode_approved"] = True
-                    updated["waiting_for_approval"] = False
-                    updated["_pipeline_pause"] = {"active": False, "reason": "test_mode"}
-                    ctx.task.step_results = updated
-                    db.commit()
-                    add_log(db, ctx.task, "auto_mode: skipped TEST MODE pause after primary generation", step=None)
-                else:
-                    add_log(db, ctx.task, "🛑 TEST MODE: Pausing pipeline after Primary Generation. Waiting for manual approval.", step=None)
+            run_phase(db, ctx.task, step_name, phase_func, ctx)
 
-                    updated = dict(step_results)
-                    updated["waiting_for_approval"] = True
-                    updated["_pipeline_pause"] = {"active": True, "reason": "test_mode", "message": "Test mode: review primary generation"}
-                    ctx.task.step_results = updated
-                    ctx.task.status = "processing"
-                    db.commit()
-                    return
+            if step_name.startswith("primary_generation") and settings.TEST_MODE:
+                step_results_tm = ctx.task.step_results or {}
+                if not step_results_tm.get("test_mode_approved"):
+                    if auto_mode:
+                        updated = dict(step_results_tm)
+                        updated["test_mode_approved"] = True
+                        updated["waiting_for_approval"] = False
+                        updated["_pipeline_pause"] = {"active": False, "reason": "test_mode"}
+                        ctx.task.step_results = updated
+                        db.commit()
+                        add_log(db, ctx.task, "auto_mode: skipped TEST MODE pause after primary generation", step=None)
+                    else:
+                        updated = dict(step_results_tm)
+                        updated["waiting_for_approval"] = True
+                        updated["_pipeline_pause"] = {
+                            "active": True,
+                            "reason": "test_mode",
+                            "message": "Test mode: review primary generation",
+                        }
+                        ctx.task.step_results = updated
+                        ctx.task.status = "processing"
+                        db.commit()
+                        add_log(
+                            db,
+                            ctx.task,
+                            "🛑 TEST MODE: Pausing after primary generation",
+                            step=None,
+                        )
+                        return
 
-        if ctx.use_serp:
-            run_phase(db, ctx.task, STEP_COMP_COMPARISON, phase_competitor_comparison, ctx)
-            run_phase(db, ctx.task, STEP_READER_OPINION, phase_reader_opinion, ctx)
-            run_phase(db, ctx.task, STEP_INTERLINK, phase_interlink, ctx)
-            run_phase(db, ctx.task, STEP_IMPROVER, phase_improver, ctx)
-
-        run_phase(db, ctx.task, STEP_FINAL_EDIT, phase_final_editing, ctx)
-        
-        if settings.FACT_CHECK_ENABLED:
-            run_phase(db, ctx.task, STEP_CONTENT_FACT_CHECK, phase_content_fact_check, ctx)
-            
-        run_phase(db, ctx.task, STEP_HTML_STRUCT, phase_html_structure, ctx)
-
-        # --- IMAGE INJECTION (optional) ---
-        run_phase(db, ctx.task, STEP_IMAGE_INJECT, phase_image_inject, ctx)
-
-        run_phase(db, ctx.task, STEP_META_GEN, phase_meta_generation, ctx)
+            if step_name == STEP_IMAGE_GEN:
+                step_results_ig = dict(ctx.task.step_results or {})
+                pause_st = step_results_ig.get("_pipeline_pause", {})
+                if (
+                    isinstance(pause_st, dict)
+                    and pause_st.get("active")
+                    and pause_st.get("reason") == "image_review"
+                ):
+                    if not step_results_ig.get("_images_approved"):
+                        if auto_mode:
+                            _auto_approve_images(ctx)
+                        else:
+                            return
 
         # Assemble and SAVE
         try:
             add_log(db, ctx.task, "Starting article assembly and saving...", step=None)
-            # Use image_inject result if available, otherwise fall back to html_structure
-            structured_html = ctx.task.step_results.get(STEP_IMAGE_INJECT, {}).get("result") or ctx.task.step_results.get(STEP_HTML_STRUCT, {}).get("result", "")
+            structured_html = pick_structured_html_for_assembly(ctx)
+            if not structured_html.strip():
+                raise ValueError(
+                    "No HTML body produced by pipeline steps — cannot assemble article."
+                )
             meta_json_str = ctx.task.step_results.get(STEP_META_GEN, {}).get("result", "{}")
             meta_data = clean_and_parse_json(meta_json_str)
 

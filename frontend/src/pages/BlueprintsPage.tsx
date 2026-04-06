@@ -2,8 +2,21 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useState, type Dispatch, type SetStateAction } from "react";
 import toast from "react-hot-toast";
 import { blueprintsApi } from "@/api/blueprints";
-import { Blueprint, BlueprintPage } from "@/types/blueprint";
+import { Blueprint, BlueprintPage, PipelinePreset } from "@/types/blueprint";
+import {
+  CUSTOM_STEP_OPTIONS,
+  DEFAULT_FULL_PIPELINE_STEPS,
+  normalizeCustomPipelineSteps,
+} from "@/lib/pipelineSteps";
 import { ChevronDown, ChevronRight, LayoutTemplate, Pencil, Plus, Trash2, X } from "lucide-react";
+
+const PIPELINE_PRESET_LABEL: Record<PipelinePreset, string> = {
+  full: "Full",
+  category: "Category",
+  about: "About",
+  legal: "Legal",
+  custom: "Custom",
+};
 
 export default function BlueprintsPage() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -246,7 +259,7 @@ function BlueprintPagesPanel({ blueprintId }: { blueprintId: string }) {
               <th className="px-2 py-2">Keyword Template</th>
               <th className="px-2 py-2">Brand Template</th>
               <th className="px-2 py-2">Filename</th>
-              <th className="px-2 py-2 text-center">SERP</th>
+              <th className="px-2 py-2 text-center">Pipeline</th>
               <th className="px-2 py-2 text-center">Nav</th>
               <th className="px-2 py-2 text-center">Footer</th>
               <th className="px-2 py-2 text-right">Actions</th>
@@ -276,7 +289,12 @@ function BlueprintPagesPanel({ blueprintId }: { blueprintId: string }) {
                 <td className="px-2 py-2 font-mono text-xs">{page.keyword_template}</td>
                 <td className="px-2 py-2 font-mono text-xs text-slate-600">{page.keyword_template_brand || "-"}</td>
                 <td className="px-2 py-2 font-mono text-xs">{page.filename}</td>
-                <td className="px-2 py-2 text-center">{page.use_serp ? "✅" : "❌"}</td>
+                <td className="px-2 py-2 text-center text-xs leading-tight">
+                  <div className="font-medium text-slate-800">
+                    {PIPELINE_PRESET_LABEL[(page.pipeline_preset || "full") as PipelinePreset]}
+                  </div>
+                  <div className="text-slate-500">{page.use_serp ? "SERP" : "no SERP"}</div>
+                </td>
                 <td className="px-2 py-2 text-center">{page.show_in_nav ? "✅" : "❌"}</td>
                 <td className="px-2 py-2 text-center">{page.show_in_footer ? "✅" : "❌"}</td>
                 <td className="px-2 py-2 text-right">
@@ -371,6 +389,76 @@ function BlueprintPagesPanel({ blueprintId }: { blueprintId: string }) {
   );
 }
 
+function PipelinePresetFields({
+  formData,
+  setFormData,
+}: {
+  formData: { pipeline_preset: PipelinePreset; pipeline_steps_custom: string[] };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  setFormData: React.Dispatch<React.SetStateAction<any>>;
+}) {
+  return (
+    <>
+      <Field label="Pipeline preset">
+        <select
+          className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+          value={formData.pipeline_preset}
+          onChange={(e) => {
+            const v = e.target.value as PipelinePreset;
+            setFormData((p: any) => ({
+              ...p,
+              pipeline_preset: v,
+              pipeline_steps_custom:
+                v === "custom" && !(p.pipeline_steps_custom?.length)
+                  ? [...DEFAULT_FULL_PIPELINE_STEPS]
+                  : p.pipeline_steps_custom,
+            }));
+          }}
+        >
+          <option value="full">Full — SERP + full analysis + generation</option>
+          <option value="category">Category — SERP + simplified analysis</option>
+          <option value="about">About — author-driven (no SERP)</option>
+          <option value="legal">Legal — template-driven (no SERP)</option>
+          <option value="custom">Custom — manual steps</option>
+        </select>
+      </Field>
+      <p className="text-xs text-slate-500">
+        SERP usage follows the preset. The <code className="rounded bg-slate-100 px-1">use_serp</code> flag is set
+        automatically on save.
+      </p>
+      {formData.pipeline_preset === "custom" && (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="mb-2 text-sm font-medium text-slate-800">Custom pipeline steps</div>
+          <div className="grid max-h-52 grid-cols-1 gap-2 overflow-y-auto sm:grid-cols-2">
+            {CUSTOM_STEP_OPTIONS.map((opt) => (
+              <label key={opt.id} className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  className="rounded border-slate-300"
+                  checked={formData.pipeline_steps_custom.includes(opt.id)}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setFormData((p: any) => {
+                      const cur = p.pipeline_steps_custom || [];
+                      const next = checked
+                        ? cur.includes(opt.id)
+                          ? cur
+                          : [...cur, opt.id]
+                        : cur.filter((s: string) => s !== opt.id);
+                      return { ...p, pipeline_steps_custom: next };
+                    });
+                  }}
+                />
+                {opt.label}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function AddBlueprintPageModal({ blueprintId, onClose }: { blueprintId: string; onClose: () => void }) {
   const queryClient = useQueryClient();
   const [formData, setFormData] = useState({
@@ -384,7 +472,8 @@ function AddBlueprintPageModal({ blueprintId, onClose }: { blueprintId: string; 
     nav_label: "",
     show_in_nav: true,
     show_in_footer: true,
-    use_serp: true,
+    pipeline_preset: "full" as PipelinePreset,
+    pipeline_steps_custom: [] as string[],
   });
 
   const mutation = useMutation({
@@ -403,10 +492,21 @@ function AddBlueprintPageModal({ blueprintId, onClose }: { blueprintId: string; 
       toast.error("Fill required fields");
       return;
     }
+    if (
+      formData.pipeline_preset === "custom" &&
+      normalizeCustomPipelineSteps(formData.pipeline_steps_custom).length === 0
+    ) {
+      toast.error("Select at least one step for custom pipeline");
+      return;
+    }
     mutation.mutate({
       ...formData,
       keyword_template_brand: formData.keyword_template_brand || undefined,
       nav_label: formData.nav_label || undefined,
+      pipeline_steps_custom:
+        formData.pipeline_preset === "custom"
+          ? normalizeCustomPipelineSteps(formData.pipeline_steps_custom || [])
+          : null,
     });
   };
 
@@ -488,16 +588,15 @@ function AddBlueprintPageModal({ blueprintId, onClose }: { blueprintId: string; 
             />
           </Field>
 
+          <PipelinePresetFields
+            formData={{
+              pipeline_preset: formData.pipeline_preset,
+              pipeline_steps_custom: formData.pipeline_steps_custom,
+            }}
+            setFormData={setFormData}
+          />
+
           <div className="flex flex-wrap gap-4 text-sm text-slate-700">
-            <label className="inline-flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={formData.use_serp}
-                onChange={(e) => setFormData((p) => ({ ...p, use_serp: e.target.checked }))}
-                className="rounded border-slate-300"
-              />
-              Use SERP
-            </label>
             <label className="inline-flex items-center gap-2">
               <input
                 type="checkbox"
@@ -561,7 +660,8 @@ function EditBlueprintPageModal({
     nav_label: page.nav_label || "",
     show_in_nav: page.show_in_nav,
     show_in_footer: page.show_in_footer,
-    use_serp: page.use_serp,
+    pipeline_preset: (page.pipeline_preset || "full") as PipelinePreset,
+    pipeline_steps_custom: [...(page.pipeline_steps_custom || [])] as string[],
   });
 
   const mutation = useMutation({
@@ -580,10 +680,21 @@ function EditBlueprintPageModal({
       toast.error("Fill required fields");
       return;
     }
+    if (
+      formData.pipeline_preset === "custom" &&
+      normalizeCustomPipelineSteps(formData.pipeline_steps_custom).length === 0
+    ) {
+      toast.error("Select at least one step for custom pipeline");
+      return;
+    }
     mutation.mutate({
       ...formData,
       keyword_template_brand: formData.keyword_template_brand || undefined,
       nav_label: formData.nav_label || undefined,
+      pipeline_steps_custom:
+        formData.pipeline_preset === "custom"
+          ? normalizeCustomPipelineSteps(formData.pipeline_steps_custom || [])
+          : null,
     });
   };
 
@@ -658,16 +769,15 @@ function EditBlueprintPageModal({
             />
           </Field>
 
+          <PipelinePresetFields
+            formData={{
+              pipeline_preset: formData.pipeline_preset,
+              pipeline_steps_custom: formData.pipeline_steps_custom,
+            }}
+            setFormData={setFormData}
+          />
+
           <div className="flex flex-wrap gap-4 text-sm text-slate-700">
-            <label className="inline-flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={formData.use_serp}
-                onChange={(e) => setFormData((p) => ({ ...p, use_serp: e.target.checked }))}
-                className="rounded border-slate-300"
-              />
-              Use SERP
-            </label>
             <label className="inline-flex items-center gap-2">
               <input
                 type="checkbox"

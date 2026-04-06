@@ -2,32 +2,12 @@ import { useQuery } from "@tanstack/react-query";
 import { tasksApi } from "@/api/tasks";
 import { usePolling } from "@/hooks/usePolling";
 import StepCard from "./StepCard";
+import { orderedStepKeysFromResults } from "@/lib/pipelineSteps";
 
 interface Props {
   taskId: string;
   isActive: boolean;
 }
-
-const ALL_STEPS = [
-  "serp_research",
-  "competitor_scraping",
-  "ai_structure_analysis",
-  "chunk_cluster_analysis",
-  "competitor_structure_analysis",
-  "final_structure_analysis",
-  "structure_fact_checking",
-  "image_generation",
-  "primary_generation",
-  "competitor_comparison",
-  "reader_opinion",
-  "interlinking_citations",
-  "improver",
-  "final_editing",
-  "content_fact_checking",
-  "html_structure",
-  "image_inject",
-  "meta_generation"
-];
 
 export default function StepMonitor({ taskId, isActive }: Props) {
   const { data: stepResp, refetch } = useQuery({
@@ -42,6 +22,8 @@ export default function StepMonitor({ taskId, isActive }: Props) {
   const results = stepResp.step_results || {};
   const isWaiting = (results as any).waiting_for_approval === true;
   const isImagePaused = (results as any)._pipeline_pause?.active && (results as any)._pipeline_pause?.reason === "image_review";
+
+  const stepKeys = orderedStepKeysFromResults(results as Record<string, unknown>);
 
   return (
     <div className="space-y-4">
@@ -59,14 +41,14 @@ export default function StepMonitor({ taskId, isActive }: Props) {
          </div>
       </div>
       <div className="space-y-3">
-        {ALL_STEPS.map((stepName, i) => {
-          const result = results[stepName] || { status: "pending" };
+        {stepKeys.map((stepName, i) => {
+          const result = (results as any)[stepName] || { status: "pending" };
           return (
-            <StepCard 
-              key={stepName} 
-              step={{ step_name: stepName, ...result } as any} 
-              taskId={taskId} 
-              index={i} 
+            <StepCard
+              key={stepName}
+              step={{ step_name: stepName, ...result } as any}
+              taskId={taskId}
+              index={i}
             />
           );
         })}

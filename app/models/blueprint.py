@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, Text, Boolean, Integer, ForeignKey, DateTime
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import uuid
@@ -34,5 +34,7 @@ class BlueprintPage(Base):
     show_in_nav = Column(Boolean, default=True)
     show_in_footer = Column(Boolean, default=True)
     use_serp = Column(Boolean, default=True)
+    pipeline_preset = Column(String(20), nullable=False, default="full")
+    pipeline_steps_custom = Column(JSONB, nullable=True)
 
     blueprint = relationship("SiteBlueprint", back_populates="pages")

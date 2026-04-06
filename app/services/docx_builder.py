@@ -106,10 +106,16 @@ def _get_all_meta_from_task(task: Task, article: Optional[GeneratedArticle]) -> 
 def content_from_step_results_fallback(task: Task) -> Tuple[str, str]:
     """
     Body text when there is no saved article row — priority:
-    html_structure > final_editing > primary_generation.
+    html_structure > final_editing > primary_generation (+ about/legal variants).
     """
     sr = task.step_results or {}
-    for key in ("html_structure", "final_editing", "primary_generation"):
+    for key in (
+        "html_structure",
+        "final_editing",
+        "primary_generation",
+        "primary_generation_about",
+        "primary_generation_legal",
+    ):
         step = sr.get(key)
         if isinstance(step, dict) and step.get("result"):
             raw = str(step.get("result") or "")

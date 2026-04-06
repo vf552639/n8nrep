@@ -10,6 +10,8 @@ STEP_STRUCTURE_FACT_CHECK = "structure_fact_checking"
 STEP_IMAGE_PROMPT_GEN = "image_prompt_generation"
 STEP_IMAGE_GEN = "image_generation"
 STEP_PRIMARY_GEN = "primary_generation"
+STEP_PRIMARY_GEN_ABOUT = "primary_generation_about"
+STEP_PRIMARY_GEN_LEGAL = "primary_generation_legal"
 STEP_COMP_COMPARISON = "competitor_comparison"
 STEP_READER_OPINION = "reader_opinion"
 STEP_INTERLINK = "interlinking_citations"
@@ -31,6 +33,8 @@ ALL_STEPS = [
     STEP_IMAGE_PROMPT_GEN,
     STEP_IMAGE_GEN,
     STEP_PRIMARY_GEN,
+    STEP_PRIMARY_GEN_ABOUT,
+    STEP_PRIMARY_GEN_LEGAL,
     STEP_COMP_COMPARISON,
     STEP_READER_OPINION,
     STEP_INTERLINK,
@@ -49,6 +53,8 @@ CRITICAL_VARS = {
     "final_structure_analysis": ["keyword", "language", "country"],
     "image_prompt_generation": ["keyword", "language"],
     "primary_generation": ["keyword", "additional_keywords", "language"],
+    "primary_generation_about": ["keyword", "language", "author", "author_style"],
+    "primary_generation_legal": ["keyword", "language", "legal_reference_html"],
     "competitor_comparison": ["keyword"],
     "reader_opinion": ["keyword"],
     "interlinking_citations": ["keyword", "site_name"],

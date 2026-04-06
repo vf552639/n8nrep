@@ -923,7 +923,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
                       <th className="px-2 py-1.5">Slug</th>
                       <th className="px-2 py-1.5">Keyword</th>
                       <th className="px-2 py-1.5">Type</th>
-                      <th className="px-2 py-1.5">SERP</th>
+                      <th className="px-2 py-1.5">Pipeline</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -933,7 +933,10 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
                         <td className="px-2 py-1.5 font-mono text-xs">{pg.page_slug}</td>
                         <td className="px-2 py-1.5 font-semibold text-slate-900">{pg.keyword}</td>
                         <td className="px-2 py-1.5">{pg.page_type}</td>
-                        <td className="px-2 py-1.5">{pg.use_serp ? "Yes" : "No"}</td>
+                        <td className="px-2 py-1.5 text-xs">
+                          <span className="font-medium capitalize">{pg.pipeline_preset || "full"}</span>
+                          <span className="text-slate-500"> · {pg.use_serp ? "SERP" : "no SERP"}</span>
+                        </td>
                       </tr>
                     ))}
                   </tbody>

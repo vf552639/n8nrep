@@ -126,10 +126,32 @@ def get_task(task_id: str, db: Session = Depends(get_db)):
     }
 
 def calculate_progress(step_results: dict) -> int:
-    """Returns progress percentage 0-100 based on 14 steps"""
+    """Progress 0–100 from _pipeline_plan when present, else legacy estimate."""
+    if not step_results:
+        return 0
+    plan = step_results.get("_pipeline_plan")
+    if isinstance(plan, dict):
+        steps_order = plan.get("steps")
+        if isinstance(steps_order, list) and steps_order:
+            total = len(steps_order)
+            done = 0
+            for s in steps_order:
+                block = step_results.get(s)
+                if isinstance(block, dict) and block.get("status") in (
+                    "completed",
+                    "completed_with_warnings",
+                ):
+                    done += 1
+            return int(min(100, (done / total) * 100))
     total_steps = 14
-    completed = sum(1 for v in (step_results or {}).values() if isinstance(v, dict) and v.get("status") == "completed")
-    return int((completed / total_steps) * 100)
+    completed = sum(
+        1
+        for k, v in (step_results or {}).items()
+        if not str(k).startswith("_")
+        and isinstance(v, dict)
+        and v.get("status") in ("completed", "completed_with_warnings")
+    )
+    return int(min(100, (completed / total_steps) * 100))
 
 @router.get("/{task_id}/steps")
 def get_task_steps(task_id: str, db: Session = Depends(get_db)):

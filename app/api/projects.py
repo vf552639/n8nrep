@@ -26,6 +26,7 @@ from app.workers.celery_app import celery_app
 # Imported to defer circular dep issues, will verify app.workers.tasks is available
 from app.workers.tasks import process_site_project, advance_project
 from app.config import settings
+from app.services.pipeline_presets import pipeline_steps_use_serp, resolve_pipeline_steps
 
 router = APIRouter()
 
@@ -364,6 +365,7 @@ def preview_project(body: ProjectPreviewRequest, db: Session = Depends(get_db)):
             else pg.keyword_template
         )
         kw = tmpl.replace("{seed}", body.seed_keyword)
+        _steps = resolve_pipeline_steps(pg)
         page_rows.append(
             {
                 "sort_order": pg.sort_order,
@@ -372,7 +374,8 @@ def preview_project(body: ProjectPreviewRequest, db: Session = Depends(get_db)):
                 "page_type": pg.page_type,
                 "keyword": kw,
                 "template_used": template_used,
-                "use_serp": bool(getattr(pg, "use_serp", True)),
+                "use_serp": pipeline_steps_use_serp(_steps),
+                "pipeline_preset": getattr(pg, "pipeline_preset", "full") or "full",
                 "filename": pg.filename,
             }
         )

@@ -16,6 +16,8 @@ const ARTICLE_REVIEW_STEP_ORDER = [
   "reader_opinion",
   "competitor_comparison",
   "primary_generation",
+  "primary_generation_about",
+  "primary_generation_legal",
 ] as const;
 
 type ArticleReviewStep = (typeof ARTICLE_REVIEW_STEP_ORDER)[number];
@@ -151,7 +153,11 @@ export default function TaskDetailPage() {
     finalEditingStep && typeof finalEditingStep === "object"
       ? String((finalEditingStep as { result?: unknown }).result ?? "").trim()
       : "";
-  const canExportDocx = task?.status === "completed" || Boolean(finalEditingResult);
+  const aboutLegalDraft =
+    Boolean((task?.step_results as any)?.primary_generation_about?.result) ||
+    Boolean((task?.step_results as any)?.primary_generation_legal?.result);
+  const canExportDocx =
+    task?.status === "completed" || Boolean(finalEditingResult) || aboutLegalDraft;
 
   const handleExportDocx = async () => {
     if (!id) return;
@@ -321,7 +327,11 @@ export default function TaskDetailPage() {
                 {draftSource ? (
                   <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">
                     Showing: {draftSource}
-                    {draftSource === "primary_generation" ? " (draft)" : ""}
+                    {draftSource === "primary_generation" ||
+                    draftSource === "primary_generation_about" ||
+                    draftSource === "primary_generation_legal"
+                      ? " (draft)"
+                      : ""}
                   </span>
                 ) : null}
                 <div className="flex-1 min-w-[1rem]" />

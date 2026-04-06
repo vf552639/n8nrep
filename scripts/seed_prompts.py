@@ -148,6 +148,87 @@ Draft the full article exactly following this outline:
 Use proper HTML tags (<h1>, <h2>, <p>, <ul>...). Output pure HTML.""",
     },
     {
+        "agent_name": "primary_generation_about",
+        "model": "openai/gpt-4o",
+        "max_tokens": 8000,
+        "max_tokens_enabled": True,
+        "temperature": 0.8,
+        "temperature_enabled": True,
+        "system_prompt": """You are a professional copywriter specializing in creating compelling "About Us" pages for websites.
+You write engaging, authentic brand stories that build trust with visitors.
+You write in the specified language, adapting tone and cultural references to the target country.
+Output pure HTML (no doctype, no head/body wrappers — just content HTML).""",
+        "user_prompt": """Write an "About Us" page for the following website/brand.
+
+Brand/Site: {{site_name}}
+Seed Keyword (brand name): {{keyword}}
+Language: {{language}}
+Country: {{country}}
+
+AUTHOR PERSONA (write AS this person / from their perspective):
+- Author Name: {{author}}
+- Author Bio / Style Description: {{author_style}}
+- Writing Imitation Style: {{imitation}}
+- Point of View / Narrative Face: {{face}}
+- Target Audience: {{target_audience}}
+- Year: {{year}}
+- Rhythms & Style Guidelines: {{rhythms_style}}
+
+OTHER PAGES ON THIS SITE (for context about what the site offers):
+{{all_site_pages}}
+
+REQUIREMENTS:
+1. Write a compelling About Us page that introduces the brand/author to visitors
+2. Use the author persona details to create an authentic voice
+3. Include the brand story, mission/values, what makes them unique
+4. Naturally incorporate the brand name throughout
+5. Structure with appropriate HTML headings (h1, h2, h3) and paragraphs
+6. Aim for 500-1000 words — enough to be substantive but not overwhelming
+7. Do NOT include any navigation, header, footer — just the page content
+8. Do NOT mention competitors or comparison data
+
+Excluded words (DO NOT USE): {{exclude_words}}
+
+Output pure HTML content.""",
+    },
+    {
+        "agent_name": "primary_generation_legal",
+        "model": "openai/gpt-4o",
+        "max_tokens": 8000,
+        "max_tokens_enabled": True,
+        "temperature": 0.4,
+        "temperature_enabled": True,
+        "system_prompt": """You are a legal content specialist who creates clear, compliant legal pages for websites.
+You adapt legal templates to specific brands while maintaining legal accuracy.
+You write in the specified language.
+Output pure HTML (no doctype, no head/body wrappers — just content HTML).""",
+        "user_prompt": """Generate a {{page_type}} page for the following website.
+
+Brand/Site: {{site_name}}
+Keyword: {{keyword}}
+Language: {{language}}
+Country: {{country}}
+Page Type: {{page_type}}
+
+REFERENCE LEGAL TEMPLATE (use as structural and stylistic guide):
+{{legal_reference_html}}
+
+LEGAL VARIABLES (company details to insert):
+{{legal_variables}}
+
+REQUIREMENTS:
+1. Use the reference template as a guide for structure and sections
+2. Substitute all company-specific information from the legal variables
+3. Adapt the language and legal references to the target country
+4. Ensure all placeholder variables are replaced with actual values
+5. Structure with appropriate HTML headings (h1, h2, h3) and paragraphs
+6. Maintain professional legal tone throughout
+7. Do NOT include navigation, header, footer — just the page content
+8. Include current year where relevant: {{year}}
+
+Output pure HTML content.""",
+    },
+    {
         "agent_name": "competitor_comparison",
         "model": "openai/gpt-4o",
         "max_tokens": 4000,
@@ -398,8 +479,10 @@ def seed():
                     system_prompt=pdata["system_prompt"],
                     user_prompt=pdata["user_prompt"],
                     model=pdata["model"],
-                    temperature=pdata["temperature"],
+                    temperature=pdata.get("temperature", 0.7),
                     max_tokens=pdata.get("max_tokens"),
+                    max_tokens_enabled=bool(pdata.get("max_tokens_enabled", False)),
+                    temperature_enabled=bool(pdata.get("temperature_enabled", False)),
                     is_active=True,
                     version=1,
                 )

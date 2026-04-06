@@ -5,6 +5,8 @@ export interface Blueprint {
   created_at: string;
 }
 
+export type PipelinePreset = "full" | "category" | "about" | "legal" | "custom";
+
 export interface BlueprintPage {
   id: string;
   blueprint_id: string;
@@ -19,4 +21,6 @@ export interface BlueprintPage {
   show_in_nav: boolean;
   show_in_footer: boolean;
   use_serp: boolean;
+  pipeline_preset: PipelinePreset;
+  pipeline_steps_custom?: string[] | null;
 }

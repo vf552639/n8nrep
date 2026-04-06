@@ -32,6 +32,7 @@ export interface ProjectPreview {
     keyword: string;
     template_used: "standard" | "brand";
     use_serp: boolean;
+    pipeline_preset: string;
     filename: string;
   }>;
   warnings: string[];
