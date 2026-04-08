@@ -701,8 +701,11 @@ def force_task_status(task_id: str, payload: ForceStatusRequest, db: Session = D
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
         
-    if task.status != "processing":
-        raise HTTPException(status_code=400, detail="Only 'processing' tasks can be forced")
+    if task.status not in ("processing", "stale"):
+        raise HTTPException(
+            status_code=400,
+            detail="Only 'processing' or 'stale' tasks can be forced",
+        )
         
     if payload.action == "fail":
         task.status = "failed"

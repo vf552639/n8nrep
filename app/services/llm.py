@@ -23,9 +23,9 @@ def generate_text(
     user_prompt: str,
     model: str = settings.DEFAULT_MODEL,
     temperature: float = 0.7,
-    frequency_penalty: float = 0.0,
-    presence_penalty: float = 0.0,
-    top_p: float = 1.0,
+    frequency_penalty: Optional[float] = None,
+    presence_penalty: Optional[float] = None,
+    top_p: Optional[float] = None,
     max_tokens: Optional[int] = None,
     max_retries: int = 3,
     response_format: Optional[Dict[str, str]] = None,
@@ -63,15 +63,18 @@ def generate_text(
                 "model": model,
                 "messages": messages,
                 "temperature": temperature,
-                "frequency_penalty": frequency_penalty,
-                "presence_penalty": presence_penalty,
-                "top_p": top_p,
                 "extra_headers": {
                     "HTTP-Referer": "https://example.com", # Update logically later
                     "X-Title": "SEO-Generator"
                 },
                 "timeout": timeout,
             }
+            if frequency_penalty is not None:
+                kwargs["frequency_penalty"] = frequency_penalty
+            if presence_penalty is not None:
+                kwargs["presence_penalty"] = presence_penalty
+            if top_p is not None:
+                kwargs["top_p"] = top_p
             if max_tokens is not None and max_tokens > 0:
                 kwargs["max_tokens"] = max_tokens
             if response_format:

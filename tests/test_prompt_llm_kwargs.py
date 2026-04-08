@@ -30,9 +30,18 @@ def test_disabled_uses_defaults_no_max_tokens():
     k = llm_sampling_kwargs_from_prompt(p)
     assert "max_tokens" not in k
     assert k["temperature"] == 0.7
-    assert k["frequency_penalty"] == 0.0
-    assert k["presence_penalty"] == 0.0
-    assert k["top_p"] == 1.0
+    assert "frequency_penalty" not in k
+    assert "presence_penalty" not in k
+    assert "top_p" not in k
+
+
+def test_disabled_params_not_in_kwargs():
+    p = _prompt()
+    k = llm_sampling_kwargs_from_prompt(p)
+    assert "top_p" not in k
+    assert "frequency_penalty" not in k
+    assert "presence_penalty" not in k
+    assert "temperature" in k
 
 
 def test_enabled_passes_custom_values():
@@ -56,6 +65,19 @@ def test_enabled_passes_custom_values():
     assert k["top_p"] == 0.9
 
 
+def test_enabled_params_present_in_kwargs():
+    p = _prompt(
+        top_p=0.9,
+        top_p_enabled=True,
+        frequency_penalty=0.5,
+        frequency_penalty_enabled=True,
+    )
+    k = llm_sampling_kwargs_from_prompt(p)
+    assert k["top_p"] == 0.9
+    assert k["frequency_penalty"] == 0.5
+    assert "presence_penalty" not in k
+
+
 def test_test_overrides_ignore_db_when_passed():
     p = _prompt(temperature=0.9, temperature_enabled=False)
     k = llm_sampling_kwargs_from_prompt(
@@ -66,8 +88,26 @@ def test_test_overrides_ignore_db_when_passed():
 
 def test_format_log_contains_custom_marker():
     p = _prompt(temperature_enabled=True)
-    kwargs = {"temperature": 0.3, "frequency_penalty": 0.0, "presence_penalty": 0.0, "top_p": 1.0}
+    kwargs = {"temperature": 0.3}
     line = format_llm_params_log_line("primary_generation", p, kwargs)
     assert "primary_generation" in line
     assert "temp=0.3" in line
     assert "custom" in line
+    assert "freq=" not in line
+    assert "top_p=" not in line
+
+
+def test_format_log_includes_optional_sampling_when_in_kwargs():
+    p = _prompt(top_p_enabled=True, frequency_penalty_enabled=True)
+    kwargs = {
+        "temperature": 0.5,
+        "max_tokens": 16000,
+        "top_p": 0.9,
+        "frequency_penalty": 0.2,
+    }
+    line = format_llm_params_log_line("meta_generation", p, kwargs)
+    assert "meta_generation" in line
+    assert "max_tokens=16000" in line
+    assert "top_p=0.9 (custom)" in line
+    assert "freq=0.2 (custom)" in line
+    assert "pres=" not in line

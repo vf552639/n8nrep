@@ -60,9 +60,9 @@ class PromptTest(BaseModel):
     model: str
     max_tokens: Optional[int] = None
     temperature: Optional[float] = 0.7
-    frequency_penalty: Optional[float] = 0.0
-    presence_penalty: Optional[float] = 0.0
-    top_p: Optional[float] = 1.0
+    frequency_penalty: Optional[float] = None
+    presence_penalty: Optional[float] = None
+    top_p: Optional[float] = None
 
 class PromptTestContext(BaseModel):
     context: Dict[str, Any]

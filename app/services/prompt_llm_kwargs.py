@@ -22,8 +22,11 @@ def llm_sampling_kwargs_from_prompt(
     max_tokens: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
-    Mirrors pipeline behavior: when *_enabled is False, stored values are ignored for the API call
-    and defaults (0.7 / 0 / 1.0 / no max_tokens) are used.
+    When *_enabled is False, that sampling parameter is omitted from the dict so OpenRouter
+    uses provider defaults (no explicit top_p=1.0 / penalty=0 in the request).
+
+    Temperature is always included: 0.7 when disabled (system default), or the stored value when enabled.
+
     Optional override args come from prompt test UI (unsaved edits); None means use prompt row.
     """
     te = (
@@ -44,7 +47,7 @@ def llm_sampling_kwargs_from_prompt(
     fval = prompt.frequency_penalty if frequency_penalty is None else frequency_penalty
     if fval is None:
         fval = 0.0
-    eff_freq = float(fval) if fe else 0.0
+    eff_freq = float(fval)
 
     pe = (
         presence_penalty_enabled
@@ -54,13 +57,13 @@ def llm_sampling_kwargs_from_prompt(
     pval = prompt.presence_penalty if presence_penalty is None else presence_penalty
     if pval is None:
         pval = 0.0
-    eff_pres = float(pval) if pe else 0.0
+    eff_pres = float(pval)
 
     tpe = top_p_enabled if top_p_enabled is not None else bool(getattr(prompt, "top_p_enabled", False))
     tpval = prompt.top_p if top_p is None else top_p
     if tpval is None:
         tpval = 1.0
-    eff_top_p = float(tpval) if tpe else 1.0
+    eff_top_p = float(tpval)
 
     mte = (
         max_tokens_enabled
@@ -69,24 +72,32 @@ def llm_sampling_kwargs_from_prompt(
     )
     mt = prompt.max_tokens if max_tokens is None else max_tokens
 
-    out: Dict[str, Any] = {
-        "temperature": eff_temp,
-        "frequency_penalty": eff_freq,
-        "presence_penalty": eff_pres,
-        "top_p": eff_top_p,
-    }
+    out: Dict[str, Any] = {"temperature": eff_temp}
+    if fe:
+        out["frequency_penalty"] = eff_freq
+    if pe:
+        out["presence_penalty"] = eff_pres
+    if tpe:
+        out["top_p"] = eff_top_p
     if mte and mt is not None and mt > 0:
         out["max_tokens"] = int(mt)
     return out
 
 
 def format_llm_params_log_line(agent_name: str, prompt: "Prompt", kwargs: Dict[str, Any]) -> str:
-    """Human-readable log line for diagnostics (matches task21 spec)."""
-    mt = kwargs.get("max_tokens", "auto")
-    return (
-        f"[{agent_name}] LLM params: model={prompt.model}, "
-        f"temp={kwargs.get('temperature', 0.7):.1f} ({'custom' if getattr(prompt, 'temperature_enabled', False) else 'default'}), "
-        f"max_tokens={mt}, "
-        f"freq={kwargs.get('frequency_penalty', 0.0)}, pres={kwargs.get('presence_penalty', 0.0)}, "
-        f"top_p={kwargs.get('top_p', 1.0)}"
-    )
+    """Human-readable log line: only lists sampling args actually passed to the API."""
+    temp_m = "custom" if getattr(prompt, "temperature_enabled", False) else "default"
+    mt = kwargs.get("max_tokens")
+    mt_str = str(mt) if mt is not None else "auto"
+    parts = [
+        f"[{agent_name}] LLM params: model={prompt.model}",
+        f"temp={kwargs.get('temperature', 0.7):.1f} ({temp_m})",
+        f"max_tokens={mt_str}",
+    ]
+    if "frequency_penalty" in kwargs:
+        parts.append(f"freq={kwargs['frequency_penalty']} (custom)")
+    if "presence_penalty" in kwargs:
+        parts.append(f"pres={kwargs['presence_penalty']} (custom)")
+    if "top_p" in kwargs:
+        parts.append(f"top_p={kwargs['top_p']} (custom)")
+    return ", ".join(parts)
