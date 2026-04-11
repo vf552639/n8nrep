@@ -204,8 +204,8 @@ function isPromptDirty(
     if (editVal !== savedVal) return true;
   }
   if (params.top) {
-    const editVal = Math.round((edit.top_p ?? 1) * 10) / 10;
-    const savedVal = Math.round((saved.top_p ?? 1) * 10) / 10;
+    const editVal = Math.round((edit.top_p ?? 0) * 10) / 10;
+    const savedVal = Math.round((saved.top_p ?? 0) * 10) / 10;
     if (editVal !== savedVal) return true;
   }
 
@@ -320,7 +320,7 @@ export default function PromptsPage() {
         frequency_penalty_enabled: paramsEnabled.freq,
         presence_penalty: paramsEnabled.pres ? (data.presence_penalty ?? 0.0) : 0.0,
         presence_penalty_enabled: paramsEnabled.pres,
-        top_p: paramsEnabled.top ? (data.top_p ?? 1.0) : 1.0,
+        top_p: paramsEnabled.top ? (data.top_p ?? 0) : 0,
         top_p_enabled: paramsEnabled.top,
         skip_in_pipeline: !!data.skip_in_pipeline,
       });
@@ -647,7 +647,7 @@ export default function PromptsPage() {
                   min={0}
                   max={1}
                   disabled={!paramsEnabled.top}
-                  value={paramsEnabled.top ? (editState.top_p ?? 1.0) : 1.0}
+                  value={paramsEnabled.top ? (editState.top_p ?? 0) : 0}
                   onChange={(e) => setEditState((prev) => (prev ? { ...prev, top_p: parseFloat(e.target.value) } : prev))}
                   onBlur={(e) => {
                     const val = Math.min(Math.max(Math.round(parseFloat(e.target.value) * 10) / 10, 0), 1);
@@ -659,6 +659,9 @@ export default function PromptsPage() {
                   checked={paramsEnabled.top}
                   onChange={(checked) => {
                     setParamsEnabled((p) => ({ ...p, top: checked }));
+                    if (!checked) {
+                      setEditState((prev) => (prev ? { ...prev, top_p: 0 } : prev));
+                    }
                   }}
                 />
               </div>
@@ -669,7 +672,7 @@ export default function PromptsPage() {
                   min={0}
                   max={1}
                   step={0.1}
-                  value={editState.top_p ?? 1.0}
+                  value={editState.top_p ?? 0}
                   onChange={(e) => setEditState((prev) => (prev ? { ...prev, top_p: parseFloat(e.target.value) } : prev))}
                 />
               )}
@@ -839,7 +842,7 @@ export default function PromptsPage() {
                       presence_penalty_enabled: paramsEnabled.pres,
                       presence_penalty: editState.presence_penalty ?? 0,
                       top_p_enabled: paramsEnabled.top,
-                      top_p: editState.top_p ?? 1,
+                      top_p: editState.top_p ?? 0,
                     }}
                   />
                 )}

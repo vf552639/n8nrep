@@ -1019,7 +1019,10 @@ def phase_ai_structure(ctx: PipelineContext):
     
     add_log(ctx.db, ctx.task, f"ai_structure raw (first 500): {ai_structure[:500]}", level="debug", step=STEP_AI_ANALYSIS)
     
-    ai_struct_data = clean_and_parse_json(ai_structure)
+    ai_struct_data = clean_and_parse_json(
+        ai_structure,
+        unwrap_keys={"intent", "Taxonomy", "Attention", "structura"},
+    )
     if ai_struct_data:
         ctx.analysis_vars["intent"] = ai_struct_data.get("intent", "")
         ctx.analysis_vars["Taxonomy"] = ai_struct_data.get("Taxonomy", "")
@@ -2091,6 +2094,14 @@ def phase_meta_generation(ctx: PipelineContext):
         response_format={"type": "json_object"}, variables=ctx.template_vars
     )
     ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
+    raw_preview = (meta_json_str or "")[:500]
+    add_log(
+        ctx.db,
+        ctx.task,
+        f"meta_generation raw (first 500): {raw_preview}",
+        level="debug",
+        step=STEP_META_GEN,
+    )
     add_log(ctx.db, ctx.task, f"Meta Tags Generation completed", step=STEP_META_GEN)
     save_step_result(ctx.db, ctx.task, STEP_META_GEN, result=meta_json_str, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
 
@@ -2318,10 +2329,21 @@ def run_pipeline(db: Session, task_id: str, auto_mode: bool = False):
                     "No HTML body produced by pipeline steps — cannot assemble article."
                 )
             meta_json_str = ctx.task.step_results.get(STEP_META_GEN, {}).get("result", "{}")
+            if not isinstance(meta_json_str, str):
+                meta_json_str = json.dumps(meta_json_str, ensure_ascii=False) if meta_json_str else "{}"
             meta_data = clean_and_parse_json(meta_json_str)
+
+            add_log(
+                db,
+                ctx.task,
+                f"meta_data keys: {list(meta_data.keys()) if meta_data else 'EMPTY'}",
+                level="debug",
+                step=STEP_META_GEN,
+            )
 
             title = ""
             description = ""
+
             if isinstance(meta_data.get("results"), list) and len(meta_data["results"]) > 0:
                 first_variant = meta_data["results"][0]
                 if isinstance(first_variant, dict):
@@ -2331,11 +2353,34 @@ def run_pipeline(db: Session, task_id: str, auto_mode: bool = False):
                     description = (
                         first_variant.get("Description") or first_variant.get("description") or ""
                     ).strip()
-            else:
+
+            if not title:
                 title = str(meta_data.get("title") or meta_data.get("Title") or "").strip()
+            if not description:
                 description = str(
                     meta_data.get("description") or meta_data.get("Description") or ""
                 ).strip()
+
+            if not title and isinstance(meta_data, dict):
+                for key, val in meta_data.items():
+                    if isinstance(val, dict):
+                        candidate_title = str(
+                            val.get("title") or val.get("Title") or ""
+                        ).strip()
+                        candidate_desc = str(
+                            val.get("description") or val.get("Description") or ""
+                        ).strip()
+                        if candidate_title:
+                            title = candidate_title
+                            description = description or candidate_desc
+                            add_log(
+                                db,
+                                ctx.task,
+                                f"meta title found in nested key '{key}'",
+                                level="debug",
+                                step=STEP_META_GEN,
+                            )
+                            break
 
             if not title:
                 title = ctx.task.main_keyword.title()
