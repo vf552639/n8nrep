@@ -1,6 +1,14 @@
 import { cn } from "@/lib/utils";
 
-export type TaskStatus = "pending" | "processing" | "completed" | "failed" | "stale" | "stopped" | "awaiting_page_approval";
+export type TaskStatus =
+  | "pending"
+  | "processing"
+  | "completed"
+  | "failed"
+  | "stale"
+  | "paused"
+  | "stopped"
+  | "awaiting_page_approval";
 
 interface Props {
   status: TaskStatus | string;
@@ -12,6 +20,7 @@ const STATUS_COLORS: Record<string, string> = {
   completed: "bg-green-200 text-green-800",
   failed: "bg-red-200 text-red-800",
   stale: "bg-yellow-200 text-yellow-800",
+  paused: "bg-cyan-200 text-cyan-900",
   stopped: "bg-orange-200 text-orange-800",
   awaiting_page_approval: "bg-amber-100 text-amber-700",
 };

@@ -4,7 +4,15 @@ from sqlalchemy import Column, String, Integer, Text, Boolean, ForeignKey, DateT
 from sqlalchemy.dialects.postgresql import UUID, JSONB, ENUM
 from app.database import Base
 
-task_status_enum = ENUM('pending', 'processing', 'completed', 'failed', 'stale', name='task_status')
+task_status_enum = ENUM(
+    "pending",
+    "processing",
+    "completed",
+    "failed",
+    "stale",
+    "paused",
+    name="task_status",
+)
 
 class Task(Base):
     __tablename__ = "tasks"

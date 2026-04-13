@@ -7,6 +7,7 @@ import { tasksApi } from "@/api/tasks";
 import StatusBadge from "@/components/common/StatusBadge";
 import StepMonitor from "@/components/tasks/StepMonitor";
 import ImageReviewPanel from "@/components/tasks/ImageReviewPanel";
+import SerpUrlsReviewer from "@/components/tasks/SerpUrlsReviewer";
 import { Info, XCircle } from "lucide-react";
 
 const ARTICLE_REVIEW_STEP_ORDER = [
@@ -60,7 +61,7 @@ export default function TaskDetailPage() {
     enabled: !!id,
     refetchInterval: (query) => {
       const status = query.state.data?.status;
-      return status === "processing" || status === "pending" ? 3000 : false;
+      return status === "processing" || status === "pending" || status === "paused" ? 3000 : false;
     },
   });
 
@@ -81,6 +82,10 @@ export default function TaskDetailPage() {
 
   const isWaiting = task?.step_results?.waiting_for_approval === true;
   const isImagePaused = task?.step_results?._pipeline_pause?.active && task?.step_results?._pipeline_pause?.reason === "image_review";
+  const isSerpReviewPaused =
+    task?.status === "paused" &&
+    task?.step_results?._pipeline_pause?.reason === "serp_review" &&
+    !task?.step_results?._serp_urls_approved;
   const draftSource = useMemo(
     () => resolveArticleReviewStep(task?.step_results as Record<string, unknown> | undefined),
     [task?.step_results]
@@ -135,7 +140,10 @@ export default function TaskDetailPage() {
     if (isImagePaused && activeTab !== "images") {
       setActiveTab("images");
     }
-  }, [isWaiting, isImagePaused]);
+    if (isSerpReviewPaused && activeTab !== "pipeline") {
+      setActiveTab("pipeline");
+    }
+  }, [isWaiting, isImagePaused, isSerpReviewPaused]);
 
   const handleForceAction = async (action: "complete" | "fail") => {
     try {
@@ -244,6 +252,15 @@ export default function TaskDetailPage() {
         <div className="space-y-6 xl:col-span-2">
           {activeTab === "pipeline" && (
             <div className="animate-in fade-in slide-in-from-bottom-2 space-y-4 rounded-xl border bg-white p-6 shadow-sm duration-300">
+              {isSerpReviewPaused && task && (
+                <SerpUrlsReviewer
+                  taskId={task.id}
+                  onApproved={() => {
+                    queryClient.invalidateQueries({ queryKey: ["task", id] });
+                    queryClient.invalidateQueries({ queryKey: ["task-steps", id] });
+                  }}
+                />
+              )}
               {(() => {
                 const pause = (task.step_results as any)?._pipeline_pause;
                 const approved = (task.step_results as any)?._images_approved;

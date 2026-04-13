@@ -256,6 +256,7 @@ export default function TasksPage() {
             >
               <option value="">All Statuses</option>
               <option value="pending">Pending</option>
+              <option value="paused">Paused</option>
               <option value="processing">Processing</option>
               <option value="completed">Completed</option>
               <option value="failed">Failed</option>

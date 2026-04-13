@@ -1,4 +1,5 @@
 from typing import List, Optional
+from urllib.parse import urlparse
 import copy
 import csv
 import io
@@ -701,10 +702,10 @@ def force_task_status(task_id: str, payload: ForceStatusRequest, db: Session = D
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
         
-    if task.status not in ("processing", "stale"):
+    if task.status not in ("processing", "stale", "paused"):
         raise HTTPException(
             status_code=400,
-            detail="Only 'processing' or 'stale' tasks can be forced",
+            detail="Only 'processing', 'stale', or 'paused' tasks can be forced",
         )
         
     if payload.action == "fail":
@@ -732,7 +733,7 @@ def rerun_task_step(task_id: str, payload: RerunStepRequest, db: Session = Depen
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
         
-    if task.status not in ("completed", "processing", "failed", "pending"):
+    if task.status not in ("completed", "processing", "failed", "pending", "paused"):
         raise HTTPException(status_code=400, detail="Task status does not allow rerunning steps")
         
     step_results = dict(task.step_results or {})
@@ -840,6 +841,137 @@ def rerun_task_step(task_id: str, payload: RerunStepRequest, db: Session = Depen
         "msg": f"Step '{payload.step_name}' queued for re-run",
         "invalidated_steps": invalidated_steps
     }
+
+# ========================
+# SERP URL REVIEW ENDPOINTS
+# ========================
+
+
+@router.get("/{task_id}/serp-urls")
+def get_serp_urls(task_id: str, db: Session = Depends(get_db)):
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    serp = task.serp_data if isinstance(task.serp_data, dict) else {}
+    organic_results = serp.get("organic_results", []) or []
+    urls = serp.get("urls", []) or []
+
+    enriched = []
+    for i, url in enumerate(urls):
+        organic = organic_results[i] if i < len(organic_results) else {}
+        if not isinstance(organic, dict):
+            organic = {}
+        pos = organic.get("position")
+        if pos is None:
+            pos = organic.get("rank_absolute") or organic.get("rank_group")
+        if pos is None:
+            pos = i + 1
+        enriched.append(
+            {
+                "url": url,
+                "title": organic.get("title", "") or "",
+                "description": organic.get("description", "") or "",
+                "position": pos,
+                "domain": organic.get("domain", "") or "",
+                "manually_added": bool(organic.get("manually_added")),
+            }
+        )
+
+    step_results = task.step_results or {}
+    pause_state = step_results.get("_pipeline_pause", {})
+    is_paused = (
+        isinstance(pause_state, dict)
+        and pause_state.get("active")
+        and pause_state.get("reason") == "serp_review"
+    )
+
+    return {
+        "urls": enriched,
+        "paused": is_paused,
+        "keyword": task.main_keyword,
+    }
+
+
+class ApproveSerpUrlsRequest(BaseModel):
+    urls: List[str]
+
+
+def _domain_from_url(url: str) -> str:
+    try:
+        parsed = urlparse(url.strip())
+        if parsed.netloc:
+            return parsed.netloc
+    except Exception:
+        pass
+    return url
+
+
+@router.post("/{task_id}/approve-serp-urls")
+def approve_serp_urls(
+    task_id: str,
+    payload: ApproveSerpUrlsRequest,
+    db: Session = Depends(get_db),
+):
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    step_results = dict(task.step_results or {})
+    pause_state = step_results.get("_pipeline_pause", {})
+    if not (
+        isinstance(pause_state, dict)
+        and pause_state.get("active")
+        and pause_state.get("reason") == "serp_review"
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Task is not paused for SERP URL review",
+        )
+
+    if not payload.urls:
+        raise HTTPException(status_code=400, detail="URLs list cannot be empty")
+
+    serp_data = dict(task.serp_data or {})
+    original_urls = serp_data.get("urls", []) or []
+    original_organic = serp_data.get("organic_results", []) or []
+
+    url_to_organic = {}
+    for i, url in enumerate(original_urls):
+        if i < len(original_organic) and isinstance(original_organic[i], dict):
+            url_to_organic[url] = dict(original_organic[i])
+
+    new_organic = []
+    for url in payload.urls:
+        organic = url_to_organic.get(url)
+        if not organic:
+            organic = {
+                "url": url,
+                "title": "",
+                "description": "",
+                "position": 999,
+                "domain": _domain_from_url(url),
+                "manually_added": True,
+            }
+        new_organic.append(organic)
+
+    serp_data["urls"] = list(payload.urls)
+    serp_data["organic_results"] = new_organic
+    task.serp_data = serp_data
+
+    step_results["_pipeline_pause"] = {"active": False, "reason": "serp_review"}
+    step_results["_serp_urls_approved"] = True
+    task.step_results = step_results
+    task.status = "pending"
+    db.commit()
+
+    process_generation_task.delay(str(task.id))
+
+    return {
+        "msg": f"SERP URLs approved: {len(payload.urls)} URLs. Pipeline resumed.",
+        "urls_count": len(payload.urls),
+    }
+
 
 # ========================
 # IMAGE REVIEW ENDPOINTS

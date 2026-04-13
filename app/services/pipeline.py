@@ -37,9 +37,10 @@ import datetime
 import signal
 
 class PipelineContext:
-    def __init__(self, db: Session, task_id: str):
+    def __init__(self, db: Session, task_id: str, auto_mode: bool = False):
         self.db = db
         self.task_id = task_id
+        self.auto_mode = auto_mode
         
         self.task = db.query(Task).filter(Task.id == task_id).first()
         if not self.task:
@@ -955,6 +956,18 @@ def phase_serp(ctx: PipelineContext):
             serp_summary["google_data"] = serp_data.get("google_data")
             serp_summary["bing_data"] = serp_data.get("bing_data")
         save_step_result(ctx.db, ctx.task, STEP_SERP, result=json.dumps(serp_summary, ensure_ascii=False), status="completed")
+        if not ctx.auto_mode:
+            step_results = dict(ctx.task.step_results or {})
+            step_results["_pipeline_pause"] = {"active": True, "reason": "serp_review"}
+            ctx.task.step_results = step_results
+            ctx.task.status = "paused"
+            ctx.db.commit()
+            add_log(
+                ctx.db,
+                ctx.task,
+                "⏸️ Pipeline paused: waiting for SERP URLs review",
+                step=STEP_SERP,
+            )
 
 def phase_scraping(ctx: PipelineContext):
     if not ctx.task.competitors_text:
@@ -2181,7 +2194,7 @@ def _auto_approve_images(ctx: PipelineContext) -> None:
 
 
 def run_pipeline(db: Session, task_id: str, auto_mode: bool = False):
-    ctx = PipelineContext(db, task_id)
+    ctx = PipelineContext(db, task_id, auto_mode=auto_mode)
 
     ctx.task.status = "processing"
     
@@ -2203,6 +2216,18 @@ def run_pipeline(db: Session, task_id: str, auto_mode: bool = False):
                     add_log(db, ctx.task, "⏸️ Pipeline paused: waiting for image review", step=None)
                     return
                 _auto_approve_images(ctx)
+            elif reason == "serp_review" and not step_results.get("_serp_urls_approved"):
+                if not auto_mode:
+                    add_log(db, ctx.task, "⏸️ Pipeline paused: waiting for SERP URLs review", step=None)
+                    ctx.task.status = "paused"
+                    db.commit()
+                    return
+                updated = dict(step_results)
+                updated["_serp_urls_approved"] = True
+                updated["_pipeline_pause"] = {"active": False, "reason": "serp_review"}
+                ctx.task.step_results = updated
+                db.commit()
+                add_log(db, ctx.task, "auto_mode: skipped SERP URL review pause", step=None)
             elif reason == "test_mode" and not step_results.get("test_mode_approved"):
                 if not auto_mode:
                     add_log(db, ctx.task, "⏸️ Pipeline paused: waiting for test mode approval", step=None)
@@ -2276,6 +2301,18 @@ def run_pipeline(db: Session, task_id: str, auto_mode: bool = False):
                 continue
 
             run_phase(db, ctx.task, step_name, phase_func, ctx)
+
+            if step_name == STEP_SERP:
+                sr = dict(ctx.task.step_results or {})
+                pause_st = sr.get("_pipeline_pause", {})
+                if (
+                    isinstance(pause_st, dict)
+                    and pause_st.get("active")
+                    and pause_st.get("reason") == "serp_review"
+                    and not sr.get("_serp_urls_approved")
+                    and not auto_mode
+                ):
+                    return
 
             if step_name.startswith("primary_generation") and settings.TEST_MODE:
                 step_results_tm = ctx.task.step_results or {}

@@ -60,6 +60,27 @@ export const tasksApi = {
   approve: (id: string) =>
     api.post<{msg: string}>(`/tasks/${id}/approve`).then(res => res.data),
 
+  getSerpUrls: (id: string) =>
+    api
+      .get<{
+        urls: Array<{
+          url: string;
+          title: string;
+          description: string;
+          position: number;
+          domain: string;
+          manually_added: boolean;
+        }>;
+        paused: boolean;
+        keyword: string;
+      }>(`/tasks/${id}/serp-urls`)
+      .then((res) => res.data),
+
+  approveSerpUrls: (id: string, urls: string[]) =>
+    api
+      .post<{ msg: string; urls_count: number }>(`/tasks/${id}/approve-serp-urls`, { urls })
+      .then((res) => res.data),
+
   getImages: (id: string) =>
     api.get<{ images: any[]; summary: any; paused: boolean }>(`/tasks/${id}/images`).then(res => res.data),
 
