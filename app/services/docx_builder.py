@@ -4,7 +4,6 @@ Build a single DOCX for a site project: title page, TOC, per-page meta table + c
 from __future__ import annotations
 
 import io
-import json
 import logging
 import re
 from datetime import datetime
@@ -21,6 +20,8 @@ from app.models.blueprint import BlueprintPage
 from app.models.project import SiteProject
 from app.models.site import Site
 from app.models.task import Task
+from app.services.json_parser import clean_and_parse_json
+from app.services.meta_parser import extract_meta_from_parsed, meta_variant_list
 from app.services.word_counter import count_content_words
 
 logger = logging.getLogger(__name__)
@@ -45,8 +46,7 @@ def _strip_boilerplate_html(soup: BeautifulSoup) -> None:
 
 def _get_all_meta_from_task(task: Task, article: Optional[GeneratedArticle]) -> Dict[str, Any]:
     """
-    Title/description/H1 from first variant; all_variants for DOCX expansion.
-    Supports {"results": [{Title, Description, H1, Trigger}, ...]} and flat dicts.
+    Title/description/H1 via extract_meta_from_parsed; all_variants from results/variants (any case).
     """
     result: Dict[str, Any] = {
         "title": "",
@@ -65,34 +65,18 @@ def _get_all_meta_from_task(task: Task, article: Optional[GeneratedArticle]) -> 
         if isinstance(mg, dict):
             raw = mg.get("result", "")
             if isinstance(raw, str) and raw.strip():
-                try:
-                    parsed = json.loads(raw)
-                    if isinstance(parsed, dict):
-                        meta_data = parsed
-                except json.JSONDecodeError:
-                    pass
+                meta_data = clean_and_parse_json(raw)
             elif isinstance(raw, dict):
                 meta_data = raw
 
     if not meta_data:
         meta_data = {}
 
-    results = meta_data.get("results")
-    if isinstance(results, list) and len(results) > 0:
-        result["all_variants"] = results
-        first = results[0]
-        if isinstance(first, dict):
-            result["title"] = str(first.get("Title") or first.get("title") or "").strip()
-            result["description"] = str(
-                first.get("Description") or first.get("description") or ""
-            ).strip()
-            result["h1"] = str(first.get("H1") or first.get("h1") or "").strip()
-    else:
-        result["title"] = str(meta_data.get("title") or meta_data.get("Title") or "").strip()
-        result["description"] = str(
-            meta_data.get("description") or meta_data.get("Description") or ""
-        ).strip()
-        result["h1"] = str(meta_data.get("H1") or meta_data.get("h1") or "").strip()
+    result["all_variants"] = meta_variant_list(meta_data)
+    extracted = extract_meta_from_parsed(meta_data)
+    result["title"] = extracted["title"]
+    result["description"] = extracted["description"]
+    result["h1"] = extracted["h1"]
 
     if article:
         if not result["title"] and article.title:

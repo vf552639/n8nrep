@@ -23,6 +23,7 @@ from app.services.deduplication import ContentDeduplicator
 from app.config import settings
 
 from app.services.json_parser import clean_and_parse_json
+from app.services.meta_parser import extract_meta_from_parsed
 from app.services.pipeline_constants import *
 from app.services.pipeline_presets import (
     PIPELINE_PRESETS,
@@ -2341,63 +2342,25 @@ def run_pipeline(db: Session, task_id: str, auto_mode: bool = False):
                 step=STEP_META_GEN,
             )
 
-            title = ""
-            description = ""
+            meta_extracted = extract_meta_from_parsed(meta_data)
+            title = meta_extracted["title"]
+            description = meta_extracted["description"]
+            h1_meta = meta_extracted.get("h1", "")
 
-            if isinstance(meta_data.get("results"), list) and len(meta_data["results"]) > 0:
-                first_variant = meta_data["results"][0]
-                if isinstance(first_variant, dict):
-                    title = (
-                        first_variant.get("Title") or first_variant.get("title") or ""
-                    ).strip()
-                    description = (
-                        first_variant.get("Description") or first_variant.get("description") or ""
-                    ).strip()
-
-            if not title:
-                title = str(meta_data.get("title") or meta_data.get("Title") or "").strip()
-            if not description:
-                description = str(
-                    meta_data.get("description") or meta_data.get("Description") or ""
-                ).strip()
-
-            if not title and isinstance(meta_data, dict):
-                for key, val in meta_data.items():
-                    if isinstance(val, dict):
-                        candidate_title = str(
-                            val.get("title") or val.get("Title") or ""
-                        ).strip()
-                        candidate_desc = str(
-                            val.get("description") or val.get("Description") or ""
-                        ).strip()
-                        if candidate_title:
-                            title = candidate_title
-                            description = description or candidate_desc
-                            add_log(
-                                db,
-                                ctx.task,
-                                f"meta title found in nested key '{key}'",
-                                level="debug",
-                                step=STEP_META_GEN,
-                            )
-                            break
+            add_log(
+                db,
+                ctx.task,
+                f"meta extracted: title='{title[:80]}', desc='{description[:80]}', h1='{h1_meta[:80]}'",
+                level="debug",
+                step=STEP_META_GEN,
+            )
 
             if not title:
                 title = ctx.task.main_keyword.title()
                 add_log(
                     db,
                     ctx.task,
-                    "⚠️ meta_generation не вернул Title — используется keyword как fallback",
-                    level="warn",
-                    step=STEP_META_GEN,
-                )
-
-            if not description:
-                description = ""
-                add_log(
-                    db,
-                    ctx.task,
-                    "⚠️ meta_generation не вернул Description",
+                    "⚠️ meta_generation не вернул Title — fallback на keyword",
                     level="warn",
                     step=STEP_META_GEN,
                 )
@@ -2429,7 +2392,6 @@ def run_pipeline(db: Session, task_id: str, auto_mode: bool = False):
                         elif fact_check_status_val == "warn":
                             add_log(db, ctx.task, f"Fact-check returned warnings.", level="warn", step=STEP_CONTENT_FACT_CHECK)
 
-            # Verify if an article exists already for this task
             existing = db.query(GeneratedArticle).filter(GeneratedArticle.task_id == ctx.task.id).first()
             if not existing:
                 article = GeneratedArticle(
@@ -2442,9 +2404,20 @@ def run_pipeline(db: Session, task_id: str, auto_mode: bool = False):
                     word_count=word_count,
                     fact_check_status=fact_check_status_val,
                     fact_check_issues=fact_check_issues_val,
-                    needs_review=needs_review_val
+                    needs_review=needs_review_val,
                 )
                 db.add(article)
+            else:
+                existing.title = title
+                existing.description = description
+                existing.meta_data = meta_data
+                existing.html_content = structured_html
+                existing.full_page_html = full_page
+                existing.word_count = word_count
+                existing.fact_check_status = fact_check_status_val
+                existing.fact_check_issues = fact_check_issues_val
+                existing.needs_review = needs_review_val
+                article = existing
 
             if ctx.task.project_id:
                 deduplicator = ContentDeduplicator(db)
