@@ -21,6 +21,7 @@ from app.workers.tasks import process_generation_task
 from app.config import settings
 from app.services.pipeline_constants import ALL_STEPS
 from app.services.serp_cache import invalidate_serp_cache
+from app.services.scraper import fetch_url_meta
 from datetime import datetime
 
 router = APIRouter()
@@ -63,6 +64,20 @@ class TaskResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class FetchUrlMetaRequest(BaseModel):
+    url: str
+
+
+@router.post("/fetch-url-meta")
+def fetch_url_meta_endpoint(payload: FetchUrlMetaRequest):
+    url = (payload.url or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required")
+    if not (url.startswith("http://") or url.startswith("https://")):
+        raise HTTPException(status_code=400, detail="URL must start with http:// or https://")
+    return fetch_url_meta(url, timeout=12)
 
 @router.get("/")
 def get_tasks(

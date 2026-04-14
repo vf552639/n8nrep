@@ -1,12 +1,29 @@
+import concurrent.futures
+from typing import Any, Dict, List
+from urllib.parse import urlparse
+
 import requests
 from bs4 import BeautifulSoup
-from typing import Dict, List, Any
-from urllib.parse import urlparse
-import time
-import concurrent.futures
 
 def parse_html(html: str) -> Dict[str, Any]:
     soup = BeautifulSoup(html, 'html.parser')
+
+    title_tag = soup.find("title")
+    meta_title = title_tag.get_text(strip=True) if title_tag else ""
+
+    meta_desc_tag = soup.find("meta", attrs={"name": "description"})
+    meta_description = (
+        meta_desc_tag.get("content", "").strip()
+        if meta_desc_tag and meta_desc_tag.get("content")
+        else ""
+    )
+    if not meta_description:
+        og_desc = soup.find("meta", attrs={"property": "og:description"})
+        meta_description = (
+            og_desc.get("content", "").strip()
+            if og_desc and og_desc.get("content")
+            else ""
+        )
     
     # Extract headers
     headers = {f"h{i}": [] for i in range(1, 7)}
@@ -25,7 +42,9 @@ def parse_html(html: str) -> Dict[str, Any]:
     return {
         "headers": headers,
         "text": text,
-        "word_count": word_count
+        "word_count": word_count,
+        "meta_title": meta_title,
+        "meta_description": meta_description,
     }
 from app.config import settings
 from app.services.notifier import notify_serper_key_issue
@@ -70,6 +89,50 @@ def scrape_via_serper(url: str, timeout: int = 30) -> str:
     except Exception as e:
         return None
 
+
+def fetch_url_meta(url: str, timeout: int = 12) -> Dict[str, str]:
+    """
+    Lightweight fetch for URL title/description with serper->direct fallback.
+    Never raises; returns empty fields on failure.
+    """
+    domain = urlparse(url).netloc
+    empty = {
+        "url": url,
+        "title": "",
+        "description": "",
+        "domain": domain,
+    }
+
+    try:
+        html = None
+        if getattr(settings, "SERPER_API_KEY", None) and not _serper_key_failed:
+            html = scrape_via_serper(url, timeout=timeout)
+
+        if not html:
+            headers = {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/91.0.4472.124 Safari/537.36"
+                )
+            }
+            response = requests.get(url, headers=headers, timeout=timeout)
+            if response.status_code == 200:
+                html = response.text
+
+        if not html:
+            return empty
+
+        parsed = parse_html(html)
+        return {
+            "url": url,
+            "title": str(parsed.get("meta_title") or ""),
+            "description": str(parsed.get("meta_description") or ""),
+            "domain": domain,
+        }
+    except Exception:
+        return empty
+
 def scrape_urls(urls: List[str], max_urls: int = 10, timeout: int = 15) -> Dict[str, Any]:
     """
     Scrapes a list of urls and returns combined results for the LLM analysis.
@@ -102,6 +165,8 @@ def scrape_urls(urls: List[str], max_urls: int = 10, timeout: int = 15) -> Dict[
                         "headers": parsed_data["headers"],
                         "text": parsed_data["text"],
                         "word_count": parsed_data["word_count"],
+                        "meta_title": parsed_data.get("meta_title", ""),
+                        "meta_description": parsed_data.get("meta_description", ""),
                         "method": "serper"
                     })
                 except Exception as e:
@@ -119,6 +184,8 @@ def scrape_urls(urls: List[str], max_urls: int = 10, timeout: int = 15) -> Dict[
                     "headers": parsed_data["headers"],
                     "text": parsed_data["text"],
                     "word_count": parsed_data["word_count"],
+                    "meta_title": parsed_data.get("meta_title", ""),
+                    "meta_description": parsed_data.get("meta_description", ""),
                     "method": "direct"
                 })
             else:
@@ -161,6 +228,8 @@ def scrape_urls(urls: List[str], max_urls: int = 10, timeout: int = 15) -> Dict[
                 "headers": parsed_headers if isinstance(parsed_headers, dict) else {},
                 "text": str(parsed_text),
                 "word_count": int(parsed_word_count or 0),
+                "meta_title": str(cached.get("meta_title") or ""),
+                "meta_description": str(cached.get("meta_description") or ""),
                 "method": "cache",
             })
         else:
@@ -183,6 +252,8 @@ def scrape_urls(urls: List[str], max_urls: int = 10, timeout: int = 15) -> Dict[
                                 "word_count": data.get("word_count", 0),
                                 "headers": data.get("headers", {}),
                                 "domain": data.get("domain", ""),
+                                "meta_title": data.get("meta_title", ""),
+                                "meta_description": data.get("meta_description", ""),
                             },
                         )
                     else:
@@ -221,6 +292,16 @@ def scrape_urls(urls: List[str], max_urls: int = 10, timeout: int = 15) -> Dict[
         "merged_text": merged_text,
         "headers_structure": all_h1_h6,
         "raw_results": results,
+        "scraped_titles": [
+            r.get("meta_title", "").strip()
+            for r in results
+            if isinstance(r.get("meta_title"), str) and r.get("meta_title", "").strip()
+        ],
+        "scraped_descriptions": [
+            r.get("meta_description", "").strip()
+            for r in results
+            if isinstance(r.get("meta_description"), str) and r.get("meta_description", "").strip()
+        ],
         "failed_results": failed_results,
         "serper_count": len([r for r in results if r.get("method") == "serper"]),
         "direct_count": len([r for r in results if r.get("method") == "direct"]),

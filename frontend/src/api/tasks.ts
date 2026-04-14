@@ -81,6 +81,16 @@ export const tasksApi = {
       .post<{ msg: string; urls_count: number }>(`/tasks/${id}/approve-serp-urls`, { urls })
       .then((res) => res.data),
 
+  fetchUrlMeta: (url: string) =>
+    api
+      .post<{
+        url: string;
+        title: string;
+        description: string;
+        domain: string;
+      }>("/tasks/fetch-url-meta", { url })
+      .then((res) => res.data),
+
   getImages: (id: string) =>
     api.get<{ images: any[]; summary: any; paused: boolean }>(`/tasks/${id}/images`).then(res => res.data),
 

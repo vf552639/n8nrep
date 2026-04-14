@@ -575,6 +575,51 @@ def setup_vars(ctx: PipelineContext):
             if len(competitor_descriptions) >= MAX_COMPETITOR_DESCRIPTIONS:
                 break
 
+        step_results = ctx.task.step_results or {}
+        scraping_step = step_results.get(STEP_SCRAPING, {})
+        scraping_result_raw = scraping_step.get("result") if isinstance(scraping_step, dict) else None
+        scraping_result = {}
+        if isinstance(scraping_result_raw, str) and scraping_result_raw.strip():
+            try:
+                parsed_scraping = json.loads(scraping_result_raw)
+                if isinstance(parsed_scraping, dict):
+                    scraping_result = parsed_scraping
+            except Exception:
+                scraping_result = {}
+        elif isinstance(scraping_result_raw, dict):
+            scraping_result = scraping_result_raw
+
+        scraped_titles = [
+            t.strip()
+            for t in _safe_list(scraping_result.get("scraped_titles"))
+            if isinstance(t, str) and t.strip()
+        ]
+        scraped_descriptions = [
+            d.strip()
+            for d in _safe_list(scraping_result.get("scraped_descriptions"))
+            if isinstance(d, str) and d.strip()
+        ]
+
+        if not competitor_titles and scraped_titles:
+            competitor_titles = scraped_titles[:MAX_COMPETITOR_TITLES]
+            add_log(
+                ctx.db,
+                ctx.task,
+                f"competitor_titles fallback: {len(competitor_titles)} from scraping (SERP had none)",
+                level="warning",
+                step=STEP_SCRAPING,
+            )
+
+        if not competitor_descriptions and scraped_descriptions:
+            competitor_descriptions = scraped_descriptions[:MAX_COMPETITOR_DESCRIPTIONS]
+            add_log(
+                ctx.db,
+                ctx.task,
+                f"competitor_descriptions fallback: {len(competitor_descriptions)} from scraping (SERP had none)",
+                level="warning",
+                step=STEP_SCRAPING,
+            )
+
         highlighted_keywords = []
         for r in organic_results:
             if not r or not isinstance(r, dict):
@@ -1007,6 +1052,10 @@ def phase_scraping(ctx: PipelineContext):
             "avg_word_count": scrape_data["average_word_count"],
             "scraped_domains": [r["domain"] for r in scrape_data["raw_results"]],
             "scraped_urls": [r["url"] for r in scrape_data["raw_results"]],
+            "scraped_titles": scrape_data.get("scraped_titles", []),
+            "scraped_descriptions": scrape_data.get("scraped_descriptions", []),
+            "titles_source": "scraping",
+            "descriptions_source": "scraping",
             "failed_results": scrape_data.get("failed_results", []),
             "serper_count": scrape_data.get("serper_count", 0),
             "direct_count": scrape_data.get("direct_count", 0),
