@@ -1,7 +1,7 @@
 import json
 import traceback
 from sqlalchemy.orm import Session
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment
 
 from app.models.task import Task
 from app.models.article import GeneratedArticle
@@ -1712,8 +1712,8 @@ def phase_image_inject(ctx: PipelineContext):
     approved_images = [img for img in image_data.get("images", []) if img.get("approved") is True and img.get("hosted_url")]
 
     if not approved_images:
-        add_log(ctx.db, ctx.task, "No approved images — cleaning MULTIMEDIA markers", step=STEP_IMAGE_INJECT)
-        cleaned = re.sub(r'\[MULTIMEDIA[^\]]*\]', '', html_result, flags=re.IGNORECASE)
+        add_log(ctx.db, ctx.task, "No approved images — cleaning MEDIA comment markers", step=STEP_IMAGE_INJECT)
+        cleaned = re.sub(r'<!--\s*MEDIA:.*?-->', '', html_result, flags=re.IGNORECASE | re.DOTALL)
         in_w = count_content_words(html_result)
         out_w = count_content_words(cleaned)
         save_step_result(ctx.db, ctx.task, STEP_IMAGE_INJECT, result=cleaned, status="completed", input_word_count=in_w, output_word_count=out_w)
@@ -1722,35 +1722,40 @@ def phase_image_inject(ctx: PipelineContext):
     add_log(ctx.db, ctx.task, f"Injecting {len(approved_images)} approved images into HTML...", step=STEP_IMAGE_INJECT)
     mark_step_running(ctx.db, ctx.task, STEP_IMAGE_INJECT)
 
-    soup = BeautifulSoup(html_result, 'html.parser')
+    soup = BeautifulSoup(html_result, "html.parser")
+    media_comments = [
+        node
+        for node in soup.find_all(
+            string=lambda text: isinstance(text, Comment) and "MEDIA:" in str(text)
+        )
+    ]
     injected_count = 0
 
-    for img in approved_images:
-        section_name = img.get("section", "")
+    for i, img in enumerate(approved_images):
         hosted_url = img["hosted_url"]
         alt_text = img.get("alt_text", "")
-        figure_html = f'<figure class="article-image"><img src="{hosted_url}" alt="{alt_text}" width="800" loading="lazy"><figcaption>{alt_text}</figcaption></figure>'
-        figure_tag = BeautifulSoup(figure_html, 'html.parser')
+        figure_html = (
+            f'<figure class="article-image">'
+            f'<img src="{hosted_url}" alt="{alt_text}" width="800" loading="lazy">'
+            f'<figcaption>{alt_text}</figcaption>'
+            f"</figure>"
+        )
+        figure_fragment = BeautifulSoup(figure_html, "html.parser")
+        figure_node = figure_fragment.find("figure")
+        if not figure_node:
+            continue
 
-        inserted = False
-        section_keywords = section_name.lower().replace("_", " ").split()
-        for heading in soup.find_all(['h2', 'h3']):
-            heading_text = heading.get_text(strip=True).lower()
-            if any(kw in heading_text for kw in section_keywords if len(kw) > 3):
-                next_p = heading.find_next('p')
-                if next_p:
-                    next_p.insert_after(figure_tag)
-                    inserted = True
-                    injected_count += 1
-                    break
-        if not inserted:
-            all_h2 = soup.find_all('h2')
+        if i < len(media_comments):
+            media_comments[i].replace_with(figure_node)
+            injected_count += 1
+        else:
+            all_h2 = soup.find_all("h2")
             if all_h2:
-                all_h2[-1].insert_before(figure_tag)
+                all_h2[-1].insert_before(figure_node)
                 injected_count += 1
 
     result_html = str(soup)
-    result_html = re.sub(r'\[MULTIMEDIA[^\]]*\]', '', result_html, flags=re.IGNORECASE)
+    result_html = re.sub(r'<!--\s*MEDIA:.*?-->', "", result_html, flags=re.IGNORECASE | re.DOTALL)
 
     add_log(ctx.db, ctx.task, f"Image injection completed: {injected_count}/{len(approved_images)} inserted", step=STEP_IMAGE_INJECT)
     in_w = count_content_words(html_result)
