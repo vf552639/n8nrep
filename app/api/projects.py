@@ -5,7 +5,7 @@ from sqlalchemy import desc
 from sqlalchemy.sql import func
 from typing import Optional, Any, Dict, List, Tuple
 from collections import defaultdict
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 import uuid
 import os
 import csv
@@ -17,7 +17,7 @@ from app.api.tasks import calculate_progress
 from app.models.project import SiteProject
 from app.models.blueprint import SiteBlueprint, BlueprintPage
 from app.models.site import Site
-from app.models.template import Template
+from app.models.template import Template, LegalPageTemplate, LEGAL_PAGE_TYPES
 from app.models.author import Author
 from app.models.task import Task
 from app.models.article import GeneratedArticle
@@ -29,6 +29,49 @@ from app.config import settings
 from app.services.pipeline_presets import pipeline_steps_use_serp, resolve_pipeline_steps
 
 router = APIRouter()
+
+
+def _validate_legal_template_map(
+    db: Session, legal_template_map: Optional[Dict[str, Any]]
+) -> Optional[Dict[str, str]]:
+    if not legal_template_map:
+        return None
+    if not isinstance(legal_template_map, dict):
+        raise HTTPException(status_code=400, detail="legal_template_map must be an object")
+    out: Dict[str, str] = {}
+    for page_type, template_id in legal_template_map.items():
+        if page_type not in LEGAL_PAGE_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid page_type in legal_template_map: {page_type}",
+            )
+        try:
+            tid = uuid.UUID(str(template_id))
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid template id for {page_type}",
+            )
+        tpl = (
+            db.query(LegalPageTemplate)
+            .filter(
+                LegalPageTemplate.id == str(tid),
+                LegalPageTemplate.is_active == True,  # noqa: E712
+            )
+            .first()
+        )
+        if not tpl:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Legal template not found or inactive: {template_id}",
+            )
+        if tpl.page_type != page_type:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Template {template_id} is for page_type {tpl.page_type}, not {page_type}",
+            )
+        out[page_type] = str(tpl.id)
+    return out or None
 
 
 def _validate_serp_config(cfg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -189,6 +232,15 @@ class SiteProjectCreate(BaseModel):
     author_id: Optional[int] = None
     serp_config: Optional[Dict[str, Any]] = None
     project_keywords: Optional[Dict[str, Any]] = None
+    legal_template_map: Optional[Dict[str, str]] = None
+
+    @field_validator("country")
+    @classmethod
+    def validate_country(cls, v: str) -> str:
+        v = (v or "").strip().upper()
+        if len(v) != 2 or not v.isalpha():
+            raise ValueError("Country must be a 2-letter ISO code (e.g. DE, FR, US)")
+        return v
 
 
 class ClusterKeywordsRequest(BaseModel):
@@ -206,6 +258,14 @@ class ProjectPreviewRequest(BaseModel):
     author_id: Optional[int] = None
     serp_config: Optional[Dict[str, Any]] = None
 
+    @field_validator("country")
+    @classmethod
+    def validate_country_preview(cls, v: str) -> str:
+        v = (v or "").strip().upper()
+        if len(v) != 2 or not v.isalpha():
+            raise ValueError("Country must be a 2-letter ISO code (e.g. DE, FR, US)")
+        return v
+
 
 class SiteProjectCloneBody(BaseModel):
     name: Optional[str] = None
@@ -215,6 +275,17 @@ class SiteProjectCloneBody(BaseModel):
     country: Optional[str] = None
     language: Optional[str] = None
     author_id: Optional[int] = None
+    legal_template_map: Optional[Dict[str, str]] = None
+
+    @field_validator("country")
+    @classmethod
+    def validate_country_clone(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        v = v.strip().upper()
+        if len(v) != 2 or not v.isalpha():
+            raise ValueError("Country must be a 2-letter ISO code (e.g. DE, FR, US)")
+        return v
 
 class SiteProjectResponse(BaseModel):
     id: str
@@ -533,6 +604,8 @@ def create_project(project_in: SiteProjectCreate, db: Session = Depends(get_db))
         if author:
             final_author_id = author.id
 
+    ltm_norm = _validate_legal_template_map(db, project_in.legal_template_map)
+
     new_project = SiteProject(
         name=project_in.name,
         blueprint_id=blueprint.id,
@@ -545,6 +618,7 @@ def create_project(project_in: SiteProjectCreate, db: Session = Depends(get_db))
         status="pending",
         serp_config=serp_normalized or {},
         project_keywords=pk_val,
+        legal_template_map=ltm_norm,
     )
     db.add(new_project)
     db.commit()
@@ -749,6 +823,9 @@ def get_project_details(id: str, db: Session = Depends(get_db)):
         "project_keywords": project.project_keywords
         if isinstance(getattr(project, "project_keywords", None), dict)
         else None,
+        "legal_template_map": project.legal_template_map
+        if isinstance(getattr(project, "legal_template_map", None), dict)
+        else {},
         **extras,
         "tasks": [
             {
@@ -812,6 +889,10 @@ def clone_project(id: str, body: SiteProjectCloneBody, db: Session = Depends(get
         if author:
             author_id = author.id
 
+    legal_map = getattr(src, "legal_template_map", None)
+    if body.legal_template_map is not None:
+        legal_map = _validate_legal_template_map(db, body.legal_template_map)
+
     dup = (
         db.query(SiteProject)
         .filter(
@@ -856,6 +937,7 @@ def clone_project(id: str, body: SiteProjectCloneBody, db: Session = Depends(get
         logs=[],
         serp_config=getattr(src, "serp_config", None) or {},
         project_keywords=getattr(src, "project_keywords", None),
+        legal_template_map=legal_map if isinstance(legal_map, dict) else None,
     )
     db.add(new_p)
     db.commit()

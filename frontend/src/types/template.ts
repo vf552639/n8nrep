@@ -24,16 +24,35 @@ export type LegalPageType =
   | "responsible_gambling"
   | "about_us";
 
+export const LEGAL_PAGE_TYPE_LABELS: Record<string, string> = {
+  privacy_policy: "Privacy Policy",
+  terms_and_conditions: "Terms & Conditions",
+  cookie_policy: "Cookie Policy",
+  responsible_gambling: "Responsible Gambling",
+  about_us: "About Us",
+};
+
 export interface LegalPageTemplateRow {
   id: string;
-  country: string;
+  name: string;
   page_type: LegalPageType | string;
   title: string;
+  content_format: string;
   is_active: boolean;
 }
 
 export interface LegalPageTemplateFull extends LegalPageTemplateRow {
-  html_content: string;
+  content: string;
   variables: Record<string, unknown>;
   notes?: string | null;
+}
+
+export interface LegalBlueprintPageTypeGroup {
+  page_type: string;
+  page_title: string;
+  templates: { id: string; name: string; title: string }[];
+}
+
+export interface LegalForBlueprintResponse {
+  legal_page_types: LegalBlueprintPageTypeGroup[];
 }

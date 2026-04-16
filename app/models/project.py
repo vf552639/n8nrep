@@ -39,6 +39,11 @@ class SiteProject(Base):
         nullable=True,
         comment="Additional keywords pool + clustering: raw, clustered, unassigned, etc.",
     )
+    legal_template_map = Column(
+        JSONB,
+        nullable=True,
+        comment="Mapping page_type -> legal_page_template_id (UUID string)",
+    )
     created_at = Column(DateTime, default=datetime.utcnow)
 
     blueprint = relationship("SiteBlueprint", back_populates="projects")

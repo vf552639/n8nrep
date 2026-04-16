@@ -1,6 +1,6 @@
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Editor from "@monaco-editor/react";
 import { sitesApi } from "@/api/sites";
 import { templatesApi } from "@/api/templates";
@@ -8,6 +8,7 @@ import type { HtmlTemplate } from "@/types/template";
 import type { HtmlTemplateInput } from "@/types/template";
 import { ArrowLeft, Save, Pencil, Trash2, Plus, ExternalLink } from "lucide-react";
 import toast from "react-hot-toast";
+import { COUNTRY_CODES, countryLabel } from "@/constants/countries";
 export default function SiteDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -40,6 +41,12 @@ export default function SiteDetailPage() {
     is_active: true,
     fileName: "",
   });
+
+  const countryOptions = useMemo(() => {
+    const set = new Set<string>(COUNTRY_CODES);
+    if (country) set.add(country.toUpperCase().trim());
+    return Array.from(set).sort();
+  }, [country]);
 
   useEffect(() => {
     if (!site) return;
@@ -235,13 +242,23 @@ export default function SiteDetailPage() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Country (ISO)</label>
-              <input
-                className="w-full rounded-lg border px-3 py-2 text-sm uppercase"
-                value={country}
+              <label className="mb-1 block text-sm font-medium text-slate-700">Country</label>
+              <select
+                className="w-full rounded-lg border px-3 py-2 text-sm bg-white"
+                value={country ? country.toUpperCase().trim() : ""}
                 onChange={(e) => setCountry(e.target.value)}
-                maxLength={10}
-              />
+              >
+                {!country && (
+                  <option value="" disabled>
+                    —
+                  </option>
+                )}
+                {countryOptions.map((c) => (
+                  <option key={c} value={c}>
+                    {countryLabel(c)} ({c})
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">Language</label>

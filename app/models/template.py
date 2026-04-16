@@ -26,19 +26,20 @@ class Template(Base):
 
 
 class LegalPageTemplate(Base):
-    """GEO-scoped legal page sample for LLM generation."""
+    """Named legal page reference sample for LLM generation (plain text or HTML)."""
 
     __tablename__ = "legal_page_templates"
     __table_args__ = (
-        UniqueConstraint("country", "page_type", name="uq_legal_page_templates_country_page_type"),
+        UniqueConstraint("name", "page_type", name="uq_legal_tpl_name_page_type"),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    country = Column(String(10), nullable=False)
+    name = Column(String(200), nullable=False)
     page_type = Column(String(50), nullable=False)
     title = Column(String(300), nullable=False)
-    html_content = Column(Text, nullable=False)
-    variables = Column(JSONB, nullable=False)
+    content = Column(Text, nullable=False)
+    content_format = Column(String(10), nullable=False, default="text")
+    variables = Column(JSONB, nullable=False, default=dict)
     notes = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)

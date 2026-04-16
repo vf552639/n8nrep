@@ -56,6 +56,14 @@ class TaskCreate(BaseModel):
     page_type: str = 'article'
     serp_config: Optional[SerpConfig] = None
 
+    @field_validator("country")
+    @classmethod
+    def validate_country(cls, v: str) -> str:
+        v = (v or "").strip().upper()
+        if len(v) != 2 or not v.isalpha():
+            raise ValueError("Country must be a 2-letter ISO code (e.g. DE, FR, US)")
+        return v
+
 class TaskResponse(BaseModel):
     id: str
     main_keyword: str

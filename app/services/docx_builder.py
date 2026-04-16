@@ -89,13 +89,18 @@ def _get_all_meta_from_task(task: Task, article: Optional[GeneratedArticle]) -> 
 
 def content_from_step_results_fallback(task: Task) -> Tuple[str, str]:
     """
-    Body text when there is no saved article row — priority:
-    html_structure > final_editing > primary_generation (+ about/legal variants).
+    Body from step_results when article row is missing or has no html_content — priority
+    matches pick_structured_html_for_assembly (same step key order).
     """
     sr = task.step_results or {}
     for key in (
+        "image_inject",
         "html_structure",
         "final_editing",
+        "improver",
+        "interlinking_citations",
+        "reader_opinion",
+        "competitor_comparison",
         "primary_generation",
         "primary_generation_about",
         "primary_generation_legal",
@@ -115,9 +120,6 @@ def _resolve_single_article_body(
         body, mode = _get_content_from_task(task, article)
         if body.strip():
             return (body, mode)
-        fb, fb_mode = content_from_step_results_fallback(task)
-        if fb.strip():
-            return (fb, fb_mode)
     raw = (article.html_content or "").strip() or (article.full_page_html or "").strip()
     if not raw:
         return ("", "plain")
@@ -237,23 +239,13 @@ def _get_content_from_task(
 ) -> Tuple[str, str]:
     """
     Returns (content, mode) where mode is 'html' or 'plain'.
+    Prefer persisted article body; otherwise same step order as pipeline assembly
+    (via content_from_step_results_fallback), not final_editing-only.
     """
-    sr = task.step_results or {}
-
-    def from_final() -> str:
-        fe = sr.get("final_editing")
-        if isinstance(fe, dict) and fe.get("result"):
-            return str(fe.get("result") or "")
-        return ""
-
     if article and article.html_content and str(article.html_content).strip():
         body = str(article.html_content)
         return (body, "html" if _is_html_content(body) else "plain")
-
-    fb = from_final()
-    if fb.strip():
-        return (fb, "html" if _is_html_content(fb) else "plain")
-    return ("", "plain")
+    return content_from_step_results_fallback(task)
 
 
 def _merge_runs_into_paragraph(para, element: Tag) -> None:

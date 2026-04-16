@@ -4,6 +4,8 @@ import { useState, useEffect, useMemo } from "react";
 import toast from "react-hot-toast";
 import api from "@/api/client";
 import { projectsApi } from "@/api/projects";
+import { legalPagesApi } from "@/api/legalPages";
+import { LEGAL_PAGE_TYPE_LABELS } from "@/types/template";
 import { tasksApi } from "@/api/tasks";
 import { formatApiErrorDetail } from "@/lib/apiErrorMessage";
 import { Project } from "@/types/project";
@@ -176,6 +178,29 @@ export default function ProjectDetailPage() {
     return (elapsed / completed) * rem;
   }, [project, nowTick]);
 
+  const ltm = project?.legal_template_map;
+  const ltmEntries =
+    ltm && typeof ltm === "object"
+      ? (Object.entries(ltm) as [string, string][]).filter(([, tid]) => tid && String(tid).trim())
+      : [];
+
+  const { data: legalTemplateLabels } = useQuery({
+    queryKey: ["project-legal-template-labels", id, ltmEntries.map((e) => e[1]).join("|")],
+    queryFn: async () => {
+      const out: { page_type: string; name: string }[] = [];
+      for (const [page_type, templateId] of ltmEntries) {
+        try {
+          const t = await legalPagesApi.getOne(String(templateId));
+          out.push({ page_type, name: t.name });
+        } catch {
+          out.push({ page_type, name: String(templateId) });
+        }
+      }
+      return out;
+    },
+    enabled: Boolean(id) && ltmEntries.length > 0,
+  });
+
   if (isLoading) return <div className="p-6 text-slate-500">Loading project...</div>;
   if (!project) return <div className="p-6 text-red-500">Project not found</div>;
 
@@ -247,6 +272,17 @@ export default function ProjectDetailPage() {
                     className="text-xs font-medium bg-indigo-50 text-indigo-800 border border-indigo-200 px-2 py-0.5 rounded"
                   >
                     {b.label}: {b.value}
+                  </span>
+                ))}
+              </span>
+            )}
+            {legalTemplateLabels && legalTemplateLabels.length > 0 && (
+              <span className="block w-full text-slate-600 text-sm">
+                Legal templates:{" "}
+                {legalTemplateLabels.map((row, i) => (
+                  <span key={row.page_type}>
+                    {i > 0 ? " · " : ""}
+                    {LEGAL_PAGE_TYPE_LABELS[row.page_type] || row.page_type} → {row.name}
                   </span>
                 ))}
               </span>

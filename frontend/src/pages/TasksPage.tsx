@@ -10,6 +10,7 @@ import { Plus, Upload, Play, Search, Filter, Trash2, RotateCcw, X } from "lucide
 import QueueControls from "@/components/tasks/QueueControls";
 import { sitesApi } from "@/api/sites";
 import type { Task, TaskCreate, SerpConfig } from "@/types/task";
+import { COUNTRY_CODES, countryLabel } from "@/constants/countries";
 
 const PAGE_SIZE = 50;
 
@@ -401,7 +402,15 @@ function CreateTaskModal({ onClose }: { onClose: () => void }) {
   const [serpDeviceOs, setSerpDeviceOs] = useState("mobile:android");
 
   const countries = Array.from(
-    new Set((authors || []).map((a: { country: string }) => a.country).filter(Boolean))
+    new Set(
+      [
+        ...COUNTRY_CODES,
+        ...(authors || []).map((a: { country: string }) =>
+          String(a.country || "").toUpperCase().trim()
+        ),
+        ...(formData.country ? [formData.country.toUpperCase().trim()] : []),
+      ].filter(Boolean)
+    )
   ).sort();
   const languages = Array.from(
     new Set((authors || []).map((a: { language: string }) => a.language).filter(Boolean))
@@ -507,7 +516,7 @@ function CreateTaskModal({ onClose }: { onClose: () => void }) {
                   </option>
                   {(countries as string[]).map((c) => (
                     <option key={c} value={c}>
-                      {c}
+                      {countryLabel(c)} ({c})
                     </option>
                   ))}
                 </select>

@@ -210,14 +210,16 @@ Language: {{language}}
 Country: {{country}}
 Page Type: {{page_type}}
 
-REFERENCE LEGAL TEMPLATE (use as structural and stylistic guide):
+REFERENCE LEGAL TEMPLATE (use as structural and stylistic guide — may be HTML or plain text):
 {{legal_reference_html}}
+
+If the reference is empty, generate the page from scratch based on best practices for the given page_type and country.
 
 LEGAL VARIABLES (company details to insert):
 {{legal_variables}}
 
 REQUIREMENTS:
-1. Use the reference template as a guide for structure and sections
+1. Use the reference template as a guide for structure and sections (when non-empty)
 2. Substitute all company-specific information from the legal variables
 3. Adapt the language and legal references to the target country
 4. Ensure all placeholder variables are replaced with actual values

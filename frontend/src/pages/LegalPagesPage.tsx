@@ -1,52 +1,31 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import toast from "react-hot-toast";
 import Editor from "@monaco-editor/react";
 import { legalPagesApi } from "@/api/legalPages";
-import { authorsApi } from "@/api/authors";
 import type { LegalPageTemplateRow, LegalPageType } from "@/types/template";
+import { LEGAL_PAGE_TYPE_LABELS } from "@/types/template";
 import { ReactTable } from "@/components/common/ReactTable";
 import { Plus, Pencil, Trash2, X } from "lucide-react";
 
-const PAGE_TYPE_LABELS: Record<string, string> = {
-  privacy_policy: "Privacy Policy",
-  terms_and_conditions: "Terms & Conditions",
-  cookie_policy: "Cookie Policy",
-  responsible_gambling: "Responsible Gambling",
-  about_us: "About Us",
-};
-
-const FALLBACK_PAGE_TYPES = Object.keys(PAGE_TYPE_LABELS);
+const FALLBACK_PAGE_TYPES = Object.keys(LEGAL_PAGE_TYPE_LABELS);
 
 export default function LegalPagesPage() {
   const queryClient = useQueryClient();
-  const [countryFilter, setCountryFilter] = useState("");
+  const [pageTypeFilter, setPageTypeFilter] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const [form, setForm] = useState({
-    country: "",
+    name: "",
     page_type: "privacy_policy" as LegalPageType | string,
     title: "",
-    html_content: "<!DOCTYPE html>\n<html><body></body></html>",
+    content: "",
+    content_format: "text" as "text" | "html",
     variablesJson: "{}",
     notes: "",
     is_active: true,
   });
-
-  const { data: authors } = useQuery({
-    queryKey: ["authors"],
-    queryFn: () => authorsApi.getAll(),
-  });
-
-  const countries = useMemo(() => {
-    const set = new Set<string>();
-    (authors || []).forEach((a: { country?: string }) => {
-      if (a.country) set.add(a.country.toUpperCase());
-    });
-    ["DE", "PL", "BR", "US", "GB", "FR", "ES", "IT", "NL", "AT", "CH"].forEach((c) => set.add(c));
-    return Array.from(set).sort();
-  }, [authors]);
 
   const { data: pageTypes } = useQuery({
     queryKey: ["legal-page-types"],
@@ -54,17 +33,18 @@ export default function LegalPagesPage() {
   });
 
   const { data: rows, isLoading } = useQuery({
-    queryKey: ["legal-pages", countryFilter],
-    queryFn: () => legalPagesApi.getAll(countryFilter || undefined),
+    queryKey: ["legal-pages", pageTypeFilter],
+    queryFn: () => legalPagesApi.getAll(pageTypeFilter || undefined),
   });
 
   const openCreate = () => {
     setEditingId(null);
     setForm({
-      country: countries[0] || "DE",
+      name: "",
       page_type: "privacy_policy",
       title: "",
-      html_content: "<!DOCTYPE html>\n<html><body></body></html>",
+      content: "",
+      content_format: "text",
       variablesJson: "{}",
       notes: "",
       is_active: true,
@@ -77,10 +57,11 @@ export default function LegalPagesPage() {
       const full = await legalPagesApi.getOne(id);
       setEditingId(id);
       setForm({
-        country: full.country,
+        name: full.name,
         page_type: full.page_type,
         title: full.title,
-        html_content: full.html_content,
+        content: full.content,
+        content_format: (full.content_format === "html" ? "html" : "text") as "text" | "html",
         variablesJson: JSON.stringify(full.variables || {}, null, 2),
         notes: full.notes || "",
         is_active: full.is_active,
@@ -101,20 +82,22 @@ export default function LegalPagesPage() {
       }
       if (editingId) {
         return legalPagesApi.update(editingId, {
-          country: form.country,
+          name: form.name,
           page_type: form.page_type,
           title: form.title,
-          html_content: form.html_content,
+          content: form.content,
+          content_format: form.content_format,
           variables,
           notes: form.notes || null,
           is_active: form.is_active,
         });
       }
       return legalPagesApi.create({
-        country: form.country,
+        name: form.name,
         page_type: form.page_type,
         title: form.title,
-        html_content: form.html_content,
+        content: form.content,
+        content_format: form.content_format,
         variables,
         notes: form.notes || null,
         is_active: form.is_active,
@@ -137,12 +120,19 @@ export default function LegalPagesPage() {
   });
 
   const columns = [
-    { accessorKey: "country", header: "Country" },
+    { accessorKey: "name", header: "Name" },
     {
       accessorKey: "page_type",
       header: "Page type",
       cell: ({ row }: { row: { original: LegalPageTemplateRow } }) => (
-        <span>{PAGE_TYPE_LABELS[row.original.page_type] || row.original.page_type}</span>
+        <span>{LEGAL_PAGE_TYPE_LABELS[row.original.page_type] || row.original.page_type}</span>
+      ),
+    },
+    {
+      accessorKey: "content_format",
+      header: "Format",
+      cell: ({ row }: { row: { original: LegalPageTemplateRow } }) => (
+        <span className="text-xs uppercase text-slate-600">{row.original.content_format}</span>
       ),
     },
     { accessorKey: "title", header: "Title" },
@@ -195,7 +185,7 @@ export default function LegalPagesPage() {
             Legal Page Templates
           </h1>
           <p className="mt-1 pl-4 text-sm text-slate-500">
-            GEO-scoped HTML samples for Privacy, Terms, and other legal pages.
+            Named reference samples (plain text or HTML) for LLM legal-page generation.
           </p>
         </div>
         <button
@@ -209,16 +199,16 @@ export default function LegalPagesPage() {
 
       <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-white px-4 py-3">
         <label className="text-sm text-slate-600">
-          Filter by country:
+          Filter by page type:
           <select
             className="ml-2 rounded border px-2 py-1 text-sm"
-            value={countryFilter}
-            onChange={(e) => setCountryFilter(e.target.value)}
+            value={pageTypeFilter}
+            onChange={(e) => setPageTypeFilter(e.target.value)}
           >
             <option value="">All</option>
-            {countries.map((c) => (
-              <option key={c} value={c}>
-                {c}
+            {(pageTypes && pageTypes.length > 0 ? pageTypes : FALLBACK_PAGE_TYPES).map((pt) => (
+              <option key={pt} value={pt}>
+                {LEGAL_PAGE_TYPE_LABELS[pt] || pt}
               </option>
             ))}
           </select>
@@ -239,18 +229,13 @@ export default function LegalPagesPage() {
             <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
-                  <label className="mb-1 block text-sm font-medium">Country *</label>
-                  <select
+                  <label className="mb-1 block text-sm font-medium">Name *</label>
+                  <input
                     className="w-full rounded border px-3 py-2 text-sm"
-                    value={form.country}
-                    onChange={(e) => setForm((f) => ({ ...f, country: e.target.value }))}
-                  >
-                    {countries.map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
+                    value={form.name}
+                    onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                    placeholder="e.g. Casino Privacy Policy"
+                  />
                 </div>
                 <div>
                   <label className="mb-1 block text-sm font-medium">Page Type *</label>
@@ -261,7 +246,7 @@ export default function LegalPagesPage() {
                   >
                     {(pageTypes && pageTypes.length > 0 ? pageTypes : FALLBACK_PAGE_TYPES).map((pt) => (
                       <option key={pt} value={pt}>
-                        {PAGE_TYPE_LABELS[pt] || pt}
+                        {LEGAL_PAGE_TYPE_LABELS[pt] || pt}
                       </option>
                     ))}
                   </select>
@@ -276,14 +261,38 @@ export default function LegalPagesPage() {
                 />
               </div>
               <div>
-                <label className="mb-1 block text-sm font-medium">HTML Content *</label>
+                <span className="mb-1 block text-sm font-medium">Content format</span>
+                <div className="flex gap-4 text-sm">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="content_format"
+                      checked={form.content_format === "text"}
+                      onChange={() => setForm((f) => ({ ...f, content_format: "text" }))}
+                    />
+                    Plain text
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="content_format"
+                      checked={form.content_format === "html"}
+                      onChange={() => setForm((f) => ({ ...f, content_format: "html" }))}
+                    />
+                    HTML
+                  </label>
+                </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">Content *</label>
+                <p className="mb-1 text-xs text-slate-500">Reference text for LLM. Can be plain text or HTML.</p>
                 <div className="overflow-hidden rounded border">
                   <Editor
                     height="240px"
-                    defaultLanguage="html"
+                    language={form.content_format === "html" ? "html" : "plaintext"}
                     theme="vs"
-                    value={form.html_content}
-                    onChange={(v) => setForm((f) => ({ ...f, html_content: v ?? "" }))}
+                    value={form.content}
+                    onChange={(v) => setForm((f) => ({ ...f, content: v ?? "" }))}
                   />
                 </div>
               </div>
@@ -320,7 +329,7 @@ export default function LegalPagesPage() {
                 type="button"
                 className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
                 onClick={() => saveMut.mutate()}
-                disabled={saveMut.isPending || !form.title.trim()}
+                disabled={saveMut.isPending || !form.title.trim() || !form.name.trim()}
               >
                 Save
               </button>

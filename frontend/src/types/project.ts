@@ -84,6 +84,7 @@ export interface Project {
     clustering_model?: string;
     clustering_cost?: number;
   } | null;
+  legal_template_map?: Record<string, string>;
 }
 
 export interface ProjectTaskExpanded {
@@ -104,4 +105,5 @@ export interface ProjectClonePayload {
   country?: string;
   language?: string;
   author_id?: number;
+  legal_template_map?: Record<string, string>;
 }

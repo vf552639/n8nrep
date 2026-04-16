@@ -1,18 +1,36 @@
 import api from "@/api/client";
-import type { LegalPageTemplateFull, LegalPageTemplateRow } from "@/types/template";
+import type {
+  LegalForBlueprintResponse,
+  LegalPageTemplateFull,
+  LegalPageTemplateRow,
+} from "@/types/template";
 
 export const legalPagesApi = {
-  getAll: (country?: string) =>
+  getAll: (pageType?: string) =>
     api
-      .get<LegalPageTemplateRow[]>("/legal-pages", { params: country ? { country } : {} })
+      .get<LegalPageTemplateRow[]>("/legal-pages", {
+        params: pageType ? { page_type: pageType } : {},
+      })
       .then((r) => r.data),
   getOne: (id: string) => api.get<LegalPageTemplateFull>(`/legal-pages/${id}`).then((r) => r.data),
-  getPageTypes: () => api.get<{ page_types: string[] }>("/legal-pages/meta/page-types").then((r) => r.data.page_types),
+  getPageTypes: () =>
+    api.get<{ page_types: string[] }>("/legal-pages/meta/page-types").then((r) => r.data.page_types),
+  getForBlueprint: (blueprintId: string) =>
+    api
+      .get<LegalForBlueprintResponse>(`/legal-pages/for-blueprint/${blueprintId}`)
+      .then((r) => r.data),
+  getByPageType: (pageType: string) =>
+    api
+      .get<{ id: string; name: string; page_type: string; title: string; content_format: string }[]>(
+        `/legal-pages/by-page-type/${pageType}`
+      )
+      .then((r) => r.data),
   create: (data: {
-    country: string;
+    name: string;
     page_type: string;
     title: string;
-    html_content: string;
+    content: string;
+    content_format?: "text" | "html";
     variables?: Record<string, unknown>;
     notes?: string | null;
     is_active?: boolean;

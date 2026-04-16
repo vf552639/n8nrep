@@ -1,7 +1,7 @@
 from typing import Optional, Any, List
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -22,6 +22,14 @@ class SiteCreate(BaseModel):
     template_id: Optional[str] = None
     legal_info: Optional[dict] = None
 
+    @field_validator("country")
+    @classmethod
+    def validate_country(cls, v: str) -> str:
+        v = (v or "").strip().upper()
+        if len(v) != 2 or not v.isalpha():
+            raise ValueError("Country must be a 2-letter ISO code (e.g. DE, FR, US)")
+        return v
+
 
 class SiteUpdate(BaseModel):
     name: Optional[str] = None
@@ -31,6 +39,16 @@ class SiteUpdate(BaseModel):
     is_active: Optional[bool] = None
     template_id: Optional[str] = None
     legal_info: Optional[dict] = None
+
+    @field_validator("country")
+    @classmethod
+    def validate_country_optional(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        v = v.strip().upper()
+        if len(v) != 2 or not v.isalpha():
+            raise ValueError("Country must be a 2-letter ISO code (e.g. DE, FR, US)")
+        return v
 
 
 def _site_out(s: Site, db: Session) -> dict[str, Any]:

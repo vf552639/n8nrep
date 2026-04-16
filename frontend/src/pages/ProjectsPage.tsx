@@ -27,6 +27,9 @@ import {
   Shuffle,
 } from "lucide-react";
 import type { Project, ProjectPreview } from "@/types/project";
+import { LEGAL_PAGE_TYPE_LABELS } from "@/types/template";
+import { COUNTRY_CODES, countryLabel } from "@/constants/countries";
+import { legalPagesApi } from "@/api/legalPages";
 
 function parseKeywords(raw: string): string[] {
   if (!raw.trim()) return [];
@@ -328,6 +331,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
     serp_device: "mobile" as "mobile" | "desktop",
     serp_os: "android" as "android" | "ios" | "windows" | "macos",
     additional_keywords_raw: "",
+    legal_template_map: {} as Record<string, string>,
   });
   const [serpAdvancedOpen, setSerpAdvancedOpen] = useState(false);
   const [preview, setPreview] = useState<ProjectPreview | null>(null);
@@ -357,9 +361,10 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const countries = Array.from(
     new Set(
       [
-        ...(authors || []).map((a: Author) => a.country),
-        ...(selectedSite?.country ? [selectedSite.country] : []),
-        ...(formData.country ? [formData.country] : []),
+        ...COUNTRY_CODES,
+        ...(authors || []).map((a: Author) => String(a.country || "").toUpperCase().trim()),
+        ...(selectedSite?.country ? [String(selectedSite.country).toUpperCase().trim()] : []),
+        ...(formData.country ? [formData.country.toUpperCase().trim()] : []),
       ].filter(Boolean)
     )
   ).sort();
@@ -380,6 +385,12 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const { data: blueprints } = useQuery({
     queryKey: ["blueprints"],
     queryFn: async () => blueprintsApi.getAll({ limit: 100 }),
+  });
+
+  const { data: legalForBp } = useQuery({
+    queryKey: ["legal-for-blueprint", formData.blueprint_id],
+    queryFn: () => legalPagesApi.getForBlueprint(formData.blueprint_id),
+    enabled: Boolean(formData.blueprint_id),
   });
 
   const buildSerpConfig = () => {
@@ -522,6 +533,12 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
       project_keywords = undefined;
     }
 
+    const ltmRaw = formData.legal_template_map || {};
+    const legal_template_map = Object.fromEntries(
+      Object.entries(ltmRaw).filter(([, templateId]) => templateId && String(templateId).trim())
+    );
+    const hasLegal = Object.keys(legal_template_map).length > 0;
+
     mutation.mutate({
       name: formData.name,
       blueprint_id: formData.blueprint_id,
@@ -533,6 +550,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
       ...(authorId != null && !Number.isNaN(authorId) ? { author_id: authorId } : {}),
       ...(serp ? { serp_config: serp } : {}),
       ...(project_keywords ? { project_keywords } : {}),
+      ...(hasLegal ? { legal_template_map } : {}),
     });
   };
 
@@ -574,7 +592,13 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
               <select
                 required
                 value={formData.blueprint_id}
-                onChange={(e) => setFormData({ ...formData, blueprint_id: e.target.value })}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    blueprint_id: e.target.value,
+                    legal_template_map: {},
+                  })
+                }
                 className="w-full border outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-sm bg-white"
               >
                 <option value="" disabled>
@@ -723,7 +747,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   </option>
                   {(countries as string[]).map((c) => (
                     <option key={c} value={c}>
-                      {c}
+                      {countryLabel(c)} ({c})
                     </option>
                   ))}
                 </select>
@@ -774,6 +798,43 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 </p>
               )}
             </div>
+
+            {legalForBp && legalForBp.legal_page_types.length > 0 && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-3">
+                <h3 className="text-sm font-semibold text-slate-800">Legal Page Templates (optional)</h3>
+                <p className="text-xs text-slate-600">
+                  Select reference templates for legal pages in this blueprint. LLM will adapt them to your
+                  site&apos;s country, language, and domain.
+                </p>
+                {legalForBp.legal_page_types.map((group) => (
+                  <div key={group.page_type}>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                      {LEGAL_PAGE_TYPE_LABELS[group.page_type] || group.page_title}
+                    </label>
+                    <select
+                      className="w-full border outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-sm bg-white"
+                      value={formData.legal_template_map[group.page_type] || ""}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setFormData((prev) => {
+                          const next = { ...prev.legal_template_map };
+                          if (!v) delete next[group.page_type];
+                          else next[group.page_type] = v;
+                          return { ...prev, legal_template_map: next };
+                        });
+                      }}
+                    >
+                      <option value="">— None (generate from scratch) —</option>
+                      {group.templates.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="border border-slate-200 rounded-lg overflow-hidden">
               <button

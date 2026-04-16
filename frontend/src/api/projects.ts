@@ -32,6 +32,7 @@ export interface SiteProjectCreatePayload {
     clustering_model?: string;
     clustering_cost?: number;
   };
+  legal_template_map?: Record<string, string>;
 }
 
 export interface ClusterKeywordsResult {
