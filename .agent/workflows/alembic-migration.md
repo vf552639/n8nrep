@@ -46,3 +46,27 @@ docker-compose exec web alembic upgrade head
 docker-compose exec web alembic heads    # Should show exactly 1 head
 docker-compose exec web alembic current  # Should match the head
 ```
+
+## Troubleshooting
+
+- If `alembic upgrade head` fails with `statement_timeout` or `lock timeout`, another session is holding a lock on the objects being migrated. Inspect blocking activity:
+
+  ```sql
+  SELECT pid, application_name, state, now() - xact_start AS tx_duration, query
+  FROM pg_stat_activity
+  WHERE state <> 'idle'
+  ORDER BY xact_start;
+  ```
+
+- To terminate long-lived `idle in transaction` sessions (e.g. stuck pooler connections older than 5 minutes):
+
+  ```sql
+  SELECT pg_terminate_backend(pid)
+  FROM pg_stat_activity
+  WHERE state = 'idle in transaction'
+    AND xact_start < now() - interval '5 minutes';
+  ```
+
+- Split large migrations into separate revisions: one revision for DDL only, a follow-up for data `UPDATE`/`INSERT`. That reduces the chance a single long transaction hits timeouts while waiting for locks.
+
+- On app startup, the API logs either `Alembic migrations up to date: <rev>` or a **migration mismatch** banner if `alembic current` ≠ `alembic heads` — fix with `docker-compose exec web alembic upgrade head` before relying on endpoints that touch new schema.
