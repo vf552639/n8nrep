@@ -21,6 +21,7 @@ import {
   X,
   Archive,
   ArchiveRestore,
+  Trash2,
   Search,
   Eye,
   ChevronDown,
@@ -89,6 +90,18 @@ export default function ProjectsPage() {
     onError: (e: unknown) => {
       const ax = e as { response?: { data?: { detail?: unknown } }; message?: string };
       toast.error(formatApiErrorDetail(ax.response?.data?.detail) || ax.message || "Request failed");
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => projectsApi.deleteProject(id),
+    onSuccess: () => {
+      toast.success("Project deleted");
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
+    onError: (e: unknown) => {
+      const ax = e as { response?: { data?: { detail?: unknown } }; message?: string };
+      toast.error(formatApiErrorDetail(ax.response?.data?.detail) || ax.message || "Delete failed");
     },
   });
 
@@ -203,21 +216,40 @@ export default function ProjectsPage() {
         meta: { tdClassName: "w-12" },
         cell: ({ row }: { row: { original: Project } }) => (
           <div
-            className="flex justify-end"
+            className="flex justify-end items-center gap-0.5"
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => e.stopPropagation()}
             role="presentation"
           >
             {viewArchived ? (
-              <button
-                type="button"
-                title="Restore from archive"
-                className="p-2 rounded-lg text-slate-500 hover:bg-emerald-50 hover:text-emerald-700"
-                onClick={() => archiveMutation.mutate({ id: row.original.id, archive: false })}
-                disabled={archiveMutation.isPending}
-              >
-                <ArchiveRestore className="w-4 h-4" />
-              </button>
+              <>
+                <button
+                  type="button"
+                  title="Restore from archive"
+                  className="p-2 rounded-lg text-slate-500 hover:bg-emerald-50 hover:text-emerald-700"
+                  onClick={() => archiveMutation.mutate({ id: row.original.id, archive: false })}
+                  disabled={archiveMutation.isPending || deleteMutation.isPending}
+                >
+                  <ArchiveRestore className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  title="Delete permanently"
+                  className="p-2 rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-700"
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `Delete project "${row.original.name}" and all its tasks? This cannot be undone.`
+                      )
+                    ) {
+                      deleteMutation.mutate(row.original.id);
+                    }
+                  }}
+                  disabled={deleteMutation.isPending}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </>
             ) : (
               <button
                 type="button"
@@ -233,7 +265,7 @@ export default function ProjectsPage() {
         ),
       },
     ],
-    [viewArchived]
+    [viewArchived, archiveMutation.isPending, deleteMutation.isPending]
   );
 
   return (
