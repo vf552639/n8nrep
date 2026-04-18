@@ -374,6 +374,14 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
     setPreview(null);
   }, [formData.use_site_template]);
 
+  useEffect(() => {
+    if (!formData.site_id || siteHasTemplate) return;
+    setFormData((prev) => {
+      if (!prev.use_site_template) return prev;
+      return { ...prev, use_site_template: false };
+    });
+  }, [formData.site_id, siteHasTemplate]);
+
   const countries = Array.from(
     new Set(
       [
@@ -599,13 +607,16 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
   const onSiteChange = (siteId: string) => {
     const site = (sites || []).find((s: Site) => s.id === siteId);
+    const newHasTemplate = site
+      ? (site.has_template ?? Boolean(site.template_id))
+      : false;
     setFormData((prev) => ({
       ...prev,
       site_id: siteId,
       country: site ? site.country : prev.country,
       language: site ? site.language : prev.language,
       author_id: "",
-      use_site_template: true,
+      use_site_template: newHasTemplate,
     }));
   };
 
@@ -673,12 +684,17 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 ))}
               </select>
             </div>
-            {siteHasTemplate && (
+            {formData.site_id && (
               <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-3 space-y-1">
-                <label className="flex items-start gap-2 text-sm text-slate-800 cursor-pointer">
+                <label
+                  className={`flex items-start gap-2 text-sm text-slate-800 ${
+                    siteHasTemplate ? "cursor-pointer" : "cursor-not-allowed"
+                  }`}
+                >
                   <input
                     type="checkbox"
                     className="mt-0.5 shrink-0"
+                    disabled={!siteHasTemplate}
                     checked={formData.use_site_template}
                     onChange={(e) =>
                       setFormData({ ...formData, use_site_template: e.target.checked })
@@ -687,8 +703,9 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   <span>
                     <span className="font-medium">Use site HTML template</span>
                     <span className="block text-xs text-slate-500 font-normal mt-1">
-                      When disabled, articles are generated as clean HTML without site wrapper (no
-                      head, css, header/footer).
+                      {siteHasTemplate
+                        ? "When disabled, articles are generated as clean HTML without site wrapper (no head, css, header/footer)."
+                        : "No HTML template assigned to this site. Articles are generated as clean HTML."}
                     </span>
                   </span>
                 </label>
