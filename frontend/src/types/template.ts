@@ -39,7 +39,6 @@ export interface LegalPageTemplateRow {
   id: string;
   name: string;
   page_type: LegalPageType | string;
-  title: string;
   content_format: string;
   is_active: boolean;
 }
@@ -54,7 +53,7 @@ export interface LegalBlueprintPageTypeGroup {
   page_type: string;
   page_title: string;
   default_template_id?: string | null;
-  templates: { id: string; name: string; title: string }[];
+  templates: { id: string; name: string }[];
 }
 
 export interface LegalForBlueprintResponse {

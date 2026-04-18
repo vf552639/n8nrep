@@ -19,7 +19,6 @@ export default function LegalPagesPage() {
   const [form, setForm] = useState({
     name: "",
     page_type: "privacy_policy" as LegalPageType | string,
-    title: "",
     content: "",
     content_format: "text" as "text" | "html",
     variablesJson: "{}",
@@ -42,7 +41,6 @@ export default function LegalPagesPage() {
     setForm({
       name: "",
       page_type: "privacy_policy",
-      title: "",
       content: "",
       content_format: "text",
       variablesJson: "{}",
@@ -59,7 +57,6 @@ export default function LegalPagesPage() {
       setForm({
         name: full.name,
         page_type: full.page_type,
-        title: full.title,
         content: full.content,
         content_format: (full.content_format === "html" ? "html" : "text") as "text" | "html",
         variablesJson: JSON.stringify(full.variables || {}, null, 2),
@@ -84,7 +81,6 @@ export default function LegalPagesPage() {
         return legalPagesApi.update(editingId, {
           name: form.name,
           page_type: form.page_type,
-          title: form.title,
           content: form.content,
           content_format: form.content_format,
           variables,
@@ -95,7 +91,6 @@ export default function LegalPagesPage() {
       return legalPagesApi.create({
         name: form.name,
         page_type: form.page_type,
-        title: form.title,
         content: form.content,
         content_format: form.content_format,
         variables,
@@ -135,7 +130,6 @@ export default function LegalPagesPage() {
         <span className="text-xs uppercase text-slate-600">{row.original.content_format}</span>
       ),
     },
-    { accessorKey: "title", header: "Title" },
     {
       accessorKey: "is_active",
       header: "Active",
@@ -253,14 +247,6 @@ export default function LegalPagesPage() {
                 </div>
               </div>
               <div>
-                <label className="mb-1 block text-sm font-medium">Title *</label>
-                <input
-                  className="w-full rounded border px-3 py-2 text-sm"
-                  value={form.title}
-                  onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-                />
-              </div>
-              <div>
                 <span className="mb-1 block text-sm font-medium">Content format</span>
                 <div className="flex gap-4 text-sm">
                   <label className="flex items-center gap-2">
@@ -329,7 +315,7 @@ export default function LegalPagesPage() {
                 type="button"
                 className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
                 onClick={() => saveMut.mutate()}
-                disabled={saveMut.isPending || !form.title.trim() || !form.name.trim()}
+                disabled={saveMut.isPending || !form.name.trim() || !form.content.trim()}
               >
                 Save
               </button>

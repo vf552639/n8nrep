@@ -36,7 +36,6 @@ class LegalPageTemplate(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(200), nullable=False)
     page_type = Column(String(50), nullable=False)
-    title = Column(String(300), nullable=False)
     content = Column(Text, nullable=False)
     content_format = Column(String(10), nullable=False, default="text")
     variables = Column(JSONB, nullable=False, default=dict)

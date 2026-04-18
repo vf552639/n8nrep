@@ -14,7 +14,6 @@ router = APIRouter()
 class LegalPageCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     page_type: str = Field(..., min_length=1, max_length=50)
-    title: str = Field(..., min_length=1, max_length=300)
     content: str = Field(..., min_length=1)
     content_format: str = Field(default="text", pattern="^(text|html)$")
     variables: dict = Field(default_factory=dict)
@@ -25,7 +24,6 @@ class LegalPageCreate(BaseModel):
 class LegalPageUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=200)
     page_type: Optional[str] = Field(None, min_length=1, max_length=50)
-    title: Optional[str] = Field(None, min_length=1, max_length=300)
     content: Optional[str] = None
     content_format: Optional[str] = Field(None, pattern="^(text|html)$")
     variables: Optional[dict] = None
@@ -80,10 +78,7 @@ def legal_templates_for_blueprint(blueprint_id: str, db: Session = Depends(get_d
                 "page_type": pt,
                 "page_title": page_type_title[pt],
                 "default_template_id": page_type_defaults.get(pt),
-                "templates": [
-                    {"id": str(t.id), "name": t.name, "title": t.title}
-                    for t in templates
-                ],
+                "templates": [{"id": str(t.id), "name": t.name} for t in templates],
             }
         )
     return {"legal_page_types": legal_page_types}
@@ -106,7 +101,6 @@ def list_by_page_type(page_type: str, db: Session = Depends(get_db)) -> List[dic
             "id": str(r.id),
             "name": r.name,
             "page_type": r.page_type,
-            "title": r.title,
             "content_format": r.content_format or "text",
         }
         for r in rows
@@ -127,7 +121,6 @@ def list_legal_pages(
             "id": str(r.id),
             "name": r.name,
             "page_type": r.page_type,
-            "title": r.title,
             "content_format": r.content_format or "text",
             "is_active": r.is_active,
         }
@@ -144,7 +137,6 @@ def get_legal_page(legal_id: str, db: Session = Depends(get_db)) -> dict[str, An
         "id": str(r.id),
         "name": r.name,
         "page_type": r.page_type,
-        "title": r.title,
         "content": r.content,
         "content_format": r.content_format or "text",
         "variables": r.variables or {},
@@ -170,7 +162,6 @@ def create_legal_page(body: LegalPageCreate, db: Session = Depends(get_db)) -> d
     r = LegalPageTemplate(
         name=name,
         page_type=body.page_type,
-        title=body.title.strip(),
         content=body.content,
         content_format=body.content_format,
         variables=body.variables or {},

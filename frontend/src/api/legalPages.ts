@@ -21,14 +21,13 @@ export const legalPagesApi = {
       .then((r) => r.data),
   getByPageType: (pageType: string) =>
     api
-      .get<{ id: string; name: string; page_type: string; title: string; content_format: string }[]>(
+      .get<{ id: string; name: string; page_type: string; content_format: string }[]>(
         `/legal-pages/by-page-type/${pageType}`
       )
       .then((r) => r.data),
   create: (data: {
     name: string;
     page_type: string;
-    title: string;
     content: string;
     content_format?: "text" | "html";
     variables?: Record<string, unknown>;
