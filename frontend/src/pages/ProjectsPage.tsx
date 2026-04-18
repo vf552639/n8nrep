@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
+import type { RowSelectionState } from "@tanstack/react-table";
 import toast from "react-hot-toast";
 import {
   projectsApi,
@@ -59,6 +60,7 @@ export default function ProjectsPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchInput.trim()), 400);
@@ -80,6 +82,12 @@ export default function ProjectsPage() {
     queryFn: async () => projectsApi.getAll(listParams),
   });
 
+  const selectedIds = useMemo(
+    () => Object.keys(rowSelection).filter((id) => rowSelection[id]),
+    [rowSelection]
+  );
+  const selectedCount = selectedIds.length;
+
   const archiveMutation = useMutation({
     mutationFn: ({ id, archive }: { id: string; archive: boolean }) =>
       archive ? projectsApi.archiveProject(id) : projectsApi.unarchiveProject(id),
@@ -97,6 +105,7 @@ export default function ProjectsPage() {
     mutationFn: (id: string) => projectsApi.deleteProject(id),
     onSuccess: () => {
       toast.success("Project deleted");
+      setRowSelection({});
       queryClient.invalidateQueries({ queryKey: ["projects"] });
     },
     onError: (e: unknown) => {
@@ -105,8 +114,63 @@ export default function ProjectsPage() {
     },
   });
 
+  const deleteSelectedMutation = useMutation({
+    mutationFn: (ids: string[]) => projectsApi.deleteSelected(ids),
+    onSuccess: (data) => {
+      toast.success(
+        `Deleted ${data.deleted} project(s)${data.skipped ? `, skipped ${data.skipped} active` : ""}`
+      );
+      setRowSelection({});
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
+    onError: () => toast.error("Failed to delete projects"),
+  });
+
+  const handleDeleteSelected = useCallback(() => {
+    if (selectedIds.length === 0) return;
+    if (
+      !window.confirm(
+        `Delete ${selectedIds.length} project(s) and all their tasks? This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    deleteSelectedMutation.mutate(selectedIds);
+  }, [selectedIds, deleteSelectedMutation]);
+
   const columns = useMemo(
     () => [
+      {
+        id: "select",
+        size: 40,
+        enableSorting: false,
+        meta: { tdClassName: "w-10 min-w-[2.5rem] align-middle" },
+        header: ({ table }: { table: any }) => (
+          <input
+            type="checkbox"
+            className="rounded border-slate-300 text-blue-600"
+            checked={table.getIsAllPageRowsSelected()}
+            ref={(el) => {
+              if (el) {
+                el.indeterminate =
+                  table.getIsSomePageRowsSelected() && !table.getIsAllPageRowsSelected();
+              }
+            }}
+            onChange={table.getToggleAllPageRowsSelectedHandler()}
+            aria-label="Select all on page"
+          />
+        ),
+        cell: ({ row }: { row: any }) => (
+          <input
+            type="checkbox"
+            className="rounded border-slate-300 text-blue-600"
+            checked={row.getIsSelected()}
+            onChange={row.getToggleSelectedHandler()}
+            onClick={(e) => e.stopPropagation()}
+            aria-label="Select row"
+          />
+        ),
+      },
       {
         accessorKey: "name",
         header: "Project Name",
@@ -228,7 +292,11 @@ export default function ProjectsPage() {
                   title="Restore from archive"
                   className="p-2 rounded-lg text-slate-500 hover:bg-emerald-50 hover:text-emerald-700"
                   onClick={() => archiveMutation.mutate({ id: row.original.id, archive: false })}
-                  disabled={archiveMutation.isPending || deleteMutation.isPending}
+                  disabled={
+                    archiveMutation.isPending ||
+                    deleteMutation.isPending ||
+                    deleteSelectedMutation.isPending
+                  }
                 >
                   <ArchiveRestore className="w-4 h-4" />
                 </button>
@@ -245,7 +313,7 @@ export default function ProjectsPage() {
                       deleteMutation.mutate(row.original.id);
                     }
                   }}
-                  disabled={deleteMutation.isPending}
+                  disabled={deleteMutation.isPending || deleteSelectedMutation.isPending}
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
@@ -256,7 +324,7 @@ export default function ProjectsPage() {
                 title="Archive"
                 className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800"
                 onClick={() => archiveMutation.mutate({ id: row.original.id, archive: true })}
-                disabled={archiveMutation.isPending}
+                disabled={archiveMutation.isPending || deleteSelectedMutation.isPending}
               >
                 <Archive className="w-4 h-4" />
               </button>
@@ -265,7 +333,12 @@ export default function ProjectsPage() {
         ),
       },
     ],
-    [viewArchived, archiveMutation.isPending, deleteMutation.isPending]
+    [
+      viewArchived,
+      archiveMutation.isPending,
+      deleteMutation.isPending,
+      deleteSelectedMutation.isPending,
+    ]
   );
 
   return (
@@ -292,7 +365,10 @@ export default function ProjectsPage() {
           <div className="inline-flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
             <button
               type="button"
-              onClick={() => setViewArchived(false)}
+              onClick={() => {
+                setViewArchived(false);
+                setRowSelection({});
+              }}
               className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
                 !viewArchived ? "bg-white shadow text-slate-900" : "text-slate-600 hover:text-slate-900"
               }`}
@@ -301,7 +377,10 @@ export default function ProjectsPage() {
             </button>
             <button
               type="button"
-              onClick={() => setViewArchived(true)}
+              onClick={() => {
+                setViewArchived(true);
+                setRowSelection({});
+              }}
               className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
                 viewArchived ? "bg-white shadow text-slate-900" : "text-slate-600 hover:text-slate-900"
               }`}
@@ -313,7 +392,10 @@ export default function ProjectsPage() {
           <div className="flex flex-wrap gap-2 items-center flex-1 min-w-[200px]">
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) => {
+                setStatusFilter(e.target.value);
+                setRowSelection({});
+              }}
               className="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white text-slate-800 max-w-[200px]"
             >
               {STATUS_OPTIONS.map((o) => (
@@ -336,10 +418,35 @@ export default function ProjectsPage() {
         </div>
       </div>
 
+      {selectedCount > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3">
+          <span className="text-sm font-medium text-slate-800">Выбрано: {selectedCount}</span>
+          <button
+            type="button"
+            disabled={deleteSelectedMutation.isPending}
+            onClick={handleDeleteSelected}
+            className="inline-flex items-center gap-1.5 rounded-md bg-white px-3 py-1.5 text-sm font-medium text-red-800 shadow-sm ring-1 ring-red-200 hover:bg-red-50 disabled:opacity-50"
+          >
+            <Trash2 className="h-4 w-4" /> Удалить выбранные
+          </button>
+          <button
+            type="button"
+            onClick={() => setRowSelection({})}
+            className="ml-auto text-sm text-slate-600 hover:text-slate-900"
+          >
+            Снять выделение
+          </button>
+        </div>
+      )}
+
       <ReactTable
-        columns={columns as never}
+        columns={columns as any}
         data={projects || []}
         isLoading={isLoading}
+        enableRowSelection
+        rowSelection={rowSelection}
+        onRowSelectionChange={setRowSelection}
+        getRowId={(row) => row.id}
         onRowClick={(p: Project) => navigate(`/projects/${p.id}`)}
       />
 

@@ -85,6 +85,13 @@ export const projectsApi = {
   deleteProject: (id: string) =>
     api.delete<{ msg: string; project_id: string }>(`/projects/${id}`).then((res) => res.data),
 
+  deleteSelected: (projectIds: string[]) =>
+    api
+      .post<{ deleted: number; skipped: number }>("/projects/delete-selected", {
+        project_ids: projectIds,
+      })
+      .then((res) => res.data),
+
   retryFailedPages: (id: string) =>
     api.post<{ msg: string; project_id: string; retried_count: number }>(`/projects/${id}/retry-failed`).then((res) => res.data),
   approvePage: (id: string) =>

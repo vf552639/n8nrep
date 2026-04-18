@@ -290,6 +290,11 @@ class SiteProjectCloneBody(BaseModel):
             raise ValueError("Country must be a 2-letter ISO code (e.g. DE, FR, US)")
         return v
 
+
+class DeleteSelectedProjectsRequest(BaseModel):
+    project_ids: List[str]
+
+
 class SiteProjectResponse(BaseModel):
     id: str
     name: str
@@ -669,6 +674,38 @@ def create_project(project_in: SiteProjectCreate, db: Session = Depends(get_db))
         "status": "Project created and queued",
         "serp_warning": serp_warning,
     }
+
+
+@router.post("/delete-selected")
+def delete_selected_projects(
+    payload: DeleteSelectedProjectsRequest, db: Session = Depends(get_db)
+):
+    """Deletes selected projects and their tasks; skips pending/generating (same rules as DELETE /{id})."""
+    if not payload.project_ids:
+        return {"deleted": 0, "skipped": 0}
+
+    id_list: List[uuid.UUID] = []
+    for pid in payload.project_ids:
+        try:
+            id_list.append(uuid.UUID(str(pid)))
+        except ValueError:
+            continue
+
+    deleted = 0
+    skipped = 0
+    for uid in id_list:
+        project = db.query(SiteProject).filter(SiteProject.id == uid).first()
+        if not project:
+            continue
+        if project.status in ("generating", "pending"):
+            skipped += 1
+            continue
+        db.query(Task).filter(Task.project_id == uid).delete(synchronize_session=False)
+        db.delete(project)
+        deleted += 1
+
+    db.commit()
+    return {"deleted": deleted, "skipped": skipped}
 
 
 @router.get("/{id}/export-csv")
