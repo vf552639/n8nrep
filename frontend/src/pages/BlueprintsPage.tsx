@@ -2,7 +2,9 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useState, type Dispatch, type SetStateAction } from "react";
 import toast from "react-hot-toast";
 import { blueprintsApi } from "@/api/blueprints";
+import { legalPagesApi } from "@/api/legalPages";
 import { Blueprint, BlueprintPage, PipelinePreset } from "@/types/blueprint";
+import { LEGAL_PAGE_TYPES_SET } from "@/types/template";
 import {
   CUSTOM_STEP_OPTIONS,
   DEFAULT_FULL_PIPELINE_STEPS,
@@ -17,6 +19,17 @@ const PIPELINE_PRESET_LABEL: Record<PipelinePreset, string> = {
   legal: "Legal",
   custom: "Custom",
 };
+
+const BLUEPRINT_PAGE_TYPE_OPTIONS: { value: string; label: string }[] = [
+  { value: "article", label: "Article" },
+  { value: "category", label: "Category" },
+  { value: "homepage", label: "Homepage" },
+  { value: "about_us", label: "About Us" },
+  { value: "privacy_policy", label: "Privacy Policy" },
+  { value: "terms_and_conditions", label: "Terms & Conditions" },
+  { value: "cookie_policy", label: "Cookie Policy" },
+  { value: "responsible_gambling", label: "Responsible Gambling" },
+];
 
 export default function BlueprintsPage() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -474,6 +487,13 @@ function AddBlueprintPageModal({ blueprintId, onClose }: { blueprintId: string; 
     show_in_footer: true,
     pipeline_preset: "full" as PipelinePreset,
     pipeline_steps_custom: [] as string[],
+    default_legal_template_id: "",
+  });
+
+  const { data: legalTemplates } = useQuery({
+    queryKey: ["legal-templates-by-type", formData.page_type],
+    queryFn: () => legalPagesApi.getByPageType(formData.page_type),
+    enabled: LEGAL_PAGE_TYPES_SET.has(formData.page_type),
   });
 
   const mutation = useMutation({
@@ -503,6 +523,7 @@ function AddBlueprintPageModal({ blueprintId, onClose }: { blueprintId: string; 
       ...formData,
       keyword_template_brand: formData.keyword_template_brand || undefined,
       nav_label: formData.nav_label || undefined,
+      default_legal_template_id: formData.default_legal_template_id || null,
       pipeline_steps_custom:
         formData.pipeline_preset === "custom"
           ? normalizeCustomPipelineSteps(formData.pipeline_steps_custom || [])
@@ -538,12 +559,29 @@ function AddBlueprintPageModal({ blueprintId, onClose }: { blueprintId: string; 
               />
             </Field>
             <Field label="Type">
-              <input
+              <select
                 value={formData.page_type}
-                onChange={(e) => setFormData((p) => ({ ...p, page_type: e.target.value }))}
-                className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                placeholder="article"
-              />
+                onChange={(e) => {
+                  const newType = e.target.value;
+                  setFormData((prev) => ({
+                    ...prev,
+                    page_type: newType,
+                    default_legal_template_id: LEGAL_PAGE_TYPES_SET.has(newType)
+                      ? prev.default_legal_template_id
+                      : "",
+                  }));
+                }}
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white"
+              >
+                {!BLUEPRINT_PAGE_TYPE_OPTIONS.some((o) => o.value === formData.page_type) && (
+                  <option value={formData.page_type}>{formData.page_type} (custom)</option>
+                )}
+                {BLUEPRINT_PAGE_TYPE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
             </Field>
             <Field label="Filename *">
               <input
@@ -570,6 +608,34 @@ function AddBlueprintPageModal({ blueprintId, onClose }: { blueprintId: string; 
               />
             </Field>
           </div>
+
+          {LEGAL_PAGE_TYPES_SET.has(formData.page_type) && (
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                Default Legal Template (optional)
+              </label>
+              <p className="mb-1 text-xs text-slate-500">
+                Fallback template for this page type. Projects can override this per-project.
+              </p>
+              <select
+                className="w-full rounded-lg border px-3 py-2 text-sm"
+                value={formData.default_legal_template_id}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    default_legal_template_id: e.target.value,
+                  }))
+                }
+              >
+                <option value="">— None (generate from scratch) —</option>
+                {(legalTemplates || []).map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <Field label="Keyword Template *">
             <input
@@ -662,6 +728,13 @@ function EditBlueprintPageModal({
     show_in_footer: page.show_in_footer,
     pipeline_preset: (page.pipeline_preset || "full") as PipelinePreset,
     pipeline_steps_custom: [...(page.pipeline_steps_custom || [])] as string[],
+    default_legal_template_id: page.default_legal_template_id || "",
+  });
+
+  const { data: legalTemplates } = useQuery({
+    queryKey: ["legal-templates-by-type", formData.page_type],
+    queryFn: () => legalPagesApi.getByPageType(formData.page_type),
+    enabled: LEGAL_PAGE_TYPES_SET.has(formData.page_type),
   });
 
   const mutation = useMutation({
@@ -691,6 +764,7 @@ function EditBlueprintPageModal({
       ...formData,
       keyword_template_brand: formData.keyword_template_brand || undefined,
       nav_label: formData.nav_label || undefined,
+      default_legal_template_id: formData.default_legal_template_id || null,
       pipeline_steps_custom:
         formData.pipeline_preset === "custom"
           ? normalizeCustomPipelineSteps(formData.pipeline_steps_custom || [])
@@ -724,11 +798,29 @@ function EditBlueprintPageModal({
               />
             </Field>
             <Field label="Type">
-              <input
+              <select
                 value={formData.page_type}
-                onChange={(e) => setFormData((p) => ({ ...p, page_type: e.target.value }))}
-                className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              />
+                onChange={(e) => {
+                  const newType = e.target.value;
+                  setFormData((prev) => ({
+                    ...prev,
+                    page_type: newType,
+                    default_legal_template_id: LEGAL_PAGE_TYPES_SET.has(newType)
+                      ? prev.default_legal_template_id
+                      : "",
+                  }));
+                }}
+                className="w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              >
+                {!BLUEPRINT_PAGE_TYPE_OPTIONS.some((o) => o.value === formData.page_type) && (
+                  <option value={formData.page_type}>{formData.page_type} (custom)</option>
+                )}
+                {BLUEPRINT_PAGE_TYPE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
             </Field>
             <Field label="Filename *">
               <input
@@ -753,6 +845,34 @@ function EditBlueprintPageModal({
               />
             </Field>
           </div>
+
+          {LEGAL_PAGE_TYPES_SET.has(formData.page_type) && (
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                Default Legal Template (optional)
+              </label>
+              <p className="mb-1 text-xs text-slate-500">
+                Fallback template for this page type. Projects can override this per-project.
+              </p>
+              <select
+                className="w-full rounded-lg border px-3 py-2 text-sm"
+                value={formData.default_legal_template_id}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    default_legal_template_id: e.target.value,
+                  }))
+                }
+              >
+                <option value="">— None (generate from scratch) —</option>
+                {(legalTemplates || []).map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <Field label="Keyword Template *">
             <input

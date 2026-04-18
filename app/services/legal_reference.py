@@ -1,6 +1,7 @@
 import json
 from typing import Any
 
+from app.models.blueprint import BlueprintPage
 from app.models.site import Site
 from app.models.template import LegalPageTemplate, LEGAL_PAGE_TYPES
 
@@ -38,6 +39,15 @@ def inject_legal_template_vars(ctx: Any) -> None:
             raw = project.legal_template_map.get(ctx.task.page_type)
             if raw is not None:
                 template_id = str(raw)
+
+    if not template_id and ctx.task.blueprint_page_id:
+        bp_page = (
+            ctx.db.query(BlueprintPage)
+            .filter(BlueprintPage.id == ctx.task.blueprint_page_id)
+            .first()
+        )
+        if bp_page and getattr(bp_page, "default_legal_template_id", None):
+            template_id = str(bp_page.default_legal_template_id)
 
     lp = None
     if template_id:

@@ -393,6 +393,27 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
     enabled: Boolean(formData.blueprint_id),
   });
 
+  useEffect(() => {
+    if (!legalForBp || legalForBp.legal_page_types.length === 0) return;
+
+    setFormData((prev) => {
+      const hasUserSelection = Object.values(prev.legal_template_map).some(
+        (v) => v && String(v).trim()
+      );
+      if (hasUserSelection) return prev;
+
+      const defaults: Record<string, string> = {};
+      for (const group of legalForBp.legal_page_types) {
+        if (group.default_template_id) {
+          defaults[group.page_type] = group.default_template_id;
+        }
+      }
+      if (Object.keys(defaults).length === 0) return prev;
+
+      return { ...prev, legal_template_map: { ...prev.legal_template_map, ...defaults } };
+    });
+  }, [legalForBp]);
+
   const buildSerpConfig = () => {
     if (
       formData.serp_engine === "google" &&
@@ -831,6 +852,11 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
                         </option>
                       ))}
                     </select>
+                    {group.default_template_id && (
+                      <p className="mt-1 text-xs text-blue-600">
+                        Blueprint default pre-selected. You can override it.
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>

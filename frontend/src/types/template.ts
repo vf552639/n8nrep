@@ -32,6 +32,9 @@ export const LEGAL_PAGE_TYPE_LABELS: Record<string, string> = {
   about_us: "About Us",
 };
 
+/** Same set as backend `LEGAL_PAGE_TYPES` — used for blueprint legal defaults UI. */
+export const LEGAL_PAGE_TYPES_SET = new Set(Object.keys(LEGAL_PAGE_TYPE_LABELS));
+
 export interface LegalPageTemplateRow {
   id: string;
   name: string;
@@ -50,6 +53,7 @@ export interface LegalPageTemplateFull extends LegalPageTemplateRow {
 export interface LegalBlueprintPageTypeGroup {
   page_type: string;
   page_title: string;
+  default_template_id?: string | null;
   templates: { id: string; name: string; title: string }[];
 }
 

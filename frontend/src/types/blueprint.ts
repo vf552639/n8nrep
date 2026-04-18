@@ -23,4 +23,5 @@ export interface BlueprintPage {
   use_serp: boolean;
   pipeline_preset: PipelinePreset;
   pipeline_steps_custom?: string[] | null;
+  default_legal_template_id?: string | null;
 }

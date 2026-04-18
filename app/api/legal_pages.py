@@ -56,10 +56,13 @@ def legal_templates_for_blueprint(blueprint_id: str, db: Session = Depends(get_d
     )
     ordered_types: List[str] = []
     page_type_title: Dict[str, str] = {}
+    page_type_defaults: Dict[str, Optional[str]] = {}
     for p in pages:
         if p.page_type in LEGAL_PAGE_TYPES and p.page_type not in page_type_title:
             ordered_types.append(p.page_type)
             page_type_title[p.page_type] = p.page_title
+            did = getattr(p, "default_legal_template_id", None)
+            page_type_defaults[p.page_type] = str(did) if did else None
 
     legal_page_types: List[dict[str, Any]] = []
     for pt in ordered_types:
@@ -76,6 +79,7 @@ def legal_templates_for_blueprint(blueprint_id: str, db: Session = Depends(get_d
             {
                 "page_type": pt,
                 "page_title": page_type_title[pt],
+                "default_template_id": page_type_defaults.get(pt),
                 "templates": [
                     {"id": str(t.id), "name": t.name, "title": t.title}
                     for t in templates

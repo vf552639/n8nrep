@@ -1,10 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+import uuid
 from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
+from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.blueprint import SiteBlueprint, BlueprintPage
+from app.models.template import LegalPageTemplate, LEGAL_PAGE_TYPES
 from app.services.pipeline_presets import (
     VALID_PRESETS,
     pipeline_steps_use_serp,
@@ -35,6 +38,7 @@ class BlueprintPageCreate(BaseModel):
     use_serp: bool = True
     pipeline_preset: str = "full"
     pipeline_steps_custom: Optional[List[str]] = None
+    default_legal_template_id: Optional[str] = None
 
     @field_validator("pipeline_preset")
     @classmethod
@@ -47,8 +51,68 @@ class BlueprintPageCreate(BaseModel):
         return s
 
 
-def _page_create_dict(page_in: BlueprintPageCreate) -> dict:
+def _validate_default_legal_template(
+    db: Session,
+    page_type: str,
+    default_legal_template_id: Optional[str],
+) -> Optional[str]:
+    """Validate and return normalized template_id or None."""
+    if not default_legal_template_id or not str(default_legal_template_id).strip():
+        return None
+    if page_type not in LEGAL_PAGE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="default_legal_template_id can only be set for legal page types: "
+            f"{list(LEGAL_PAGE_TYPES)}",
+        )
+    try:
+        tid = uuid.UUID(str(default_legal_template_id).strip())
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid default_legal_template_id: {default_legal_template_id}",
+        ) from e
+    tpl = (
+        db.query(LegalPageTemplate)
+        .filter(
+            LegalPageTemplate.id == tid,
+            LegalPageTemplate.is_active == True,  # noqa: E712
+        )
+        .first()
+    )
+    if not tpl:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Legal template not found or inactive: {default_legal_template_id}",
+        )
+    if tpl.page_type != page_type:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Template page_type '{tpl.page_type}' doesn't match "
+            f"blueprint page_type '{page_type}'",
+        )
+    return str(tpl.id)
+
+
+def _page_create_dict(page_in: BlueprintPageCreate, db: Session) -> dict:
     payload = page_in.model_dump()
+    page_type = (payload.get("page_type") or "article").strip()
+    raw_default = payload.pop("default_legal_template_id", None)
+
+    if raw_default and str(raw_default).strip() and page_type not in LEGAL_PAGE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="default_legal_template_id can only be set for legal page types: "
+            f"{list(LEGAL_PAGE_TYPES)}",
+        )
+
+    if page_type not in LEGAL_PAGE_TYPES:
+        payload["default_legal_template_id"] = None
+    else:
+        norm = _validate_default_legal_template(db, page_type, raw_default)
+        payload["default_legal_template_id"] = uuid.UUID(norm) if norm else None
+
+    payload["page_type"] = page_type
     steps = resolve_steps_from_payload(
         payload.get("pipeline_preset", "full"),
         payload.get("pipeline_steps_custom"),
@@ -115,6 +179,9 @@ def get_blueprint_pages(id: str, db: Session = Depends(get_db)):
             "use_serp": p.use_serp,
             "pipeline_preset": getattr(p, "pipeline_preset", "full") or "full",
             "pipeline_steps_custom": getattr(p, "pipeline_steps_custom", None),
+            "default_legal_template_id": (
+                str(p.default_legal_template_id) if getattr(p, "default_legal_template_id", None) else None
+            ),
         }
         for p in pages
     ]
@@ -122,7 +189,7 @@ def get_blueprint_pages(id: str, db: Session = Depends(get_db)):
 
 @router.post("/{id}/pages")
 def create_blueprint_page(id: str, page_in: BlueprintPageCreate, db: Session = Depends(get_db)):
-    payload = _page_create_dict(page_in)
+    payload = _page_create_dict(page_in, db)
     db_page = BlueprintPage(blueprint_id=id, **payload)
     db.add(db_page)
     db.commit()
@@ -146,7 +213,7 @@ def update_blueprint_page(id: str, page_id: str, page_in: BlueprintPageCreate, d
     if not db_page:
         raise HTTPException(status_code=404, detail="Page not found")
 
-    payload = _page_create_dict(page_in)
+    payload = _page_create_dict(page_in, db)
     for key, value in payload.items():
         setattr(db_page, key, value)
 

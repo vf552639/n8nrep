@@ -36,5 +36,10 @@ class BlueprintPage(Base):
     use_serp = Column(Boolean, default=True)
     pipeline_preset = Column(String(20), nullable=False, default="full")
     pipeline_steps_custom = Column(JSONB, nullable=True)
+    default_legal_template_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("legal_page_templates.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     blueprint = relationship("SiteBlueprint", back_populates="pages")
