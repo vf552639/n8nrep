@@ -82,14 +82,24 @@ export const projectsApi = {
   unarchiveProject: (id: string) =>
     api.post<{ msg: string; project_id: string; is_archived: boolean }>(`/projects/${id}/unarchive`).then((res) => res.data),
 
-  deleteProject: (id: string) =>
-    api.delete<{ msg: string; project_id: string }>(`/projects/${id}`).then((res) => res.data),
+  deleteProject: (id: string, opts?: { force?: boolean }) =>
+    api
+      .delete<{ msg: string; project_id: string }>(`/projects/${id}`, {
+        params: opts?.force ? { force: true } : {},
+      })
+      .then((res) => res.data),
 
-  deleteSelected: (projectIds: string[]) =>
+  deleteSelected: (projectIds: string[], opts?: { force?: boolean }) =>
     api
       .post<{ deleted: number; skipped: number }>("/projects/delete-selected", {
         project_ids: projectIds,
+        force: Boolean(opts?.force),
       })
+      .then((res) => res.data),
+
+  resetProjectStatus: (id: string) =>
+    api
+      .post<{ msg: string; project_id: string; status: string }>(`/projects/${id}/reset-status`)
       .then((res) => res.data),
 
   retryFailedPages: (id: string) =>

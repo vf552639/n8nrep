@@ -8,12 +8,24 @@ import { SiteCreateInput } from "@/types/site";
 import { ReactTable } from "@/components/common/ReactTable";
 import { Plus, Globe, X, Trash2 } from "lucide-react";
 import { normalizeLanguageDisplay } from "@/lib/languageDisplay";
+import { formatApiErrorDetail } from "@/lib/apiErrorMessage";
+
+type SiteDeleteConflictDetail = {
+  message?: string;
+  task_count?: number;
+  project_count?: number;
+  projects?: { id: string; name: string; status: string }[];
+};
 
 export default function SitesPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleteConflict, setDeleteConflict] = useState<{
+    siteId: string;
+    detail: SiteDeleteConflictDetail;
+  } | null>(null);
 
   const { data: sites, isLoading } = useQuery({
     queryKey: ["sites"],
@@ -23,21 +35,28 @@ export default function SitesPage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => sitesApi.delete(id),
-    onSuccess: () => {
-      toast.success("Site deleted");
+    mutationFn: (vars: { id: string; force?: boolean }) =>
+      sitesApi.delete(vars.id, { force: Boolean(vars.force) }),
+    onSuccess: (_, vars) => {
+      toast.success(vars.force ? "Site deleted with all projects" : "Site deleted");
       queryClient.invalidateQueries({ queryKey: ["sites"] });
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
       setDeleteId(null);
+      setDeleteConflict(null);
     },
-    onError: (error: unknown) => {
-      const ax = error as { response?: { data?: { detail?: string | string[] } } };
-      const d = ax.response?.data?.detail;
-      const msg =
-        typeof d === "string"
-          ? d
-          : Array.isArray(d)
-            ? d.join(" ")
-            : "Failed to delete site";
+    onError: (error: unknown, vars) => {
+      const ax = error as {
+        response?: { status?: number; data?: { detail?: unknown } };
+      };
+      if (ax.response?.status === 409 && !vars.force) {
+        const d = ax.response.data?.detail;
+        if (d && typeof d === "object" && !Array.isArray(d) && "projects" in d) {
+          setDeleteId(null);
+          setDeleteConflict({ siteId: vars.id, detail: d as SiteDeleteConflictDetail });
+          return;
+        }
+      }
+      const msg = formatApiErrorDetail(ax.response?.data?.detail) || "Failed to delete site";
       toast.error(msg);
     },
   });
@@ -135,9 +154,60 @@ export default function SitesPage() {
                 type="button"
                 className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:opacity-50"
                 disabled={deleteMutation.isPending}
-                onClick={() => deleteMutation.mutate(deleteId)}
+                onClick={() => deleteMutation.mutate({ id: deleteId })}
               >
                 {deleteMutation.isPending ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteConflict && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 space-y-4 border max-h-[90vh] overflow-y-auto">
+            <h2 className="text-lg font-semibold text-slate-900">Site has linked data</h2>
+            <p className="text-sm text-slate-600">
+              {deleteConflict.detail.message ||
+                `Нельзя удалить сайт: есть задачи или проекты (${deleteConflict.detail.project_count ?? 0} проектов).`}
+            </p>
+            {deleteConflict.detail.projects && deleteConflict.detail.projects.length > 0 && (
+              <div className="border rounded-lg overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 text-left text-slate-600">
+                    <tr>
+                      <th className="px-3 py-2 font-medium">Project</th>
+                      <th className="px-3 py-2 font-medium">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {deleteConflict.detail.projects.map((p) => (
+                      <tr key={p.id}>
+                        <td className="px-3 py-2 font-medium text-slate-800">{p.name}</td>
+                        <td className="px-3 py-2 text-slate-600">{p.status}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="flex flex-wrap justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 rounded-lg"
+                onClick={() => setDeleteConflict(null)}
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:opacity-50"
+                disabled={deleteMutation.isPending}
+                onClick={() =>
+                  deleteMutation.mutate({ id: deleteConflict.siteId, force: true })
+                }
+              >
+                {deleteMutation.isPending ? "…" : "Удалить сайт вместе со всеми проектами"}
               </button>
             </div>
           </div>

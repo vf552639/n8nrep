@@ -117,14 +117,49 @@ export default function ProjectDetailPage() {
     onError: () => toast.error("Could not retry task"),
   });
 
+  const [forceDeleteOpen, setForceDeleteOpen] = useState(false);
+
   const deleteMutation = useMutation({
-    mutationFn: () => projectsApi.deleteProject(id!),
+    mutationFn: (opts?: { force?: boolean }) =>
+      projectsApi.deleteProject(id!, { force: Boolean(opts?.force) }),
     onSuccess: () => {
       toast.success("Project deleted");
+      setForceDeleteOpen(false);
       queryClient.invalidateQueries({ queryKey: ["projects"] });
       navigate("/projects");
     },
-    onError: () => toast.error("Delete failed"),
+    onError: (e: unknown, vars) => {
+      const ax = e as {
+        response?: { status?: number; data?: { detail?: unknown } };
+        message?: string;
+      };
+      const detail = ax.response?.data?.detail;
+      const msg = formatApiErrorDetail(detail);
+      if (
+        !vars?.force &&
+        ax.response?.status === 400 &&
+        /pending or generating/i.test(msg)
+      ) {
+        setForceDeleteOpen(true);
+        return;
+      }
+      toast.error(msg || ax.message || "Delete failed");
+    },
+  });
+
+  const resetStatusMutation = useMutation({
+    mutationFn: () => projectsApi.resetProjectStatus(id!),
+    onSuccess: () => {
+      toast.success("Project marked as failed — you can delete or retry");
+      queryClient.invalidateQueries({ queryKey: ["project", id] });
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
+    onError: (e: unknown) => {
+      const ax = e as { response?: { data?: { detail?: unknown } }; message?: string };
+      toast.error(
+        formatApiErrorDetail(ax.response?.data?.detail) || ax.message || "Reset failed"
+      );
+    },
   });
 
   const startMutation = useMutation({
@@ -212,7 +247,7 @@ export default function ProjectDetailPage() {
   const failedCount = project.failed_count ?? 0;
   const canRetryFailed =
     failedCount > 0 && project.status !== "generating" && project.status !== "pending";
-  const canDelete = project.status !== "generating" && project.status !== "pending";
+  const canResetStuckStatus = project.status === "generating" || project.status === "pending";
   const canStart = project.status === "pending";
   const logs = project.logs ?? [];
   const sc = project.serp_config as Record<string, unknown> | undefined;
@@ -318,24 +353,33 @@ export default function ProjectDetailPage() {
               <RefreshCw className="w-4 h-4" /> Retry Failed Pages
             </button>
           )}
-          {canDelete && (
+          {canResetStuckStatus && (
             <button
               type="button"
-              onClick={() => {
-                if (
-                  window.confirm(
-                    "Delete this project and all its tasks? This cannot be undone."
-                  )
-                ) {
-                  deleteMutation.mutate();
-                }
-              }}
-              disabled={deleteMutation.isPending}
-              className="flex items-center gap-2 bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 px-3 py-1.5 rounded-md text-sm font-medium disabled:opacity-60"
+              onClick={() => resetStatusMutation.mutate()}
+              disabled={resetStatusMutation.isPending}
+              className="flex items-center gap-2 bg-slate-100 text-slate-800 border border-slate-200 hover:bg-slate-200 px-3 py-1.5 rounded-md text-sm font-medium disabled:opacity-60"
+              title='Sets status to failed with note "Manually reset — stale task"'
             >
-              <Trash2 className="w-4 h-4" /> Delete
+              <CircleDashed className="w-4 h-4" /> Reset stuck status
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => {
+              if (
+                window.confirm(
+                  "Delete this project and all its tasks? This cannot be undone."
+                )
+              ) {
+                deleteMutation.mutate();
+              }
+            }}
+            disabled={deleteMutation.isPending}
+            className="flex items-center gap-2 bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 px-3 py-1.5 rounded-md text-sm font-medium disabled:opacity-60"
+          >
+            <Trash2 className="w-4 h-4" /> Delete
+          </button>
           {project.status === "generating" && (
             <button 
               onClick={() => actionMutation.mutate("stop")}
@@ -647,6 +691,35 @@ export default function ProjectDetailPage() {
           </div>
         )}
       </div>
+
+      {forceDeleteOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4 border">
+            <h2 className="text-lg font-semibold text-slate-900">Cannot delete normally</h2>
+            <p className="text-sm text-slate-600">
+              Проект завис в статусе <span className="font-semibold">{project.status}</span>.
+              Celery-задача, вероятно, не выполняется. Принудительно удалить?
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 rounded-lg"
+                onClick={() => setForceDeleteOpen(false)}
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:opacity-50"
+                disabled={deleteMutation.isPending}
+                onClick={() => deleteMutation.mutate({ force: true })}
+              >
+                {deleteMutation.isPending ? "…" : "Force Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {cloneOpen && (
         <CloneProjectModal

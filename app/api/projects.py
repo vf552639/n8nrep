@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
@@ -29,6 +31,16 @@ from app.config import settings
 from app.services.pipeline_presets import pipeline_steps_use_serp, resolve_pipeline_steps
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+def _revoke_project_celery_task(celery_task_id: Optional[str]) -> None:
+    if not celery_task_id or not str(celery_task_id).strip():
+        return
+    try:
+        celery_app.control.revoke(str(celery_task_id), terminate=True)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Celery revoke failed for task_id=%s: %s", celery_task_id, exc)
 
 
 def _validate_legal_template_map(
@@ -293,6 +305,7 @@ class SiteProjectCloneBody(BaseModel):
 
 class DeleteSelectedProjectsRequest(BaseModel):
     project_ids: List[str]
+    force: bool = False
 
 
 class SiteProjectResponse(BaseModel):
@@ -697,9 +710,11 @@ def delete_selected_projects(
         project = db.query(SiteProject).filter(SiteProject.id == uid).first()
         if not project:
             continue
-        if project.status in ("generating", "pending"):
+        if not payload.force and project.status in ("generating", "pending"):
             skipped += 1
             continue
+        if payload.force:
+            _revoke_project_celery_task(project.celery_task_id)
         db.query(Task).filter(Task.project_id == uid).delete(synchronize_session=False)
         db.delete(project)
         deleted += 1
@@ -1042,19 +1057,45 @@ def unarchive_project(id: str, db: Session = Depends(get_db)):
 
 
 @router.delete("/{id}")
-def delete_project(id: str, db: Session = Depends(get_db)):
+def delete_project(
+    id: str,
+    force: bool = Query(False, description="Delete even if pending/generating; revokes Celery worker task"),
+    db: Session = Depends(get_db),
+):
     project = db.query(SiteProject).filter(SiteProject.id == id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    if project.status in ("generating", "pending"):
+    if not force and project.status in ("generating", "pending"):
         raise HTTPException(
             status_code=400,
             detail="Cannot delete a project that is pending or generating. Stop or wait until it finishes.",
         )
+    if force:
+        _revoke_project_celery_task(project.celery_task_id)
     db.query(Task).filter(Task.project_id == id).delete(synchronize_session=False)
     db.delete(project)
     db.commit()
     return {"msg": "Project deleted", "project_id": id}
+
+
+@router.post("/{id}/reset-status")
+def reset_project_status(id: str, db: Session = Depends(get_db)):
+    """Move stuck pending/generating project to failed so it can be deleted or retried normally."""
+    project = db.query(SiteProject).filter(SiteProject.id == id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.status not in ("pending", "generating"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Only pending or generating projects can be reset (current: {project.status})",
+        )
+    _revoke_project_celery_task(project.celery_task_id)
+    project.status = "failed"
+    project.error_log = "Manually reset — stale task"
+    project.celery_task_id = None
+    project.stopping_requested = False
+    db.commit()
+    return {"msg": "Project status reset to failed", "project_id": id, "status": project.status}
 
 
 @router.post("/{id}/retry-failed")

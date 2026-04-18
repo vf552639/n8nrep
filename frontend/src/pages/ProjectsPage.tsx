@@ -34,6 +34,12 @@ import { LEGAL_PAGE_TYPE_LABELS } from "@/types/template";
 import { COUNTRY_CODES, countryLabel } from "@/constants/countries";
 import { legalPagesApi } from "@/api/legalPages";
 
+function isProjectDeleteBlockedByActiveStatus(status: number | undefined, detail: unknown): boolean {
+  if (status !== 400) return false;
+  const s = formatApiErrorDetail(detail);
+  return /pending or generating/i.test(s);
+}
+
 function parseKeywords(raw: string): string[] {
   if (!raw.trim()) return [];
   return raw
@@ -61,6 +67,11 @@ export default function ProjectsPage() {
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
+  const [forceDeleteModal, setForceDeleteModal] = useState<{
+    id: string;
+    name: string;
+    status: string;
+  } | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchInput.trim()), 400);
@@ -102,26 +113,53 @@ export default function ProjectsPage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => projectsApi.deleteProject(id),
+    mutationFn: (vars: { id: string; name: string; status: string; force?: boolean }) =>
+      projectsApi.deleteProject(vars.id, { force: Boolean(vars.force) }),
     onSuccess: () => {
       toast.success("Project deleted");
+      setForceDeleteModal(null);
       setRowSelection({});
       queryClient.invalidateQueries({ queryKey: ["projects"] });
     },
-    onError: (e: unknown) => {
-      const ax = e as { response?: { data?: { detail?: unknown } }; message?: string };
+    onError: (e: unknown, variables) => {
+      const ax = e as {
+        response?: { status?: number; data?: { detail?: unknown } };
+        message?: string;
+      };
+      if (
+        !variables.force &&
+        isProjectDeleteBlockedByActiveStatus(ax.response?.status, ax.response?.data?.detail)
+      ) {
+        setForceDeleteModal({
+          id: variables.id,
+          name: variables.name,
+          status: variables.status,
+        });
+        return;
+      }
       toast.error(formatApiErrorDetail(ax.response?.data?.detail) || ax.message || "Delete failed");
     },
   });
 
   const deleteSelectedMutation = useMutation({
-    mutationFn: (ids: string[]) => projectsApi.deleteSelected(ids),
-    onSuccess: (data) => {
+    mutationFn: (vars: { ids: string[]; force?: boolean }) =>
+      projectsApi.deleteSelected(vars.ids, { force: Boolean(vars.force) }),
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
       toast.success(
         `Deleted ${data.deleted} project(s)${data.skipped ? `, skipped ${data.skipped} active` : ""}`
       );
+      if (data.skipped > 0 && !variables.force) {
+        if (
+          window.confirm(
+            `${data.skipped} project(s) are still pending or generating and were skipped. Force delete them? Celery tasks will be revoked. This cannot be undone.`
+          )
+        ) {
+          deleteSelectedMutation.mutate({ ids: variables.ids, force: true });
+          return;
+        }
+      }
       setRowSelection({});
-      queryClient.invalidateQueries({ queryKey: ["projects"] });
     },
     onError: () => toast.error("Failed to delete projects"),
   });
@@ -135,7 +173,7 @@ export default function ProjectsPage() {
     ) {
       return;
     }
-    deleteSelectedMutation.mutate(selectedIds);
+    deleteSelectedMutation.mutate({ ids: selectedIds });
   }, [selectedIds, deleteSelectedMutation]);
 
   const columns = useMemo(
@@ -310,7 +348,11 @@ export default function ProjectsPage() {
                         `Delete project "${row.original.name}" and all its tasks? This cannot be undone.`
                       )
                     ) {
-                      deleteMutation.mutate(row.original.id);
+                      deleteMutation.mutate({
+                        id: row.original.id,
+                        name: row.original.name,
+                        status: row.original.status,
+                      });
                     }
                   }}
                   disabled={deleteMutation.isPending || deleteSelectedMutation.isPending}
@@ -449,6 +491,42 @@ export default function ProjectsPage() {
         getRowId={(row) => row.id}
         onRowClick={(p: Project) => navigate(`/projects/${p.id}`)}
       />
+
+      {forceDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4 border">
+            <h2 className="text-lg font-semibold text-slate-900">Cannot delete normally</h2>
+            <p className="text-sm text-slate-600">
+              Проект завис в статусе <span className="font-semibold">{forceDeleteModal.status}</span>.
+              Celery-задача, вероятно, не выполняется. Принудительно удалить?
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 rounded-lg"
+                onClick={() => setForceDeleteModal(null)}
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:opacity-50"
+                disabled={deleteMutation.isPending}
+                onClick={() =>
+                  deleteMutation.mutate({
+                    id: forceDeleteModal.id,
+                    name: forceDeleteModal.name,
+                    status: forceDeleteModal.status,
+                    force: true,
+                  })
+                }
+              >
+                {deleteMutation.isPending ? "…" : "Force Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isCreateOpen && <CreateProjectModal onClose={() => setIsCreateOpen(false)} />}
     </div>

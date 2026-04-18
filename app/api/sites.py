@@ -1,6 +1,7 @@
+import logging
 from typing import Optional, Any, List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
@@ -10,8 +11,19 @@ from app.models.task import Task
 from app.models.project import SiteProject
 from app.models.template import Template
 from app.utils.language_normalize import normalize_language
+from app.workers.celery_app import celery_app
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+def _revoke_site_project_celery(celery_task_id: Optional[str]) -> None:
+    if not celery_task_id or not str(celery_task_id).strip():
+        return
+    try:
+        celery_app.control.revoke(str(celery_task_id), terminate=True)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Celery revoke failed for task_id=%s: %s", celery_task_id, exc)
 
 
 class SiteCreate(BaseModel):
@@ -141,19 +153,45 @@ def update_site(site_id: str, body: SiteUpdate, db: Session = Depends(get_db)) -
 
 
 @router.delete("/{site_id}")
-def delete_site(site_id: str, db: Session = Depends(get_db)) -> dict[str, str]:
+def delete_site(
+    site_id: str,
+    force: bool = Query(False, description="Delete site and all related projects/tasks"),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
     site = db.query(Site).filter(Site.id == site_id).first()
     if not site:
         raise HTTPException(status_code=404, detail="Site not found")
 
     task_count = db.query(Task).filter(Task.target_site_id == site_id).count()
-    project_count = db.query(SiteProject).filter(SiteProject.site_id == site_id).count()
+    projects = db.query(SiteProject).filter(SiteProject.site_id == site_id).all()
+    project_count = len(projects)
 
-    if task_count > 0 or project_count > 0:
+    if not force and (task_count > 0 or project_count > 0):
+        projects_out = [
+            {"id": str(p.id), "name": p.name, "status": p.status} for p in projects
+        ]
         raise HTTPException(
             status_code=409,
-            detail=f"Cannot delete: site has {task_count} tasks and {project_count} projects. Delete them first.",
+            detail={
+                "message": (
+                    f"Cannot delete: site has {task_count} tasks and {project_count} projects. "
+                    "Delete them first or use force=true."
+                ),
+                "task_count": task_count,
+                "project_count": project_count,
+                "projects": projects_out,
+            },
         )
+
+    if force:
+        for p in projects:
+            _revoke_site_project_celery(p.celery_task_id)
+            db.query(Task).filter(Task.project_id == p.id).delete(synchronize_session=False)
+            db.delete(p)
+        db.query(Task).filter(Task.target_site_id == site_id).delete(synchronize_session=False)
+        db.delete(site)
+        db.commit()
+        return {"msg": "Site deleted (with projects and tasks)", "site_id": site_id}
 
     db.delete(site)
     db.commit()
