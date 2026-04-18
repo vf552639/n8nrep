@@ -61,13 +61,18 @@ def build_site(db: Session, project_id: str) -> str:
             continue
             
         article = article_by_task.get(str(task.id))
-        if not article or not article.full_page_html:
+        page_html = (
+            (article.full_page_html or "").strip() or (article.html_content or "").strip()
+            if article
+            else ""
+        )
+        if not article or not page_html:
             logger.warning(
-                f"[build_site] No article/full_page_html for task {task.id} (keyword: {task.main_keyword})"
+                f"[build_site] No article HTML for task {task.id} (keyword: {task.main_keyword})"
             )
             continue
-            
-        html_content = article.full_page_html
+
+        html_content = page_html
         
         # Inject navigation
         html_content = html_content.replace("<!-- NAV -->", header_nav)

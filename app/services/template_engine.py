@@ -6,13 +6,26 @@ from sqlalchemy.orm import Session
 
 from app.models.site import Site
 from app.models.template import Template
+from app.models.project import SiteProject
 
 
-def generate_full_page(db: Session, site_id: str, html_content: str, title: str, description: str) -> Optional[str]:
+def generate_full_page(
+    db: Session,
+    site_id: str,
+    html_content: str,
+    title: str,
+    description: str,
+    project_id: Optional[str] = None,
+) -> Optional[str]:
     """
     Uses the site's assigned Template (if any) to wrap generated content.
-    Returns the full HTML page or None if no template is linked.
+    Returns the full HTML page or None if no template is linked or project disables wrapper.
     """
+    if project_id:
+        project = db.query(SiteProject).filter(SiteProject.id == project_id).first()
+        if project and not getattr(project, "use_site_template", True):
+            return None
+
     site = db.query(Site).filter(Site.id == site_id).first()
     if not site or not site.template_id:
         return None

@@ -679,6 +679,7 @@ function CloneProjectModal({
     country: project.country,
     language: project.language,
     author_id: "" as string,
+    use_site_template: project.use_site_template !== false,
   });
 
   const { data: sites } = useQuery({
@@ -694,6 +695,9 @@ function CloneProjectModal({
     (a: Author) => a.country === form.country && a.language === form.language
   );
 
+  const cloneSite = (sites || []).find((s: Site) => s.id === form.site_id);
+  const cloneSiteHasTemplate = Boolean(cloneSite?.template_id);
+
   const mutation = useMutation({
     mutationFn: () => {
       const authorId =
@@ -708,6 +712,7 @@ function CloneProjectModal({
         country: form.country,
         language: form.language,
         ...(authorId != null && !Number.isNaN(authorId) ? { author_id: authorId } : {}),
+        use_site_template: form.use_site_template,
       });
     },
     onSuccess: (data) => {
@@ -730,6 +735,7 @@ function CloneProjectModal({
       country: site ? site.country : prev.country,
       language: site ? site.language : prev.language,
       author_id: "",
+      use_site_template: true,
     }));
   };
 
@@ -783,6 +789,27 @@ function CloneProjectModal({
               ))}
             </select>
           </div>
+          {cloneSiteHasTemplate && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+              <label className="flex items-start gap-2 text-sm text-slate-800 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 shrink-0"
+                  checked={form.use_site_template}
+                  onChange={(e) =>
+                    setForm({ ...form, use_site_template: e.target.checked })
+                  }
+                />
+                <span>
+                  <span className="font-medium">Use site HTML template</span>
+                  <span className="block text-xs text-slate-500 font-normal mt-1">
+                    When disabled, articles are generated as clean HTML without site wrapper (no
+                    head, css, header/footer).
+                  </span>
+                </span>
+              </label>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Country</label>

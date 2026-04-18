@@ -17,6 +17,7 @@ export interface ProjectPreview {
     name: string;
     domain: string;
     has_template: boolean;
+    use_site_template: boolean;
     will_be_created: boolean;
   };
   author: {
@@ -85,6 +86,7 @@ export interface Project {
     clustering_cost?: number;
   } | null;
   legal_template_map?: Record<string, string>;
+  use_site_template?: boolean;
 }
 
 export interface ProjectTaskExpanded {
@@ -106,4 +108,5 @@ export interface ProjectClonePayload {
   language?: string;
   author_id?: number;
   legal_template_map?: Record<string, string>;
+  use_site_template?: boolean;
 }

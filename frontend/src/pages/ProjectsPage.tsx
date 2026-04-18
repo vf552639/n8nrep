@@ -332,6 +332,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
     serp_os: "android" as "android" | "ios" | "windows" | "macos",
     additional_keywords_raw: "",
     legal_template_map: {} as Record<string, string>,
+    use_site_template: true,
   });
   const [serpAdvancedOpen, setSerpAdvancedOpen] = useState(false);
   const [preview, setPreview] = useState<ProjectPreview | null>(null);
@@ -357,6 +358,11 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
   });
 
   const selectedSite = (sites || []).find((s: Site) => s.id === formData.site_id);
+  const siteHasTemplate = Boolean(selectedSite?.template_id);
+
+  useEffect(() => {
+    setPreview(null);
+  }, [formData.use_site_template]);
 
   const countries = Array.from(
     new Set(
@@ -446,6 +452,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
         language: formData.language,
         ...(authorId != null && !Number.isNaN(authorId) ? { author_id: authorId } : {}),
         serp_config: buildSerpConfig(),
+        use_site_template: formData.use_site_template,
       });
     },
     onSuccess: (data) => {
@@ -572,6 +579,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
       ...(serp ? { serp_config: serp } : {}),
       ...(project_keywords ? { project_keywords } : {}),
       ...(hasLegal ? { legal_template_map } : {}),
+      use_site_template: formData.use_site_template,
     });
   };
 
@@ -583,6 +591,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
       country: site ? site.country : prev.country,
       language: site ? site.language : prev.language,
       author_id: "",
+      use_site_template: true,
     }));
   };
 
@@ -650,6 +659,27 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 ))}
               </select>
             </div>
+            {siteHasTemplate && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-3 space-y-1">
+                <label className="flex items-start gap-2 text-sm text-slate-800 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 shrink-0"
+                    checked={formData.use_site_template}
+                    onChange={(e) =>
+                      setFormData({ ...formData, use_site_template: e.target.checked })
+                    }
+                  />
+                  <span>
+                    <span className="font-medium">Use site HTML template</span>
+                    <span className="block text-xs text-slate-500 font-normal mt-1">
+                      When disabled, articles are generated as clean HTML without site wrapper (no
+                      head, css, header/footer).
+                    </span>
+                  </span>
+                </label>
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Seed Keyword *</label>
               <input
@@ -963,10 +993,17 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                 <div className="border rounded-lg p-3 bg-slate-50">
                   <div className="text-xs text-slate-500 uppercase">Site</div>
-                  <div className="font-medium text-slate-900">
-                    {preview.site.name}
-                    {preview.site.will_be_created && (
-                      <span className="text-amber-700 text-xs ml-1">(will be created)</span>
+                  <div className="font-medium text-slate-900 flex flex-wrap items-center gap-2">
+                    <span>
+                      {preview.site.name}
+                      {preview.site.will_be_created && (
+                        <span className="text-amber-700 text-xs ml-1">(will be created)</span>
+                      )}
+                    </span>
+                    {preview.site.use_site_template === false && (
+                      <span className="text-xs font-medium px-2 py-0.5 rounded bg-slate-200 text-slate-700">
+                        Template: OFF
+                      </span>
                     )}
                   </div>
                   <div className="text-slate-600 text-xs">{preview.site.domain}</div>

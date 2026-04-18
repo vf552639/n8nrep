@@ -33,6 +33,7 @@ export interface SiteProjectCreatePayload {
     clustering_cost?: number;
   };
   legal_template_map?: Record<string, string>;
+  use_site_template?: boolean;
 }
 
 export interface ClusterKeywordsResult {

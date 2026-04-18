@@ -44,6 +44,13 @@ class SiteProject(Base):
         nullable=True,
         comment="Mapping page_type -> legal_page_template_id (UUID string)",
     )
+    use_site_template = Column(
+        Boolean,
+        default=True,
+        server_default="true",
+        nullable=False,
+        comment="Use site HTML template wrapper for generated pages",
+    )
     created_at = Column(DateTime, default=datetime.utcnow)
 
     blueprint = relationship("SiteBlueprint", back_populates="projects")

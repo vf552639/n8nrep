@@ -9,6 +9,7 @@ from app.models.site import Site
 from app.models.author import Author
 from app.models.prompt import Prompt
 from app.models.blueprint import BlueprintPage
+from app.models.project import SiteProject
 from app.services.serp import fetch_serp_data
 from app.services.scraper import scrape_urls
 from app.services.llm import generate_text
@@ -902,10 +903,26 @@ def setup_template_vars(ctx: PipelineContext):
         if cur is None or (isinstance(cur, str) and not str(cur).strip()):
             ctx.template_vars[var_key] = str(raw_res)
 
-    # Fetch HTML template reference for LLM injection
-    site_template_html, site_template_name = get_template_for_reference(ctx.db, str(ctx.task.target_site_id))
-    ctx.template_vars["site_template_html"] = site_template_html or ""
-    ctx.template_vars["site_template_name"] = site_template_name or ""
+    # Fetch HTML template reference for LLM injection (optional per-project)
+    use_template = True
+    if ctx.task.project_id:
+        project = (
+            ctx.db.query(SiteProject)
+            .filter(SiteProject.id == ctx.task.project_id)
+            .first()
+        )
+        if project and not getattr(project, "use_site_template", True):
+            use_template = False
+
+    if use_template:
+        site_template_html, site_template_name = get_template_for_reference(
+            ctx.db, str(ctx.task.target_site_id)
+        )
+        ctx.template_vars["site_template_html"] = site_template_html or ""
+        ctx.template_vars["site_template_name"] = site_template_name or ""
+    else:
+        ctx.template_vars["site_template_html"] = ""
+        ctx.template_vars["site_template_name"] = ""
 
     inject_legal_template_vars(ctx)
 
@@ -2457,7 +2474,14 @@ def run_pipeline(db: Session, task_id: str, auto_mode: bool = False):
                 )
 
             word_count = count_content_words(structured_html)
-            full_page = generate_full_page(db, str(ctx.task.target_site_id), structured_html, title, description)
+            full_page = generate_full_page(
+                db,
+                str(ctx.task.target_site_id),
+                structured_html,
+                title,
+                description,
+                project_id=str(ctx.task.project_id) if ctx.task.project_id else None,
+            )
 
             # Process fact_check results
             fact_check_status_val = ""

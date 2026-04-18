@@ -233,6 +233,7 @@ class SiteProjectCreate(BaseModel):
     serp_config: Optional[Dict[str, Any]] = None
     project_keywords: Optional[Dict[str, Any]] = None
     legal_template_map: Optional[Dict[str, str]] = None
+    use_site_template: bool = True
 
     @field_validator("country")
     @classmethod
@@ -257,6 +258,7 @@ class ProjectPreviewRequest(BaseModel):
     language: str
     author_id: Optional[int] = None
     serp_config: Optional[Dict[str, Any]] = None
+    use_site_template: bool = True
 
     @field_validator("country")
     @classmethod
@@ -276,6 +278,7 @@ class SiteProjectCloneBody(BaseModel):
     language: Optional[str] = None
     author_id: Optional[int] = None
     legal_template_map: Optional[Dict[str, str]] = None
+    use_site_template: Optional[bool] = None
 
     @field_validator("country")
     @classmethod
@@ -355,6 +358,7 @@ def get_projects(
             "failed_tasks": failed_n,
             "total_cost": total_cost,
             "serp_config": getattr(p, "serp_config", None) or {},
+            "use_site_template": bool(getattr(p, "use_site_template", True)),
         })
     return out
 
@@ -380,18 +384,24 @@ def preview_project(body: ProjectPreviewRequest, db: Session = Depends(get_db)):
             f"Site '{body.target_site}' not found — will be created automatically"
         )
 
-    has_template = False
+    has_template_site = False
     if site is not None and site.template_id:
         tpl = (
             db.query(Template)
             .filter(Template.id == site.template_id, Template.is_active == True)  # noqa: E712
             .first()
         )
-        has_template = tpl is not None
-        if not has_template:
+        has_template_site = tpl is not None
+        if not has_template_site:
             warnings.append("Site template_id is set but template is missing or inactive.")
     elif site is not None:
         warnings.append("Site has no HTML template. Articles will be generated without site wrapper.")
+
+    has_template = bool(has_template_site and body.use_site_template)
+    if has_template_site and not body.use_site_template:
+        warnings.append(
+            "Site template disabled for this project. Articles will be raw HTML."
+        )
 
     author_source = "none"
     author_id: Optional[int] = None
@@ -491,6 +501,7 @@ def preview_project(body: ProjectPreviewRequest, db: Session = Depends(get_db)):
             "name": site_name,
             "domain": site_domain,
             "has_template": has_template if site is not None else False,
+            "use_site_template": bool(body.use_site_template),
             "will_be_created": site_will_create,
         },
         "author": {
@@ -619,6 +630,7 @@ def create_project(project_in: SiteProjectCreate, db: Session = Depends(get_db))
         serp_config=serp_normalized or {},
         project_keywords=pk_val,
         legal_template_map=ltm_norm,
+        use_site_template=bool(project_in.use_site_template),
     )
     db.add(new_project)
     db.commit()
@@ -826,6 +838,7 @@ def get_project_details(id: str, db: Session = Depends(get_db)):
         "legal_template_map": project.legal_template_map
         if isinstance(getattr(project, "legal_template_map", None), dict)
         else {},
+        "use_site_template": bool(getattr(project, "use_site_template", True)),
         **extras,
         "tasks": [
             {
@@ -893,6 +906,12 @@ def clone_project(id: str, body: SiteProjectCloneBody, db: Session = Depends(get
     if body.legal_template_map is not None:
         legal_map = _validate_legal_template_map(db, body.legal_template_map)
 
+    use_site_template = (
+        bool(body.use_site_template)
+        if body.use_site_template is not None
+        else bool(getattr(src, "use_site_template", True))
+    )
+
     dup = (
         db.query(SiteProject)
         .filter(
@@ -938,6 +957,7 @@ def clone_project(id: str, body: SiteProjectCloneBody, db: Session = Depends(get
         serp_config=getattr(src, "serp_config", None) or {},
         project_keywords=getattr(src, "project_keywords", None),
         legal_template_map=legal_map if isinstance(legal_map, dict) else None,
+        use_site_template=use_site_template,
     )
     db.add(new_p)
     db.commit()
