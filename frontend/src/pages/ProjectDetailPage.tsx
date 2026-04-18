@@ -372,7 +372,7 @@ export default function ProjectDetailPage() {
                   "Delete this project and all its tasks? This cannot be undone."
                 )
               ) {
-                deleteMutation.mutate();
+                deleteMutation.mutate({});
               }
             }}
             disabled={deleteMutation.isPending}
