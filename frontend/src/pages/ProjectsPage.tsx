@@ -8,6 +8,7 @@ import {
   type SiteProjectCreatePayload,
 } from "@/api/projects";
 import { formatApiErrorDetail } from "@/lib/apiErrorMessage";
+import { languageEquals, normalizeLanguageDisplay } from "@/lib/languageDisplay";
 import { sitesApi } from "@/api/sites";
 import { blueprintsApi } from "@/api/blueprints";
 import { Author } from "@/types/author";
@@ -355,10 +356,19 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const { data: sites } = useQuery({
     queryKey: ["sites"],
     queryFn: async () => sitesApi.getAll(),
+    refetchOnMount: "always",
   });
 
-  const selectedSite = (sites || []).find((s: Site) => s.id === formData.site_id);
-  const siteHasTemplate = Boolean(selectedSite?.template_id);
+  const { data: selectedSiteDetail } = useQuery({
+    queryKey: ["sites", formData.site_id],
+    queryFn: () => sitesApi.getOne(formData.site_id!),
+    enabled: Boolean(formData.site_id),
+  });
+
+  const selectedSite =
+    selectedSiteDetail ?? (sites || []).find((s: Site) => s.id === formData.site_id);
+  const siteHasTemplate =
+    selectedSite?.has_template ?? Boolean(selectedSite?.template_id);
 
   useEffect(() => {
     setPreview(null);
@@ -377,15 +387,19 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const languages = Array.from(
     new Set(
       [
-        ...(authors || []).map((a: Author) => a.language),
-        ...(selectedSite?.language ? [selectedSite.language] : []),
-        ...(formData.language ? [formData.language] : []),
+        ...(authors || []).map((a: Author) => normalizeLanguageDisplay(String(a.language || ""))),
+        ...(selectedSite?.language ? [normalizeLanguageDisplay(selectedSite.language)] : []),
+        ...(formData.language ? [normalizeLanguageDisplay(formData.language)] : []),
       ].filter(Boolean)
     )
   ).sort();
 
   const filteredAuthors = (authors || []).filter(
-    (a: Author) => a.country === formData.country && a.language === formData.language
+    (a: Author) =>
+      String(a.country || "")
+        .toUpperCase()
+        .trim() === String(formData.country || "").toUpperCase().trim() &&
+      languageEquals(a.language, formData.language)
   );
 
   const { data: blueprints } = useQuery({

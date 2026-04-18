@@ -30,6 +30,7 @@ def test_site_out_includes_template_id_and_name_when_linked():
 
     assert out["template_id"] == str(tpl_id)
     assert out["template_name"] == "Main layout"
+    assert out["has_template"] is True
     assert out["legal_info"] == {"company_name": "ACME"}
 
 
@@ -49,4 +50,5 @@ def test_site_out_null_template_when_no_template_id():
 
     assert out["template_id"] is None
     assert out["template_name"] is None
+    assert out["has_template"] is False
     assert out["legal_info"] == {}

@@ -11,6 +11,7 @@ import QueueControls from "@/components/tasks/QueueControls";
 import { sitesApi } from "@/api/sites";
 import type { Task, TaskCreate, SerpConfig } from "@/types/task";
 import { COUNTRY_CODES, countryLabel } from "@/constants/countries";
+import { languageEquals, normalizeLanguageDisplay } from "@/lib/languageDisplay";
 
 const PAGE_SIZE = 50;
 
@@ -413,12 +414,19 @@ function CreateTaskModal({ onClose }: { onClose: () => void }) {
     )
   ).sort();
   const languages = Array.from(
-    new Set((authors || []).map((a: { language: string }) => a.language).filter(Boolean))
+    new Set(
+      (authors || []).map((a: { language: string }) =>
+        normalizeLanguageDisplay(String(a.language || ""))
+      ).filter(Boolean)
+    )
   ).sort();
 
   const filteredAuthors = (authors || []).filter(
     (a: { country: string; language: string }) =>
-      a.country === formData.country && a.language === formData.language
+      String(a.country || "")
+        .toUpperCase()
+        .trim() === String(formData.country || "").toUpperCase().trim() &&
+      languageEquals(a.language, formData.language)
   );
 
   const mutation = useMutation({

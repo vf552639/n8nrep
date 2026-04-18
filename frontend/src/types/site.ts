@@ -7,6 +7,8 @@ export interface Site {
   is_active: boolean;
   template_id?: string | null;
   template_name?: string | null;
+  /** True when site.template_id is set (same as Boolean(template_id); explicit for UI). */
+  has_template?: boolean;
   legal_info?: Record<string, string>;
   niche?: string;
 }

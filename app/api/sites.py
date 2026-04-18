@@ -9,6 +9,7 @@ from app.models.site import Site
 from app.models.task import Task
 from app.models.project import SiteProject
 from app.models.template import Template
+from app.utils.language_normalize import normalize_language
 
 router = APIRouter()
 
@@ -30,6 +31,14 @@ class SiteCreate(BaseModel):
             raise ValueError("Country must be a 2-letter ISO code (e.g. DE, FR, US)")
         return v
 
+    @field_validator("language")
+    @classmethod
+    def normalize_language_create(cls, v: str) -> str:
+        out = normalize_language(v) or ""
+        if not out:
+            raise ValueError("Language is required")
+        return out
+
 
 class SiteUpdate(BaseModel):
     name: Optional[str] = None
@@ -50,6 +59,14 @@ class SiteUpdate(BaseModel):
             raise ValueError("Country must be a 2-letter ISO code (e.g. DE, FR, US)")
         return v
 
+    @field_validator("language")
+    @classmethod
+    def normalize_language_update(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        out = normalize_language(v)
+        return out if out else None
+
 
 def _site_out(s: Site, db: Session) -> dict[str, Any]:
     tpl_name = None
@@ -66,6 +83,7 @@ def _site_out(s: Site, db: Session) -> dict[str, Any]:
         "is_active": s.is_active,
         "template_id": str(s.template_id) if s.template_id else None,
         "template_name": tpl_name,
+        "has_template": bool(s.template_id),
         "legal_info": s.legal_info if isinstance(s.legal_info, dict) else {},
     }
 

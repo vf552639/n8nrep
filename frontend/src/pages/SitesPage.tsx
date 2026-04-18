@@ -7,6 +7,7 @@ import { templatesApi } from "@/api/templates";
 import { SiteCreateInput } from "@/types/site";
 import { ReactTable } from "@/components/common/ReactTable";
 import { Plus, Globe, X, Trash2 } from "lucide-react";
+import { normalizeLanguageDisplay } from "@/lib/languageDisplay";
 
 export default function SitesPage() {
   const navigate = useNavigate();
@@ -162,7 +163,11 @@ function CreateSiteModal({ onClose }: { onClose: () => void }) {
     new Set((authors || []).map((a: { country: string }) => a.country).filter(Boolean))
   ).sort();
   const languages = Array.from(
-    new Set((authors || []).map((a: { language: string }) => a.language).filter(Boolean))
+    new Set(
+      (authors || []).map((a: { language: string }) =>
+        normalizeLanguageDisplay(String(a.language || ""))
+      ).filter(Boolean)
+    )
   ).sort();
 
   const [formData, setFormData] = useState({
