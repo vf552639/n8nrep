@@ -1,6 +1,14 @@
 # Environments
 .env
 .venv
+
+# Runtime / generated artifacts
+celerybeat-schedule
+data/exports/
+.claude/worktrees/
+.ruff_cache/
+.pytest_cache/
+
 env/
 venv/
 ENV/
