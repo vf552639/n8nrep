@@ -64,15 +64,6 @@ class TaskCreate(BaseModel):
             raise ValueError("Country must be a 2-letter ISO code (e.g. DE, FR, US)")
         return v
 
-class TaskResponse(BaseModel):
-    id: str
-    main_keyword: str
-    status: str
-    created_at: str
-
-    class Config:
-        from_attributes = True
-
 
 class FetchUrlMetaRequest(BaseModel):
     url: str

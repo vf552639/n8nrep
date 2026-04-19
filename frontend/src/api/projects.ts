@@ -6,11 +6,11 @@ import {
   ProjectTaskExpanded as ProjectTask,
 } from "@/types/project";
 
-/** Matches backend `SiteProjectCreate` — use `target_site` (site UUID or domain/name). */
+/** Matches backend `SiteProjectCreate` — use `target_site` (site UUID or domain/name); omit for markup-only. */
 export interface SiteProjectCreatePayload {
   name: string;
   blueprint_id: string;
-  target_site: string;
+  target_site?: string;
   seed_keyword: string;
   seed_is_brand?: boolean;
   country: string;

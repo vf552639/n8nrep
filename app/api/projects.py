@@ -185,6 +185,25 @@ def _resolve_site(db: Session, target_site: str, country: str, language: str) ->
     return site
 
 
+MARKUP_ONLY_SITE_KEY = "__markup_only__"
+
+
+def _resolve_site_or_markup_only(
+    db: Session,
+    target_site: Optional[str],
+    country: str,
+    language: str,
+    use_site_template: bool,
+) -> Tuple[Site, bool]:
+    """Resolve site; empty target_site uses a reserved placeholder and disables site HTML wrapper."""
+    ts = (target_site or "").strip()
+    if ts:
+        site = _resolve_site(db, ts, country, language)
+        return site, bool(use_site_template)
+    site = _resolve_site(db, MARKUP_ONLY_SITE_KEY, country, language)
+    return site, False
+
+
 def _ensure_worker_available() -> None:
     try:
         inspect = celery_app.control.inspect(timeout=3)
@@ -238,7 +257,7 @@ class SiteProjectCreate(BaseModel):
     blueprint_id: str
     seed_keyword: str
     seed_is_brand: bool = False
-    target_site: str  # Domain or name
+    target_site: Optional[str] = None  # Domain, name, UUID; omit for markup-only (placeholder site)
     country: str
     language: str
     author_id: Optional[int] = None
@@ -246,6 +265,14 @@ class SiteProjectCreate(BaseModel):
     project_keywords: Optional[Dict[str, Any]] = None
     legal_template_map: Optional[Dict[str, str]] = None
     use_site_template: bool = True
+
+    @field_validator("target_site", mode="before")
+    @classmethod
+    def normalize_target_site_create(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s if s else None
 
     @field_validator("country")
     @classmethod
@@ -265,12 +292,20 @@ class ProjectPreviewRequest(BaseModel):
     blueprint_id: str
     seed_keyword: str
     seed_is_brand: bool = False
-    target_site: str
+    target_site: Optional[str] = None
     country: str
     language: str
     author_id: Optional[int] = None
     serp_config: Optional[Dict[str, Any]] = None
     use_site_template: bool = True
+
+    @field_validator("target_site", mode="before")
+    @classmethod
+    def normalize_target_site_preview(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s if s else None
 
     @field_validator("country")
     @classmethod
@@ -291,6 +326,14 @@ class SiteProjectCloneBody(BaseModel):
     author_id: Optional[int] = None
     legal_template_map: Optional[Dict[str, str]] = None
     use_site_template: Optional[bool] = None
+
+    @field_validator("target_site", mode="before")
+    @classmethod
+    def normalize_target_site_clone(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s if s else None
 
     @field_validator("country")
     @classmethod
@@ -394,13 +437,21 @@ def preview_project(body: ProjectPreviewRequest, db: Session = Depends(get_db)):
         .all()
     )
 
-    site, site_will_create, site_name, site_domain = _resolve_site_readonly(db, body.target_site)
-    warnings: List[str] = []
-
-    if site is None:
-        warnings.append(
-            f"Site '{body.target_site}' not found — will be created automatically"
+    ts = (body.target_site or "").strip()
+    if not ts:
+        site, site_will_create, site_name, site_domain = _resolve_site_readonly(
+            db, MARKUP_ONLY_SITE_KEY
         )
+        effective_use_site_template = False
+        warnings.append(
+            "Markup-only mode: no target site — using reserved placeholder site; "
+            "articles will be raw HTML without site wrapper."
+        )
+    else:
+        site, site_will_create, site_name, site_domain = _resolve_site_readonly(db, ts)
+        effective_use_site_template = bool(body.use_site_template)
+        if site is None:
+            warnings.append(f"Site '{ts}' not found — will be created automatically")
 
     has_template_site = False
     if site is not None and site.template_id:
@@ -415,8 +466,8 @@ def preview_project(body: ProjectPreviewRequest, db: Session = Depends(get_db)):
     elif site is not None:
         warnings.append("Site has no HTML template. Articles will be generated without site wrapper.")
 
-    has_template = bool(has_template_site and body.use_site_template)
-    if has_template_site and not body.use_site_template:
+    has_template = bool(has_template_site and effective_use_site_template)
+    if has_template_site and not effective_use_site_template:
         warnings.append(
             "Site template disabled for this project. Articles will be raw HTML."
         )
@@ -519,7 +570,7 @@ def preview_project(body: ProjectPreviewRequest, db: Session = Depends(get_db)):
             "name": site_name,
             "domain": site_domain,
             "has_template": has_template if site is not None else False,
-            "use_site_template": bool(body.use_site_template),
+            "use_site_template": bool(effective_use_site_template),
             "will_be_created": site_will_create,
         },
         "author": {
@@ -582,7 +633,13 @@ def create_project(project_in: SiteProjectCreate, db: Session = Depends(get_db))
     if not blueprint:
         raise HTTPException(status_code=404, detail="Blueprint not found")
 
-    site = _resolve_site(db, project_in.target_site, project_in.country, project_in.language)
+    site, effective_use_site_template = _resolve_site_or_markup_only(
+        db,
+        project_in.target_site,
+        project_in.country,
+        project_in.language,
+        project_in.use_site_template,
+    )
 
     existing = (
         db.query(SiteProject)
@@ -648,7 +705,7 @@ def create_project(project_in: SiteProjectCreate, db: Session = Depends(get_db))
         serp_config=serp_normalized or {},
         project_keywords=pk_val,
         legal_template_map=ltm_norm,
-        use_site_template=bool(project_in.use_site_template),
+        use_site_template=bool(effective_use_site_template),
     )
     db.add(new_project)
     db.commit()
@@ -939,11 +996,23 @@ def clone_project(id: str, body: SiteProjectCloneBody, db: Session = Depends(get
     language = body.language if body.language is not None else src.language
 
     if body.target_site is not None:
-        site = _resolve_site(db, body.target_site, country, language)
+        default_ust = (
+            bool(body.use_site_template)
+            if body.use_site_template is not None
+            else bool(getattr(src, "use_site_template", True))
+        )
+        site, use_site_template = _resolve_site_or_markup_only(
+            db, body.target_site, country, language, default_ust
+        )
     else:
         site = db.query(Site).filter(Site.id == src.site_id).first()
         if not site:
             raise HTTPException(status_code=404, detail="Site not found for project")
+        use_site_template = (
+            bool(body.use_site_template)
+            if body.use_site_template is not None
+            else bool(getattr(src, "use_site_template", True))
+        )
 
     author_id = body.author_id if body.author_id is not None else src.author_id
     if author_id is None:
@@ -957,12 +1026,6 @@ def clone_project(id: str, body: SiteProjectCloneBody, db: Session = Depends(get
     legal_map = getattr(src, "legal_template_map", None)
     if body.legal_template_map is not None:
         legal_map = _validate_legal_template_map(db, body.legal_template_map)
-
-    use_site_template = (
-        bool(body.use_site_template)
-        if body.use_site_template is not None
-        else bool(getattr(src, "use_site_template", True))
-    )
 
     dup = (
         db.query(SiteProject)

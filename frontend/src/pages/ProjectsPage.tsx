@@ -551,6 +551,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
     additional_keywords_raw: "",
     legal_template_map: {} as Record<string, string>,
     use_site_template: true,
+    markup_only: false,
   });
   const [serpAdvancedOpen, setSerpAdvancedOpen] = useState(false);
   const [preview, setPreview] = useState<ProjectPreview | null>(null);
@@ -589,7 +590,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     setPreview(null);
-  }, [formData.use_site_template]);
+  }, [formData.use_site_template, formData.markup_only]);
 
   useEffect(() => {
     if (!formData.site_id || siteHasTemplate) return;
@@ -684,14 +685,14 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
           : undefined;
       return projectsApi.preview({
         blueprint_id: formData.blueprint_id,
-        target_site: formData.site_id,
+        ...(formData.markup_only ? {} : { target_site: formData.site_id }),
         seed_keyword: formData.seed_keyword,
         seed_is_brand: formData.seed_is_brand,
         country: formData.country,
         language: formData.language,
         ...(authorId != null && !Number.isNaN(authorId) ? { author_id: authorId } : {}),
         serp_config: buildSerpConfig(),
-        use_site_template: formData.use_site_template,
+        use_site_template: formData.markup_only ? false : formData.use_site_template,
       });
     },
     onSuccess: (data) => {
@@ -736,10 +737,10 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
   const canPreview =
     Boolean(formData.blueprint_id) &&
-    Boolean(formData.site_id) &&
     Boolean(formData.seed_keyword) &&
     Boolean(formData.country) &&
-    Boolean(formData.language);
+    Boolean(formData.language) &&
+    (formData.markup_only || Boolean(formData.site_id));
 
   const mutation = useMutation({
     mutationFn: projectsApi.create,
@@ -766,16 +767,19 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const needSite = !formData.markup_only;
     if (
       !formData.name ||
       !formData.blueprint_id ||
-      !formData.site_id ||
+      (needSite && !formData.site_id) ||
       !formData.seed_keyword ||
       !formData.country ||
       !formData.language
     ) {
       toast.error(
-        "Please fill in all required fields (Name, Blueprint, Site, Seed Keyword, Country, Language)"
+        needSite
+          ? "Please fill in all required fields (Name, Blueprint, Site, Seed Keyword, Country, Language)"
+          : "Please fill in all required fields (Name, Blueprint, Seed Keyword, Country, Language)"
       );
       return;
     }
@@ -809,7 +813,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
     mutation.mutate({
       name: formData.name,
       blueprint_id: formData.blueprint_id,
-      target_site: formData.site_id,
+      ...(formData.markup_only ? {} : { target_site: formData.site_id }),
       seed_keyword: formData.seed_keyword,
       seed_is_brand: formData.seed_is_brand,
       country: formData.country,
@@ -818,7 +822,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
       ...(serp ? { serp_config: serp } : {}),
       ...(project_keywords ? { project_keywords } : {}),
       ...(hasLegal ? { legal_template_map } : {}),
-      use_site_template: formData.use_site_template,
+      use_site_template: formData.markup_only ? false : formData.use_site_template,
     });
   };
 
@@ -883,6 +887,33 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 ))}
               </select>
             </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-3">
+              <label className="flex items-start gap-2 text-sm text-slate-800 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 shrink-0"
+                  checked={formData.markup_only}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    setFormData((prev) => ({
+                      ...prev,
+                      markup_only: on,
+                      ...(on ? { site_id: "", use_site_template: false } : {}),
+                    }));
+                  }}
+                />
+                <span>
+                  <span className="font-medium">
+                    Markup only (skip target site — output without site HTML wrapper)
+                  </span>
+                  <span className="block text-xs text-slate-500 font-normal mt-1">
+                    Uses a reserved placeholder site; set Country and Language below. No site head,
+                    header, or footer wrapper.
+                  </span>
+                </span>
+              </label>
+            </div>
+            {!formData.markup_only && (
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Target Site *</label>
               <select
@@ -901,7 +932,8 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 ))}
               </select>
             </div>
-            {formData.site_id && (
+            )}
+            {!formData.markup_only && formData.site_id && (
               <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-3 space-y-1">
                 <label
                   className={`flex items-start gap-2 text-sm text-slate-800 ${
@@ -1093,7 +1125,9 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
               </select>
               {(!formData.country || !formData.language) && (
                 <p className="mt-1 text-xs text-slate-500">
-                  Select Country and Language first (or use Target Site to prefill)
+                  {formData.markup_only
+                    ? "Select Country and Language first."
+                    : "Select Country and Language first (or use Target Site to prefill)."}
                 </p>
               )}
             </div>
