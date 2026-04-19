@@ -2,31 +2,15 @@ from typing import Optional, Any, List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.schemas.template import TemplateCreate, TemplateUpdate
 from app.models.site import Site
 from app.models.template import Template
 
 router = APIRouter()
-
-
-class TemplateCreate(BaseModel):
-    name: str = Field(..., min_length=1, max_length=200)
-    html_template: str = Field(..., min_length=1)
-    description: Optional[str] = None
-    preview_screenshot: Optional[str] = Field(None, max_length=500)
-    is_active: bool = True
-
-
-class TemplateUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=1, max_length=200)
-    html_template: Optional[str] = None
-    description: Optional[str] = None
-    preview_screenshot: Optional[str] = Field(None, max_length=500)
-    is_active: Optional[bool] = None
 
 
 def _sites_count(db: Session, template_id: UUID) -> int:

@@ -2,15 +2,14 @@ import logging
 from typing import Optional, Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.schemas.site import SiteCreate, SiteUpdate
 from app.models.site import Site
 from app.models.task import Task
 from app.models.project import SiteProject
 from app.models.template import Template
-from app.utils.language_normalize import normalize_language
 from app.workers.celery_app import celery_app
 
 router = APIRouter()
@@ -24,60 +23,6 @@ def _revoke_site_project_celery(celery_task_id: Optional[str]) -> None:
         celery_app.control.revoke(str(celery_task_id), terminate=True)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Celery revoke failed for task_id=%s: %s", celery_task_id, exc)
-
-
-class SiteCreate(BaseModel):
-    name: str
-    domain: str
-    country: str
-    language: str
-    is_active: bool = True
-    template_id: Optional[str] = None
-    legal_info: Optional[dict] = None
-
-    @field_validator("country")
-    @classmethod
-    def validate_country(cls, v: str) -> str:
-        v = (v or "").strip().upper()
-        if len(v) != 2 or not v.isalpha():
-            raise ValueError("Country must be a 2-letter ISO code (e.g. DE, FR, US)")
-        return v
-
-    @field_validator("language")
-    @classmethod
-    def normalize_language_create(cls, v: str) -> str:
-        out = normalize_language(v) or ""
-        if not out:
-            raise ValueError("Language is required")
-        return out
-
-
-class SiteUpdate(BaseModel):
-    name: Optional[str] = None
-    domain: Optional[str] = None
-    country: Optional[str] = None
-    language: Optional[str] = None
-    is_active: Optional[bool] = None
-    template_id: Optional[str] = None
-    legal_info: Optional[dict] = None
-
-    @field_validator("country")
-    @classmethod
-    def validate_country_optional(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return v
-        v = v.strip().upper()
-        if len(v) != 2 or not v.isalpha():
-            raise ValueError("Country must be a 2-letter ISO code (e.g. DE, FR, US)")
-        return v
-
-    @field_validator("language")
-    @classmethod
-    def normalize_language_update(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return v
-        out = normalize_language(v)
-        return out if out else None
 
 
 def _site_out(s: Site, db: Session) -> dict[str, Any]:

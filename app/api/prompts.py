@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from app.database import get_db
+from app.schemas.prompt import PromptCreate, PromptTest, PromptTestContext, PromptUpdate
 from app.models.prompt import Prompt
 from app.services.llm import generate_text
 from app.services.pipeline import apply_template_vars
@@ -21,62 +21,6 @@ def _sanitize(text: Optional[str]) -> str:
         .replace("\ufeff", "")
     )
 
-
-class PromptCreate(BaseModel):
-    agent_name: str
-    system_prompt: str
-    user_prompt: str = ""
-    model: str
-    max_tokens: Optional[int] = 2000
-    temperature: Optional[float] = 0.7
-    frequency_penalty: Optional[float] = 0.0
-    presence_penalty: Optional[float] = 0.0
-    top_p: Optional[float] = 1.0
-    skip_in_pipeline: bool = False
-
-
-class PromptUpdate(BaseModel):
-    """In-place update of the existing prompt row (no new version)."""
-
-    system_prompt: str
-    user_prompt: str = ""
-    model: str
-    max_tokens: Optional[int] = None
-    max_tokens_enabled: bool = False
-    temperature: Optional[float] = 0.7
-    temperature_enabled: bool = False
-    frequency_penalty: Optional[float] = 0.0
-    frequency_penalty_enabled: bool = False
-    presence_penalty: Optional[float] = 0.0
-    presence_penalty_enabled: bool = False
-    top_p: Optional[float] = 1.0
-    top_p_enabled: bool = False
-    skip_in_pipeline: bool = False
-
-class PromptTest(BaseModel):
-    system_prompt: str
-    user_prompt: str
-    test_data: str
-    model: str
-    max_tokens: Optional[int] = None
-    temperature: Optional[float] = 0.7
-    frequency_penalty: Optional[float] = None
-    presence_penalty: Optional[float] = None
-    top_p: Optional[float] = None
-
-class PromptTestContext(BaseModel):
-    context: Dict[str, Any]
-    model: Optional[str] = None
-    max_tokens: Optional[int] = None
-    max_tokens_enabled: Optional[bool] = None
-    temperature: Optional[float] = None
-    temperature_enabled: Optional[bool] = None
-    frequency_penalty: Optional[float] = None
-    frequency_penalty_enabled: Optional[bool] = None
-    presence_penalty: Optional[float] = None
-    presence_penalty_enabled: Optional[bool] = None
-    top_p: Optional[float] = None
-    top_p_enabled: Optional[bool] = None
 
 @router.get("/")
 def get_prompts(active_only: bool = Query(True), db: Session = Depends(get_db)):

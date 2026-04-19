@@ -1,23 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse, StreamingResponse
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from typing import Optional
 import io
 
 from app.database import get_db
+from app.schemas.article import ArticleUpdate
 from app.models.article import GeneratedArticle
 from app.models.task import Task
 from app.services.word_counter import count_content_words
 
 router = APIRouter()
 
-
-class ArticleUpdate(BaseModel):
-    html_content: Optional[str] = None
-    title: Optional[str] = None
-    description: Optional[str] = None
 
 @router.get("/")
 def get_articles(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):

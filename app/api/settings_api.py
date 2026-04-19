@@ -1,31 +1,15 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
 from typing import Dict, Any
 import os
 import dotenv
+
+from app.schemas.settings import SettingsUpdate
 
 router = APIRouter()
 
 def get_env_path():
     # Simple relative path to .env in project root
     return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env")
-
-class SettingsUpdate(BaseModel):
-    OPENROUTER_API_KEY: str = None
-    DATAFORSEO_LOGIN: str = None
-    DATAFORSEO_PASSWORD: str = None
-    SERPAPI_KEY: str = None
-    SERPER_API_KEY: str = None
-    TELEGRAM_BOT_TOKEN: str = None
-    TELEGRAM_CHAT_ID: str = None
-    CELERY_CONCURRENCY: str = None
-    EXCLUDE_WORDS: str = None
-    EXCLUDED_DOMAINS: str = None
-    SEQUENTIAL_MODE: str = None
-    MIDJOURNEY_API_KEY: str = None
-    IMGBB_API_KEY: str = None
-    IMAGE_MODEL_DEFAULT: str = None
-    IMAGE_GEN_ENABLED: str = None
 
 @router.get("/")
 def get_settings() -> Dict[str, Any]:

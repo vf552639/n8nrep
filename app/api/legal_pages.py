@@ -1,34 +1,14 @@
 from typing import Optional, Any, List, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.schemas.legal_page import LegalPageCreate, LegalPageUpdate
 from app.models.blueprint import BlueprintPage
 from app.models.template import LegalPageTemplate, LEGAL_PAGE_TYPES
 
 router = APIRouter()
-
-
-class LegalPageCreate(BaseModel):
-    name: str = Field(..., min_length=1, max_length=200)
-    page_type: str = Field(..., min_length=1, max_length=50)
-    content: str = Field(..., min_length=1)
-    content_format: str = Field(default="text", pattern="^(text|html)$")
-    variables: dict = Field(default_factory=dict)
-    notes: Optional[str] = None
-    is_active: bool = True
-
-
-class LegalPageUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=1, max_length=200)
-    page_type: Optional[str] = Field(None, min_length=1, max_length=50)
-    content: Optional[str] = None
-    content_format: Optional[str] = Field(None, pattern="^(text|html)$")
-    variables: Optional[dict] = None
-    notes: Optional[str] = None
-    is_active: Optional[bool] = None
 
 
 def _validate_page_type(pt: str) -> None:

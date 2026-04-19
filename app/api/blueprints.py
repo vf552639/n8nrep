@@ -2,10 +2,10 @@ import uuid
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.schemas.blueprint import BlueprintPageCreate, SiteBlueprintCreate
 from app.models.blueprint import SiteBlueprint, BlueprintPage
 from app.models.template import LegalPageTemplate, LEGAL_PAGE_TYPES
 from app.services.pipeline_presets import (
@@ -15,40 +15,6 @@ from app.services.pipeline_presets import (
 )
 
 router = APIRouter()
-
-
-class SiteBlueprintCreate(BaseModel):
-    name: str
-    slug: str
-    description: Optional[str] = None
-    is_active: bool = True
-
-
-class BlueprintPageCreate(BaseModel):
-    page_slug: str
-    page_title: str
-    page_type: str = "article"
-    keyword_template: str
-    keyword_template_brand: Optional[str] = None
-    filename: str
-    sort_order: int = 0
-    nav_label: Optional[str] = None
-    show_in_nav: bool = True
-    show_in_footer: bool = True
-    use_serp: bool = True
-    pipeline_preset: str = "full"
-    pipeline_steps_custom: Optional[List[str]] = None
-    default_legal_template_id: Optional[str] = None
-
-    @field_validator("pipeline_preset")
-    @classmethod
-    def validate_pipeline_preset(cls, v: str) -> str:
-        s = (v or "full").strip().lower()
-        if s not in VALID_PRESETS:
-            raise ValueError(
-                f"pipeline_preset must be one of {sorted(VALID_PRESETS)}, got {v!r}"
-            )
-        return s
 
 
 def _validate_default_legal_template(

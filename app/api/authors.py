@@ -4,37 +4,12 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from pydantic import BaseModel, field_validator
-
 from app.database import get_db
-from app.utils.language_normalize import normalize_language
+from app.schemas.author import AuthorCreate
 from app.models.author import Author
 from app.models.task import Task
 
 router = APIRouter()
-
-
-class AuthorCreate(BaseModel):
-    author: str
-    country: str
-    language: str
-    bio: Optional[str] = None
-    co_short: Optional[str] = None
-    city: Optional[str] = None
-    imitation: Optional[str] = None
-    year: Optional[str] = None
-    face: Optional[str] = None
-    target_audience: Optional[str] = None
-    rhythms_style: Optional[str] = None
-    exclude_words: Optional[str] = None
-
-    @field_validator("language")
-    @classmethod
-    def normalize_language_field(cls, v: str) -> str:
-        out = normalize_language(v) or ""
-        if not out:
-            raise ValueError("Language is required")
-        return out
 
 
 def _format_year(val) -> str:
