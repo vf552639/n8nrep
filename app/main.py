@@ -31,16 +31,14 @@ from app.api import (
 )
 from app.api.deps import verify_api_key
 from app.config import settings
+from app.logging_config import configure_logging
 
-# Configure file logging
 os.makedirs("logs", exist_ok=True)
-logging.basicConfig(
-    level=logging.INFO,
-    format="[%(asctime)s] %(levelname)s [%(name)s:%(lineno)s] %(message)s",
-    handlers=[
-        logging.FileHandler("logs/app.log", mode="a"),
-        logging.StreamHandler(),
-    ],
+
+configure_logging(
+    json_logs=settings.LOG_JSON,
+    level=settings.LOG_LEVEL,
+    log_file_path="logs/app.log",
 )
 logger = logging.getLogger(__name__)
 

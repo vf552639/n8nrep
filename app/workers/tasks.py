@@ -4,6 +4,7 @@ import traceback
 from datetime import datetime, timedelta
 from typing import List, Optional
 
+import structlog
 from celery.exceptions import SoftTimeLimitExceeded
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -14,7 +15,7 @@ from app.config import settings
 
 
 def _append_project_log(db, project, msg: str, level: str = "info") -> None:
-    logs = list(project.logs or [])
+    logs = list(project.log_events or [])
     logs.append(
         {
             "ts": datetime.utcnow().isoformat() + "Z",
@@ -22,8 +23,8 @@ def _append_project_log(db, project, msg: str, level: str = "info") -> None:
             "level": level,
         }
     )
-    project.logs = logs
-    flag_modified(project, "logs")
+    project.log_events = logs[-500:]
+    flag_modified(project, "log_events")
 
 def _load_failed_pages(project) -> list:
     if not project.error_log:
@@ -84,8 +85,12 @@ def process_generation_task(self, task_id: str):
     """
     db = SessionLocal()
     try:
-        run_pipeline(db, task_id)
-        
+        structlog.contextvars.bind_contextvars(task_id=str(task_id))
+        try:
+            run_pipeline(db, task_id)
+        finally:
+            structlog.contextvars.clear_contextvars()
+
     except SoftTimeLimitExceeded:
         from app.models.task import Task
         task = db.query(Task).filter(Task.id == task_id).first()
@@ -243,7 +248,14 @@ def process_project_page(self, project_id: str, page_index: int):
 
         t0 = time_module.monotonic()
         try:
-            run_pipeline(db, str(project_task.id), auto_mode=True)
+            structlog.contextvars.bind_contextvars(
+                task_id=str(project_task.id),
+                project_id=str(project.id),
+            )
+            try:
+                run_pipeline(db, str(project_task.id), auto_mode=True)
+            finally:
+                structlog.contextvars.clear_contextvars()
         except Exception as pipeline_err:
             db.refresh(project_task)
             if project_task.status not in ("failed", "completed"):

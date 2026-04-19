@@ -7,6 +7,10 @@ class Settings(BaseSettings):
     SUPABASE_URL: str
     SUPABASE_KEY: str
 
+    # Logging
+    LOG_JSON: bool = False
+    LOG_LEVEL: str = "INFO"
+
     # Security
     API_KEY: str = ""
     CORS_ORIGINS: str = "*"
