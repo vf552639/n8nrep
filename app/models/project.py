@@ -27,7 +27,7 @@ class SiteProject(Base):
     started_at = Column(DateTime, nullable=True)
     generation_started_at = Column(DateTime, nullable=True, comment="Actual generation start time")
     completed_at = Column(DateTime, nullable=True)
-    logs = Column(JSONB, nullable=True, default=list)
+    log_events = Column(JSONB, nullable=False, default=list, server_default="[]")
     serp_config = Column(
         JSONB,
         nullable=True,

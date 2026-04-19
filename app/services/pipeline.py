@@ -151,9 +151,9 @@ def add_log(db: Session, task: Task, msg: str, level: str = "info", step: str = 
     if step:
         entry["step"] = step
     
-    current_logs = list(task.logs or [])
+    current_logs = list(task.log_events or [])
     current_logs.append(entry)
-    task.logs = current_logs
+    task.log_events = current_logs[-500:]
     db.commit()
 
 
@@ -276,9 +276,12 @@ def call_agent(ctx: PipelineContext, agent_name: str, context: str, response_for
         
         # Check Critical Vars
         critical = CRITICAL_VARS.get(agent_name, [])
+        allow_empty_critical = CRITICAL_VARS_ALLOW_EMPTY.get(agent_name, frozenset())
         missing_critical = []
         for cv in critical:
-            if cv in all_unresolved or cv in all_empty:
+            if cv in all_unresolved:
+                missing_critical.append(cv)
+            elif cv in all_empty and cv not in allow_empty_critical:
                 missing_critical.append(cv)
                 
         if missing_critical:

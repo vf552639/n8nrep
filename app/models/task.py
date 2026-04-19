@@ -35,7 +35,7 @@ class Task(Base):
     retry_count = Column(Integer, default=0)
     step_results = Column(JSONB, nullable=True, default={})
     serp_config = Column(JSONB, nullable=True, default={})
-    logs = Column(JSONB, nullable=True, default=[])
+    log_events = Column(JSONB, nullable=False, default=list, server_default="[]")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_heartbeat = Column(DateTime, nullable=True)

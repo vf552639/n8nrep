@@ -1,13 +1,12 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from sqlalchemy.sql import func
 from typing import Optional, Any, Dict, List, Tuple
 from collections import defaultdict
-from pydantic import BaseModel, field_validator
 import uuid
 import os
 import csv
@@ -29,6 +28,14 @@ from app.workers.celery_app import celery_app
 from app.workers.tasks import process_site_project, advance_project
 from app.config import settings
 from app.services.pipeline_presets import pipeline_steps_use_serp, resolve_pipeline_steps
+from app.schemas.project import (
+    ClusterKeywordsRequest,
+    DeleteSelectedProjectsRequest,
+    ProjectPreviewRequest,
+    SiteProjectCloneBody,
+    SiteProjectCreate,
+    SiteProjectResponse,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -249,122 +256,10 @@ def _project_detail_extras(
         "avg_seconds_per_page": avg_seconds_per_page,
         "blueprint_page_count": blueprint_page_count,
         "remaining_pages": remaining_pages,
-        "logs": project.logs if isinstance(project.logs, list) else (project.logs or []),
+        "log_events": project.log_events
+        if isinstance(project.log_events, list)
+        else (project.log_events or []),
     }
-
-class SiteProjectCreate(BaseModel):
-    name: str
-    blueprint_id: str
-    seed_keyword: str
-    seed_is_brand: bool = False
-    target_site: Optional[str] = None  # Domain, name, UUID; omit for markup-only (placeholder site)
-    country: str
-    language: str
-    author_id: Optional[int] = None
-    serp_config: Optional[Dict[str, Any]] = None
-    project_keywords: Optional[Dict[str, Any]] = None
-    legal_template_map: Optional[Dict[str, str]] = None
-    use_site_template: bool = True
-
-    @field_validator("target_site", mode="before")
-    @classmethod
-    def normalize_target_site_create(cls, v: Any) -> Optional[str]:
-        if v is None:
-            return None
-        s = str(v).strip()
-        return s if s else None
-
-    @field_validator("country")
-    @classmethod
-    def validate_country(cls, v: str) -> str:
-        v = (v or "").strip().upper()
-        if len(v) != 2 or not v.isalpha():
-            raise ValueError("Country must be a 2-letter ISO code (e.g. DE, FR, US)")
-        return v
-
-
-class ClusterKeywordsRequest(BaseModel):
-    keywords: List[str]
-    blueprint_id: str
-
-
-class ProjectPreviewRequest(BaseModel):
-    blueprint_id: str
-    seed_keyword: str
-    seed_is_brand: bool = False
-    target_site: Optional[str] = None
-    country: str
-    language: str
-    author_id: Optional[int] = None
-    serp_config: Optional[Dict[str, Any]] = None
-    use_site_template: bool = True
-
-    @field_validator("target_site", mode="before")
-    @classmethod
-    def normalize_target_site_preview(cls, v: Any) -> Optional[str]:
-        if v is None:
-            return None
-        s = str(v).strip()
-        return s if s else None
-
-    @field_validator("country")
-    @classmethod
-    def validate_country_preview(cls, v: str) -> str:
-        v = (v or "").strip().upper()
-        if len(v) != 2 or not v.isalpha():
-            raise ValueError("Country must be a 2-letter ISO code (e.g. DE, FR, US)")
-        return v
-
-
-class SiteProjectCloneBody(BaseModel):
-    name: Optional[str] = None
-    seed_keyword: Optional[str] = None
-    seed_is_brand: Optional[bool] = None
-    target_site: Optional[str] = None
-    country: Optional[str] = None
-    language: Optional[str] = None
-    author_id: Optional[int] = None
-    legal_template_map: Optional[Dict[str, str]] = None
-    use_site_template: Optional[bool] = None
-
-    @field_validator("target_site", mode="before")
-    @classmethod
-    def normalize_target_site_clone(cls, v: Any) -> Optional[str]:
-        if v is None:
-            return None
-        s = str(v).strip()
-        return s if s else None
-
-    @field_validator("country")
-    @classmethod
-    def validate_country_clone(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return v
-        v = v.strip().upper()
-        if len(v) != 2 or not v.isalpha():
-            raise ValueError("Country must be a 2-letter ISO code (e.g. DE, FR, US)")
-        return v
-
-
-class DeleteSelectedProjectsRequest(BaseModel):
-    project_ids: List[str]
-    force: bool = False
-
-
-class SiteProjectResponse(BaseModel):
-    id: str
-    name: str
-    blueprint_id: str
-    site_id: str
-    seed_keyword: str
-    seed_is_brand: bool
-    status: str
-    current_page_index: int
-    build_zip_url: Optional[str]
-    created_at: str
-    
-    class Config:
-        from_attributes = True
 
 @router.get("/")
 def get_projects(
@@ -900,6 +795,54 @@ def export_project_docx(id: str, db: Session = Depends(get_db)):
     )
 
 
+@router.get("/{id}/export-html")
+def export_project_html(
+    id: str,
+    mode: str = Query("zip", description="zip (default) or concat"),
+    db: Session = Depends(get_db),
+):
+    project = db.query(SiteProject).filter(SiteProject.id == id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    n_done = (
+        db.query(func.count(Task.id))
+        .filter(Task.project_id == id, Task.status == "completed")
+        .scalar()
+        or 0
+    )
+    if n_done == 0:
+        raise HTTPException(status_code=400, detail="No completed pages to export")
+
+    from app.services.html_export import build_project_html_concat, build_project_html_zip
+
+    safe_name = (
+        "".join(c for c in project.name if c.isalnum() or c in " -_").strip() or "project"
+    )
+    m = (mode or "zip").strip().lower()
+    if m not in ("zip", "concat"):
+        raise HTTPException(status_code=400, detail="mode must be zip or concat")
+
+    try:
+        if m == "zip":
+            data = build_project_html_zip(db, str(project.id))
+            filename = f"{safe_name}.html.zip"
+            return StreamingResponse(
+                iter([data]),
+                media_type="application/zip",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+        text = build_project_html_concat(db, str(project.id))
+        filename = f"{safe_name}.html"
+        return Response(
+            content=text.encode("utf-8"),
+            media_type="text/html; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
 @router.get("/{id}")
 def get_project_details(id: str, db: Session = Depends(get_db)):
     project = db.query(SiteProject).filter(SiteProject.id == id).first()
@@ -1068,7 +1011,7 @@ def clone_project(id: str, body: SiteProjectCloneBody, db: Session = Depends(get
         is_archived=False,
         started_at=None,
         completed_at=None,
-        logs=[],
+        log_events=[],
         serp_config=getattr(src, "serp_config", None) or {},
         project_keywords=getattr(src, "project_keywords", None),
         legal_template_map=legal_map if isinstance(legal_map, dict) else None,
@@ -1238,9 +1181,9 @@ def approve_page(id: str, db: Session = Depends(get_db)):
         )
 
     project.status = "generating"
-    logs = list(project.logs or [])
+    logs = list(project.log_events or [])
     logs.append({"ts": datetime.utcnow().isoformat() + "Z", "msg": "Page approved. Continuing generation.", "level": "info"})
-    project.logs = logs
+    project.log_events = logs[-500:]
     db.commit()
 
     advance_project.delay(str(project.id), True)
