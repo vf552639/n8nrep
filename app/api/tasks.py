@@ -1,16 +1,17 @@
-from typing import List, Optional
-from urllib.parse import urlparse
 import copy
 import csv
 import io
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+import uuid
+from datetime import datetime
+from typing import List, Optional
+from urllib.parse import urlparse
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy import desc
 from sqlalchemy.sql import func
-from pydantic import BaseModel
-import uuid
 
 from app.database import get_db
 from app.models.task import Task
@@ -22,51 +23,19 @@ from app.config import settings
 from app.services.pipeline_constants import ALL_STEPS
 from app.services.serp_cache import invalidate_serp_cache
 from app.services.scraper import fetch_url_meta
-from datetime import datetime
+from app.schemas.task import (
+    ApproveImagesRequest,
+    ApproveSerpUrlsRequest,
+    FetchUrlMetaRequest,
+    ForceStatusRequest,
+    RegenerateImageRequest,
+    RerunStepRequest,
+    StartSelectedRequest,
+    TaskCreate,
+    UpdateStepResultRequest,
+)
 
 router = APIRouter()
-
-from typing import Literal
-from pydantic import field_validator
-
-class SerpConfig(BaseModel):
-    search_engine: Literal["google", "bing", "google+bing"] = "google"
-    depth: Literal[10, 20, 30, 50, 100] = 10
-    device: Literal["mobile", "desktop"] = "mobile"
-    os: Literal["android", "ios", "windows", "macos"] = "android"
-
-    @field_validator("os")
-    @classmethod
-    def validate_os_device_combo(cls, v, info):
-        device = info.data.get("device", "mobile")
-        if device == "mobile" and v not in ("android", "ios"):
-            raise ValueError(f"Mobile device supports only android/ios, got {v}")
-        if device == "desktop" and v not in ("windows", "macos"):
-            raise ValueError(f"Desktop device supports only windows/macos, got {v}")
-        return v
-
-class TaskCreate(BaseModel):
-    main_keyword: str
-    country: str
-    language: str
-    target_site: str
-    author_id: Optional[int] = None
-    additional_keywords: Optional[str] = None
-    priority: int = 0
-    page_type: str = 'article'
-    serp_config: Optional[SerpConfig] = None
-
-    @field_validator("country")
-    @classmethod
-    def validate_country(cls, v: str) -> str:
-        v = (v or "").strip().upper()
-        if len(v) != 2 or not v.isalpha():
-            raise ValueError("Country must be a 2-letter ISO code (e.g. DE, FR, US)")
-        return v
-
-
-class FetchUrlMetaRequest(BaseModel):
-    url: str
 
 
 @router.post("/fetch-url-meta")
@@ -182,11 +151,6 @@ def get_task_steps(task_id: str, db: Session = Depends(get_db)):
         "step_results": task.step_results or {},
         "current_step": next((k for k, v in (task.step_results or {}).items() if isinstance(v, dict) and v.get("status") == "running"), None)
     }
-
-
-class UpdateStepResultRequest(BaseModel):
-    step_name: str
-    result: str
 
 
 @router.put("/{task_id}/step-result")
@@ -420,8 +384,6 @@ def start_all_pending(db: Session = Depends(get_db)):
         "msg": f"Запущена цепочка из {len(pending_tasks)} задач (последовательно)"
     }
 
-class StartSelectedRequest(BaseModel):
-    task_ids: List[str]
 
 @router.post("/start-selected")
 def start_selected_tasks(payload: StartSelectedRequest, db: Session = Depends(get_db)):
@@ -707,8 +669,6 @@ def delete_task(task_id: str, db: Session = Depends(get_db)):
     db.commit()
     return {"msg": "Task deleted"}
 
-class ForceStatusRequest(BaseModel):
-    action: str  # "complete" or "fail"
 
 @router.post("/{task_id}/force-status")
 def force_task_status(task_id: str, payload: ForceStatusRequest, db: Session = Depends(get_db)):
@@ -736,10 +696,6 @@ def force_task_status(task_id: str, payload: ForceStatusRequest, db: Session = D
     else:
         raise HTTPException(status_code=400, detail="Invalid action. Use 'complete' or 'fail'")
 
-class RerunStepRequest(BaseModel):
-    step_name: str
-    feedback: str
-    cascade: bool = True
 
 @router.post("/{task_id}/rerun-step")
 def rerun_task_step(task_id: str, payload: RerunStepRequest, db: Session = Depends(get_db)):
@@ -910,10 +866,6 @@ def get_serp_urls(task_id: str, db: Session = Depends(get_db)):
     }
 
 
-class ApproveSerpUrlsRequest(BaseModel):
-    urls: List[str]
-
-
 def _domain_from_url(url: str) -> str:
     try:
         parsed = urlparse(url.strip())
@@ -1023,11 +975,6 @@ def get_task_images(task_id: str, db: Session = Depends(get_db)):
     }
 
 
-class ApproveImagesRequest(BaseModel):
-    approved_ids: list  # List of image IDs to approve
-    skipped_ids: list = []  # List of image IDs to skip
-
-
 @router.post("/{task_id}/approve-images")
 def approve_images(task_id: str, payload: ApproveImagesRequest, db: Session = Depends(get_db)):
     """Approve/skip images and resume pipeline."""
@@ -1077,11 +1024,6 @@ def approve_images(task_id: str, payload: ApproveImagesRequest, db: Session = De
         "approved_count": len(approved_set),
         "skipped_count": len(skipped_set),
     }
-
-
-class RegenerateImageRequest(BaseModel):
-    image_id: str
-    new_prompt: str = ""  # Optional prompt override
 
 
 @router.post("/{task_id}/regenerate-image")
