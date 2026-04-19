@@ -159,4 +159,44 @@ export const projectsApi = {
     a.remove();
     URL.revokeObjectURL(url);
   },
+
+  exportHtmlZipUrl: (id: string) =>
+    `${import.meta.env.VITE_API_URL || "http://localhost:8000/api"}/projects/${id}/export-html?mode=zip`,
+
+  exportHtmlConcatUrl: (id: string) =>
+    `${import.meta.env.VITE_API_URL || "http://localhost:8000/api"}/projects/${id}/export-html?mode=concat`,
+
+  exportHtmlZip: async (id: string) => {
+    const res = await api.get<Blob>(`/projects/${id}/export-html`, {
+      params: { mode: "zip" },
+      responseType: "blob",
+    });
+    const url = URL.createObjectURL(res.data);
+    const a = document.createElement("a");
+    a.href = url;
+    const disp = res.headers["content-disposition"] as string | undefined;
+    const m = disp?.match(/filename="?([^";]+)"?/);
+    a.download = m?.[1]?.trim() || `project_${id}.html.zip`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
+  exportHtmlConcat: async (id: string) => {
+    const res = await api.get<Blob>(`/projects/${id}/export-html`, {
+      params: { mode: "concat" },
+      responseType: "blob",
+    });
+    const url = URL.createObjectURL(res.data);
+    const a = document.createElement("a");
+    a.href = url;
+    const disp = res.headers["content-disposition"] as string | undefined;
+    const m = disp?.match(/filename="?([^";]+)"?/);
+    a.download = m?.[1]?.trim() || `project_${id}.html`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
 };

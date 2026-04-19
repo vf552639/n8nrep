@@ -8,7 +8,7 @@ import StatusBadge from "@/components/common/StatusBadge";
 import StepMonitor from "@/components/tasks/StepMonitor";
 import ImageReviewPanel from "@/components/tasks/ImageReviewPanel";
 import SerpUrlsReviewer from "@/components/tasks/SerpUrlsReviewer";
-import { Info, XCircle } from "lucide-react";
+import { Code2, Info, Loader2, XCircle } from "lucide-react";
 
 const ARTICLE_REVIEW_STEP_ORDER = [
   "final_editing",
@@ -166,6 +166,10 @@ export default function TaskDetailPage() {
     Boolean((task?.step_results as any)?.primary_generation_legal?.result);
   const canExportDocx =
     task?.status === "completed" || Boolean(finalEditingResult) || aboutLegalDraft;
+  const canExportHtml = task?.status === "completed";
+
+  const [htmlExportBusy, setHtmlExportBusy] = useState(false);
+  const [clipboardFallbackHtml, setClipboardFallbackHtml] = useState<string | null>(null);
 
   const handleExportDocx = async () => {
     if (!id) return;
@@ -174,6 +178,47 @@ export default function TaskDetailPage() {
       toast.success("DOCX downloaded");
     } catch {
       toast.error("Export DOCX failed");
+    }
+  };
+
+  const handleDownloadHtml = async () => {
+    if (!id) return;
+    setHtmlExportBusy(true);
+    try {
+      await tasksApi.exportHtmlDownload(id);
+      toast.success("HTML downloaded");
+    } catch (e: unknown) {
+      const status = (e as { response?: { status?: number } })?.response?.status;
+      if (status === 409) {
+        toast.error("Страница ещё не сгенерирована до стадии HTML");
+      } else {
+        toast.error("Download HTML failed");
+      }
+    } finally {
+      setHtmlExportBusy(false);
+    }
+  };
+
+  const handleCopyHtml = async () => {
+    if (!id) return;
+    setHtmlExportBusy(true);
+    try {
+      const html = await tasksApi.exportHtml(id);
+      try {
+        await navigator.clipboard.writeText(html);
+        toast.success("HTML скопирован");
+      } catch {
+        setClipboardFallbackHtml(html);
+      }
+    } catch (e: unknown) {
+      const status = (e as { response?: { status?: number } })?.response?.status;
+      if (status === 409) {
+        toast.error("Страница ещё не сгенерирована до стадии HTML");
+      } else {
+        toast.error("Copy HTML failed");
+      }
+    } finally {
+      setHtmlExportBusy(false);
     }
   };
 
@@ -191,7 +236,8 @@ export default function TaskDetailPage() {
     { id: "logs", label: "Execution Logs" },
   ];
 
-  const logs: LogEntry[] = Array.isArray(task.logs) ? task.logs : [];
+  const rawLogs = task.log_events;
+  const logs: LogEntry[] = Array.isArray(rawLogs) ? rawLogs : [];
 
   return (
     <div className="space-y-6">
@@ -226,6 +272,44 @@ export default function TaskDetailPage() {
             >
               Export DOCX
             </button>
+          )}
+          {canExportHtml ? (
+            <>
+              <button
+                type="button"
+                onClick={handleDownloadHtml}
+                disabled={htmlExportBusy}
+                className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50 disabled:opacity-60"
+              >
+                {htmlExportBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Code2 className="h-4 w-4" />}
+                Download HTML
+              </button>
+              <button
+                type="button"
+                onClick={handleCopyHtml}
+                disabled={htmlExportBusy}
+                className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50 disabled:opacity-60"
+              >
+                Copy HTML
+              </button>
+            </>
+          ) : (
+            <span title="Available after generation completes" className="inline-flex gap-2">
+              <button
+                type="button"
+                disabled
+                className="cursor-not-allowed rounded-md border border-slate-100 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-400"
+              >
+                Download HTML
+              </button>
+              <button
+                type="button"
+                disabled
+                className="cursor-not-allowed rounded-md border border-slate-100 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-400"
+              >
+                Copy HTML
+              </button>
+            </span>
           )}
           <StatusBadge status={task.status} />
         </div>
@@ -518,6 +602,37 @@ export default function TaskDetailPage() {
           </div>
         </div>
       </div>
+
+      {clipboardFallbackHtml !== null && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="clipboard-fallback-title"
+        >
+          <div className="max-h-[90vh] w-full max-w-3xl rounded-lg bg-white p-4 shadow-xl">
+            <h3 id="clipboard-fallback-title" className="mb-2 text-lg font-semibold text-slate-900">
+              Copy HTML manually
+            </h3>
+            <p className="mb-2 text-sm text-slate-600">
+              Clipboard is unavailable. Select the text below and use Ctrl+C (Cmd+C).
+            </p>
+            <textarea
+              readOnly
+              className="h-64 w-full rounded border border-slate-200 p-2 font-mono text-xs"
+              value={clipboardFallbackHtml}
+              onFocus={(e) => e.target.select()}
+            />
+            <button
+              type="button"
+              className="mt-3 rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900"
+              onClick={() => setClipboardFallbackHtml(null)}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

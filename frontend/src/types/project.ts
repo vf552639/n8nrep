@@ -72,7 +72,7 @@ export interface Project {
   avg_seconds_per_page?: number | null;
   blueprint_page_count?: number;
   remaining_pages?: number;
-  logs?: ProjectLogEntry[];
+  log_events?: ProjectLogEntry[];
   celery_task_id?: string | null;
   serp_config?: Record<string, unknown>;
   project_keywords?: {

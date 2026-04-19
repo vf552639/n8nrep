@@ -118,6 +118,7 @@ export default function ProjectDetailPage() {
   });
 
   const [forceDeleteOpen, setForceDeleteOpen] = useState(false);
+  const [projectHtmlMenuOpen, setProjectHtmlMenuOpen] = useState(false);
 
   const deleteMutation = useMutation({
     mutationFn: (opts?: { force?: boolean }) =>
@@ -249,7 +250,7 @@ export default function ProjectDetailPage() {
     failedCount > 0 && project.status !== "generating" && project.status !== "pending";
   const canResetStuckStatus = project.status === "generating" || project.status === "pending";
   const canStart = project.status === "pending";
-  const logs = project.logs ?? [];
+  const logs = project.log_events ?? [];
   const sc = project.serp_config as Record<string, unknown> | undefined;
   const serpBadgeItems: { label: string; value: string }[] = [];
   if (sc) {
@@ -415,20 +416,65 @@ export default function ProjectDetailPage() {
             </button>
           )}
           {canExportDocx && (
-            <button
-              type="button"
-              onClick={async () => {
-                try {
-                  await projectsApi.exportDocx(project.id);
-                  toast.success("DOCX download started");
-                } catch {
-                  toast.error("DOCX export failed");
-                }
-              }}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium shadow-sm transition-colors"
-            >
-              <FileText className="w-4 h-4" /> Export DOCX
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await projectsApi.exportDocx(project.id);
+                    toast.success("DOCX download started");
+                  } catch {
+                    toast.error("DOCX export failed");
+                  }
+                }}
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium shadow-sm transition-colors"
+              >
+                <FileText className="w-4 h-4" /> Export DOCX
+              </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setProjectHtmlMenuOpen((o) => !o)}
+                  className="flex items-center gap-2 border border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100 px-4 py-2 rounded-md text-sm font-medium shadow-sm transition-colors"
+                >
+                  Download HTML <ChevronDown className="h-4 w-4" />
+                </button>
+                {projectHtmlMenuOpen && (
+                  <div className="absolute right-0 z-20 mt-1 w-56 rounded-md border border-slate-200 bg-white py-1 shadow-lg">
+                    <button
+                      type="button"
+                      className="block w-full px-3 py-2 text-left text-sm text-slate-800 hover:bg-slate-50"
+                      onClick={async () => {
+                        setProjectHtmlMenuOpen(false);
+                        try {
+                          await projectsApi.exportHtmlZip(project.id);
+                          toast.success("HTML ZIP download started");
+                        } catch {
+                          toast.error("HTML export failed");
+                        }
+                      }}
+                    >
+                      All pages (ZIP)
+                    </button>
+                    <button
+                      type="button"
+                      className="block w-full px-3 py-2 text-left text-sm text-slate-800 hover:bg-slate-50"
+                      onClick={async () => {
+                        setProjectHtmlMenuOpen(false);
+                        try {
+                          await projectsApi.exportHtmlConcat(project.id);
+                          toast.success("Single HTML file download started");
+                        } catch {
+                          toast.error("HTML export failed");
+                        }
+                      }}
+                    >
+                      Single file
+                    </button>
+                  </div>
+                )}
+              </div>
+            </>
           )}
           {project.status === "completed" && (
             <>

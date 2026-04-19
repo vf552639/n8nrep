@@ -15,7 +15,8 @@ export interface Task {
   serp_data?: any;
   step_results?: any;
   serp_config?: SerpConfig;
-  logs?: any[];
+  /** Pipeline execution log lines (backend: log_events) */
+  log_events?: any[];
 }
 
 export interface SerpConfig {

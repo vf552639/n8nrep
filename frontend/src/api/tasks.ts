@@ -117,5 +117,30 @@ export const tasksApi = {
     a.remove();
     URL.revokeObjectURL(url);
   },
+
+  exportHtml: (id: string) =>
+    api
+      .get<string>(`/tasks/${id}/export-html`, {
+        responseType: "text",
+        skipErrorToast: true,
+      } as { responseType: "text"; skipErrorToast?: boolean })
+      .then((r) => r.data),
+
+  exportHtmlUrl: (id: string) =>
+    `${import.meta.env.VITE_API_URL || "http://localhost:8000/api"}/tasks/${id}/export-html`,
+
+  exportHtmlDownload: async (id: string) => {
+    const res = await api.get<Blob>(`/tasks/${id}/export-html`, { responseType: "blob" });
+    const url = URL.createObjectURL(res.data);
+    const a = document.createElement("a");
+    a.href = url;
+    const disp = res.headers["content-disposition"] as string | undefined;
+    const m = disp?.match(/filename="?([^";]+)"?/);
+    a.download = m?.[1]?.trim() || `task_${id}.html`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
 };
 

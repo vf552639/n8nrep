@@ -271,16 +271,25 @@ export default function LegalPagesPage() {
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium">Content *</label>
-                <p className="mb-1 text-xs text-slate-500">Reference text for LLM. Can be plain text or HTML.</p>
-                <div className="overflow-hidden rounded border">
-                  <Editor
-                    height="240px"
-                    language={form.content_format === "html" ? "html" : "plaintext"}
-                    theme="vs"
+                <p className="mb-1 text-xs text-slate-500">Reference text for LLM. Plain text or HTML depending on format.</p>
+                {form.content_format === "text" ? (
+                  <textarea
+                    className="min-h-[240px] w-full rounded border px-3 py-2 font-mono text-sm"
                     value={form.content}
-                    onChange={(v) => setForm((f) => ({ ...f, content: v ?? "" }))}
+                    onChange={(e) => setForm((f) => ({ ...f, content: e.target.value }))}
+                    spellCheck={false}
                   />
-                </div>
+                ) : (
+                  <div className="overflow-hidden rounded border">
+                    <Editor
+                      height="240px"
+                      language="html"
+                      theme="vs"
+                      value={form.content}
+                      onChange={(v) => setForm((f) => ({ ...f, content: v ?? "" }))}
+                    />
+                  </div>
+                )}
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium">Variables (JSON)</label>
