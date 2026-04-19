@@ -8,7 +8,9 @@ from app.database import SessionLocal
 from app.models.prompt import Prompt
 
 # Re-apply model/text/max_tokens from seed when running `python scripts/seed_prompts.py`
-PROMPTS_FORCE_UPDATE = frozenset({"image_prompt_generation", "image_generation", "html_structure"})
+PROMPTS_FORCE_UPDATE = frozenset(
+    {"image_prompt_generation", "image_generation", "html_structure", "primary_generation_legal"}
+)
 
 PROMPTS_DATA = [
     {
@@ -202,30 +204,37 @@ Output pure HTML content.""",
 You adapt legal templates to specific brands while maintaining legal accuracy.
 You write in the specified language.
 Output pure HTML (no doctype, no head/body wrappers — just content HTML).""",
-        "user_prompt": """Generate a {{page_type}} page for the following website.
+        "user_prompt": """Generate a {{page_type_label}} page for the following website.
 
 Brand/Site: {{site_name}}
 Keyword: {{keyword}}
 Language: {{language}}
 Country: {{country}}
-Page Type: {{page_type}}
+Page type: {{page_type_label}}
 
-REFERENCE LEGAL TEMPLATE (use as structural and stylistic guide — may be HTML or plain text):
-{{legal_reference_html}}
+REFERENCE FORMAT: {{legal_reference_format}}
+- If format is "text", the reference is plain text: follow its section intent and wording style, but output valid HTML (do not paste raw text as an unbroken blob if structure is implied by line breaks or headings in the reference).
+- If format is "html", the reference is HTML: preserve heading hierarchy and section order unless adaptation for the brand requires minor restructuring.
 
-If the reference is empty, generate the page from scratch based on best practices for the given page_type and country.
+REFERENCE LEGAL TEMPLATE (may be empty — structural and stylistic guide only):
+{{legal_reference}}
 
-LEGAL VARIABLES (company details to insert):
+If the reference is empty, generate the page from scratch based on best practices for this page type, country, and language.
+
+TEMPLATE NOTES (author instructions for this sample — follow if non-empty):
+{{legal_template_notes}}
+
+LEGAL VARIABLES (company details to insert — JSON; merge into the final page):
 {{legal_variables}}
 
 REQUIREMENTS:
-1. Use the reference template as a guide for structure and sections (when non-empty)
-2. Substitute all company-specific information from the legal variables
+1. Use the reference as a guide for structure and sections when non-empty; respect REFERENCE FORMAT above
+2. Substitute all company-specific information from the legal variables JSON — no unresolved {{placeholders}} in the output
 3. Adapt the language and legal references to the target country
 4. Ensure all placeholder variables are replaced with actual values
 5. Structure with appropriate HTML headings (h1, h2, h3) and paragraphs
 6. Maintain professional legal tone throughout
-7. Do NOT include navigation, header, footer — just the page content
+7. Do NOT include navigation, site chrome, header, or footer — only the page body content
 8. Include current year where relevant: {{year}}
 
 Output pure HTML content.""",

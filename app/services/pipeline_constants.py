@@ -54,7 +54,15 @@ CRITICAL_VARS = {
     "image_prompt_generation": ["keyword", "language"],
     "primary_generation": ["keyword", "additional_keywords", "language"],
     "primary_generation_about": ["keyword", "language", "author", "author_style"],
-    "primary_generation_legal": ["keyword", "language", "legal_reference_html"],
+    "primary_generation_legal": [
+        "keyword",
+        "language",
+        "country",
+        "page_type_label",
+        "legal_reference",
+        "legal_reference_format",
+        "legal_variables",
+    ],
     "competitor_comparison": ["keyword"],
     "reader_opinion": ["keyword"],
     "interlinking_citations": ["keyword", "site_name"],
@@ -64,5 +72,10 @@ CRITICAL_VARS = {
     "meta_generation": ["keyword", "language"],
     "structure_fact_checking": ["keyword", "result_final_structure_analysis"],
     "content_fact_checking": ["keyword", "language"],
+}
+
+# Critical vars that may be present but intentionally empty (e.g. optional reference body).
+CRITICAL_VARS_ALLOW_EMPTY: dict[str, frozenset[str]] = {
+    "primary_generation_legal": frozenset({"legal_reference"}),
 }
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import io
 import logging
-import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -20,22 +19,12 @@ from app.models.blueprint import BlueprintPage
 from app.models.project import SiteProject
 from app.models.site import Site
 from app.models.task import Task
+from app.services.html_export import is_html_content, resolve_export_body
 from app.services.json_parser import clean_and_parse_json
 from app.services.meta_parser import extract_meta_from_parsed, meta_variant_list
 from app.services.word_counter import count_content_words
 
 logger = logging.getLogger(__name__)
-
-_HTML_BLOCK = re.compile(
-    r"<(h[1-6]|p|ul|ol|li|table|div|section|article|br|blockquote)\b",
-    re.IGNORECASE,
-)
-
-
-def _is_html_content(text: str) -> bool:
-    if not text or not text.strip():
-        return False
-    return bool(_HTML_BLOCK.search(text))
 
 
 def _strip_boilerplate_html(soup: BeautifulSoup) -> None:
@@ -87,32 +76,6 @@ def _get_all_meta_from_task(task: Task, article: Optional[GeneratedArticle]) -> 
     return result
 
 
-def content_from_step_results_fallback(task: Task) -> Tuple[str, str]:
-    """
-    Body from step_results when article row is missing or has no html_content — priority
-    matches pick_structured_html_for_assembly (same step key order).
-    """
-    sr = task.step_results or {}
-    for key in (
-        "image_inject",
-        "html_structure",
-        "final_editing",
-        "improver",
-        "interlinking_citations",
-        "reader_opinion",
-        "competitor_comparison",
-        "primary_generation",
-        "primary_generation_about",
-        "primary_generation_legal",
-    ):
-        step = sr.get(key)
-        if isinstance(step, dict) and step.get("result"):
-            raw = str(step.get("result") or "")
-            if raw.strip():
-                return (raw, "html" if _is_html_content(raw) else "plain")
-    return ("", "plain")
-
-
 def _resolve_single_article_body(
     article: GeneratedArticle, task: Optional[Task]
 ) -> Tuple[str, str]:
@@ -123,7 +86,7 @@ def _resolve_single_article_body(
     raw = (article.html_content or "").strip() or (article.full_page_html or "").strip()
     if not raw:
         return ("", "plain")
-    return (raw, "html" if _is_html_content(raw) else "plain")
+    return (raw, "html" if is_html_content(raw) else "plain")
 
 
 def _add_simple_article_meta_table(
@@ -219,7 +182,7 @@ def build_task_export_docx(db: Session, task: Task) -> bytes:
     if article:
         return build_single_article_docx(article, task)
 
-    content, _mode = content_from_step_results_fallback(task)
+    content, _src = resolve_export_body(task, None, for_html_export=False)
     if not content.strip():
         raise ValueError("No article or draft content to export")
 
@@ -239,13 +202,13 @@ def _get_content_from_task(
 ) -> Tuple[str, str]:
     """
     Returns (content, mode) where mode is 'html' or 'plain'.
-    Prefer persisted article body; otherwise same step order as pipeline assembly
-    (via content_from_step_results_fallback), not final_editing-only.
+    Prefer persisted article body and full_page extraction; otherwise same step order
+    as pipeline assembly (resolve_export_body), not final_editing-only.
     """
-    if article and article.html_content and str(article.html_content).strip():
-        body = str(article.html_content)
-        return (body, "html" if _is_html_content(body) else "plain")
-    return content_from_step_results_fallback(task)
+    body, _src = resolve_export_body(task, article, for_html_export=False)
+    if not body.strip():
+        return ("", "plain")
+    return (body, "html" if is_html_content(body) else "plain")
 
 
 def _merge_runs_into_paragraph(para, element: Tag) -> None:
