@@ -137,7 +137,7 @@ def get_task(task_id: str, db: Session = Depends(get_db)):
         "serp_config": task.serp_config or {},
         "error_log": task.error_log,
         "created_at": task.created_at.isoformat(),
-        "logs": task.logs or [],
+        "log_events": task.log_events or [],
     }
 
 def calculate_progress(step_results: dict) -> int:
@@ -837,16 +837,19 @@ def rerun_task_step(task_id: str, payload: RerunStepRequest, db: Session = Depen
     
     # Log the action
     log_msg = f"🔄 Rerun requested for step '{payload.step_name}' with feedback: '{payload.feedback[:200]}'. Cascade: {payload.cascade}. Invalidated steps: {invalidated_steps}"
-    
-    logs = list(task.logs or [])
-    logs.append({
-        "timestamp": datetime.utcnow().isoformat(),
-        "level": "info",
-        "step": payload.step_name,
-        "message": log_msg
-    })
-    task.logs = logs
-    
+
+    log_events = list(task.log_events or [])
+    log_events.append(
+        {
+            "ts": datetime.utcnow().isoformat(),
+            "level": "info",
+            "msg": log_msg,
+            "step": payload.step_name,
+        }
+    )
+    task.log_events = log_events[-500:]
+    flag_modified(task, "log_events")
+
     db.commit()
     
     process_generation_task.delay(str(task.id))
