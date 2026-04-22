@@ -1,0 +1,66 @@
+from app.services.pipeline.context import PipelineContext
+from app.services.pipeline.llm_client import call_agent, call_agent_with_exclude_validation, get_prompt_obj
+from app.services.pipeline.persistence import add_log, mark_step_running, save_step_result
+from app.services.pipeline.runner import run_phase, run_pipeline
+from app.services.pipeline.vars import apply_template_vars, setup_template_vars, setup_vars
+
+# Backward-compatible phase re-exports for existing tests and integrations.
+from app.services._pipeline_legacy import (
+    phase_ai_structure,
+    phase_chunk_analysis,
+    phase_competitor_comparison,
+    phase_competitor_structure,
+    phase_content_fact_check,
+    phase_final_editing,
+    phase_final_structure,
+    phase_html_structure,
+    phase_image_gen,
+    phase_image_inject,
+    phase_image_prompt_gen,
+    phase_improver,
+    phase_interlink,
+    phase_meta_generation,
+    phase_primary_gen,
+    phase_primary_gen_about,
+    phase_primary_gen_legal,
+    phase_reader_opinion,
+    phase_scraping,
+    phase_serp,
+    phase_structure_fact_check,
+)
+
+__all__ = [
+    "PipelineContext",
+    "add_log",
+    "apply_template_vars",
+    "call_agent",
+    "call_agent_with_exclude_validation",
+    "get_prompt_obj",
+    "mark_step_running",
+    "phase_ai_structure",
+    "phase_chunk_analysis",
+    "phase_competitor_comparison",
+    "phase_competitor_structure",
+    "phase_content_fact_check",
+    "phase_final_editing",
+    "phase_final_structure",
+    "phase_html_structure",
+    "phase_image_gen",
+    "phase_image_inject",
+    "phase_image_prompt_gen",
+    "phase_improver",
+    "phase_interlink",
+    "phase_meta_generation",
+    "phase_primary_gen",
+    "phase_primary_gen_about",
+    "phase_primary_gen_legal",
+    "phase_reader_opinion",
+    "phase_scraping",
+    "phase_serp",
+    "phase_structure_fact_check",
+    "run_phase",
+    "run_pipeline",
+    "save_step_result",
+    "setup_template_vars",
+    "setup_vars",
+]
