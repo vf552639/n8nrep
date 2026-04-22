@@ -3,7 +3,7 @@ from typing import Any
 
 from app.models.blueprint import BlueprintPage
 from app.models.site import Site
-from app.models.template import LegalPageTemplate, LEGAL_PAGE_TYPES
+from app.models.template import LEGAL_PAGE_TYPES, LegalPageTemplate
 
 PAGE_TYPE_LABELS = {
     "privacy_policy": "Privacy Policy",
@@ -63,11 +63,7 @@ def inject_legal_template_vars(ctx: Any) -> None:
                 template_id = str(raw)
 
     if not template_id and ctx.task.blueprint_page_id:
-        bp_page = (
-            ctx.db.query(BlueprintPage)
-            .filter(BlueprintPage.id == ctx.task.blueprint_page_id)
-            .first()
-        )
+        bp_page = ctx.db.query(BlueprintPage).filter(BlueprintPage.id == ctx.task.blueprint_page_id).first()
         if bp_page and getattr(bp_page, "default_legal_template_id", None):
             template_id = str(bp_page.default_legal_template_id)
 

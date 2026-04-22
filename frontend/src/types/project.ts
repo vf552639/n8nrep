@@ -87,6 +87,8 @@ export interface Project {
   } | null;
   legal_template_map?: Record<string, string>;
   use_site_template?: boolean;
+  /** User-provided competitor URLs (merged into SERP before scraping). */
+  competitor_urls?: string[];
 }
 
 export interface ProjectTaskExpanded {
@@ -109,4 +111,5 @@ export interface ProjectClonePayload {
   author_id?: number;
   legal_template_map?: Record<string, string>;
   use_site_template?: boolean;
+  competitor_urls?: string[];
 }

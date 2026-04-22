@@ -1,8 +1,8 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, Text, Boolean, DateTime, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import Boolean, Column, DateTime, String, Text, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -29,9 +29,7 @@ class LegalPageTemplate(Base):
     """Named legal page reference sample for LLM generation (plain text or HTML)."""
 
     __tablename__ = "legal_page_templates"
-    __table_args__ = (
-        UniqueConstraint("name", "page_type", name="uq_legal_tpl_name_page_type"),
-    )
+    __table_args__ = (UniqueConstraint("name", "page_type", name="uq_legal_tpl_name_page_type"),)
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(200), nullable=False)

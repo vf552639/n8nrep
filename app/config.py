@@ -1,5 +1,5 @@
-import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class Settings(BaseSettings):
     # Database
@@ -55,7 +55,7 @@ class Settings(BaseSettings):
 
     # Fact Checking
     FACT_CHECK_ENABLED: bool = True
-    FACT_CHECK_MODE: str = "soft" # "soft" or "strict"
+    FACT_CHECK_MODE: str = "soft"  # "soft" or "strict"
     FACT_CHECK_FAIL_THRESHOLD: int = 1
 
     # Self-check / retry budgets (exclude-word retries, html_structure recovery)
@@ -71,10 +71,7 @@ class Settings(BaseSettings):
     IMGBB_API_KEY: str = ""
     IMAGE_MODEL_DEFAULT: str = "google/gemini-2.5-flash-image-preview"
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore"
-    )
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
 
 settings = Settings()

@@ -1,4 +1,4 @@
-from typing import Optional, Any, List
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -6,9 +6,9 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.schemas.template import TemplateCreate, TemplateUpdate
 from app.models.site import Site
 from app.models.template import Template
+from app.schemas.template import TemplateCreate, TemplateUpdate
 
 router = APIRouter()
 
@@ -18,9 +18,9 @@ def _sites_count(db: Session, template_id: UUID) -> int:
 
 
 @router.get("/")
-def list_templates(db: Session = Depends(get_db)) -> List[dict[str, Any]]:
+def list_templates(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
     rows = db.query(Template).order_by(Template.name).all()
-    out: List[dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     for t in rows:
         out.append(
             {

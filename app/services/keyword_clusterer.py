@@ -1,18 +1,18 @@
 """
 Cluster additional project keywords across blueprint pages via a single LLM call.
 """
+
 import json
-import re
-from typing import Any, Dict, List
+from typing import Any
 
 from app.config import settings
 from app.services.llm import generate_text
 
 
 def cluster_keywords(
-    keywords: List[str],
-    pages: List[Dict[str, str]],
-) -> Dict[str, Any]:
+    keywords: list[str],
+    pages: list[dict[str, str]],
+) -> dict[str, Any]:
     """
     Returns clustered preview dict (not persisted).
     """
@@ -80,7 +80,7 @@ Use exact page slugs and exact keywords from the lists above. Every keyword must
         unassigned = []
 
     pages_by_slug = {p["slug"]: p for p in pages}
-    clustered: Dict[str, Any] = {}
+    clustered: dict[str, Any] = {}
     total_assigned = 0
 
     for slug, assigned_kws in assignments.items():

@@ -1,4 +1,5 @@
 """Tests for legal template variables injected into the pipeline context."""
+
 import json
 import uuid
 from types import SimpleNamespace

@@ -1,26 +1,27 @@
 """Build OpenRouter / generate_text sampling kwargs from Prompt + optional test overrides."""
+
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from app.models.prompt import Prompt
 
 
 def llm_sampling_kwargs_from_prompt(
-    prompt: "Prompt",
+    prompt: Prompt,
     *,
-    temperature_enabled: Optional[bool] = None,
-    temperature: Optional[float] = None,
-    frequency_penalty_enabled: Optional[bool] = None,
-    frequency_penalty: Optional[float] = None,
-    presence_penalty_enabled: Optional[bool] = None,
-    presence_penalty: Optional[float] = None,
-    top_p_enabled: Optional[bool] = None,
-    top_p: Optional[float] = None,
-    max_tokens_enabled: Optional[bool] = None,
-    max_tokens: Optional[int] = None,
-) -> Dict[str, Any]:
+    temperature_enabled: bool | None = None,
+    temperature: float | None = None,
+    frequency_penalty_enabled: bool | None = None,
+    frequency_penalty: float | None = None,
+    presence_penalty_enabled: bool | None = None,
+    presence_penalty: float | None = None,
+    top_p_enabled: bool | None = None,
+    top_p: float | None = None,
+    max_tokens_enabled: bool | None = None,
+    max_tokens: int | None = None,
+) -> dict[str, Any]:
     """
     When *_enabled is False, that sampling parameter is omitted from the dict so OpenRouter
     uses provider defaults (no explicit top_p=1.0 / penalty=0 in the request).
@@ -72,7 +73,7 @@ def llm_sampling_kwargs_from_prompt(
     )
     mt = prompt.max_tokens if max_tokens is None else max_tokens
 
-    out: Dict[str, Any] = {"temperature": eff_temp}
+    out: dict[str, Any] = {"temperature": eff_temp}
     if fe:
         out["frequency_penalty"] = eff_freq
     if pe:
@@ -84,7 +85,7 @@ def llm_sampling_kwargs_from_prompt(
     return out
 
 
-def format_llm_params_log_line(agent_name: str, prompt: "Prompt", kwargs: Dict[str, Any]) -> str:
+def format_llm_params_log_line(agent_name: str, prompt: Prompt, kwargs: dict[str, Any]) -> str:
     """Human-readable log line: only lists sampling args actually passed to the API."""
     temp_m = "custom" if getattr(prompt, "temperature_enabled", False) else "default"
     mt = kwargs.get("max_tokens")

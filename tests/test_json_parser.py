@@ -8,7 +8,7 @@ def test_json_parser_clean():
 
 
 def test_json_parser_markdown():
-    raw = "```json\n{\"test\": 123}\n```"
+    raw = '```json\n{"test": 123}\n```'
     res = clean_and_parse_json(raw)
     assert res == {"test": 123}
 

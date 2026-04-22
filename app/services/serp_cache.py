@@ -1,6 +1,7 @@
 import hashlib
 import json
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 from app.config import settings
 
@@ -18,7 +19,7 @@ def _get_redis_client():
         return None
 
 
-def _safe_json_loads(raw: Optional[str]) -> Optional[dict]:
+def _safe_json_loads(raw: str | None) -> dict | None:
     if not raw:
         return None
     try:
@@ -28,14 +29,18 @@ def _safe_json_loads(raw: Optional[str]) -> Optional[dict]:
         return None
 
 
-def _serp_cache_key(keyword: str, country_code: str, language_code: str, serp_config: Optional[dict] = None) -> str:
+def _serp_cache_key(
+    keyword: str, country_code: str, language_code: str, serp_config: dict | None = None
+) -> str:
     cfg = serp_config or {}
     engine = str(cfg.get("search_engine", "google")).lower()
     kw_hash = hashlib.sha256(keyword.lower().strip().encode("utf-8")).hexdigest()
     return f"serp_cache:{kw_hash}:{country_code.lower()}:{language_code.lower()}:{engine}"
 
 
-def invalidate_serp_cache(keyword: str, country_code: str, language_code: str, serp_config: Optional[dict] = None) -> bool:
+def invalidate_serp_cache(
+    keyword: str, country_code: str, language_code: str, serp_config: dict | None = None
+) -> bool:
     client = _get_redis_client()
     if not client:
         return False
@@ -50,10 +55,10 @@ def get_cached_serp(
     keyword: str,
     country_code: str,
     language_code: str,
-    serp_config: Optional[dict],
-    fetch_fn: Callable[[str, str, str, Optional[dict]], Dict[str, Any]],
+    serp_config: dict | None,
+    fetch_fn: Callable[[str, str, str, dict | None], dict[str, Any]],
     force_refresh: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     client = _get_redis_client()
     key = _serp_cache_key(keyword, country_code, language_code, serp_config)
 
@@ -84,7 +89,7 @@ def _scrape_cache_key(url: str) -> str:
     return f"scrape_cache:{hashlib.sha256(url.strip().encode('utf-8')).hexdigest()}"
 
 
-def get_cached_scrape_item(url: str) -> Optional[dict]:
+def get_cached_scrape_item(url: str) -> dict | None:
     client = _get_redis_client()
     if not client:
         return None
@@ -99,20 +104,26 @@ def set_cached_scrape_item(url: str, parsed_data: dict) -> None:
     if not client:
         return
     try:
-        client.setex(_scrape_cache_key(url), int(settings.SCRAPE_CACHE_TTL), json.dumps(parsed_data, ensure_ascii=False))
+        client.setex(
+            _scrape_cache_key(url),
+            int(settings.SCRAPE_CACHE_TTL),
+            json.dumps(parsed_data, ensure_ascii=False),
+        )
     except Exception:
         return
 
 
-def get_cached_scrape(urls_list: List[str], scrape_fn: Callable[[List[str]], Dict[str, dict]]) -> Dict[str, Any]:
+def get_cached_scrape(
+    urls_list: list[str], scrape_fn: Callable[[list[str]], dict[str, dict]]
+) -> dict[str, Any]:
     """Generic batch wrapper for per-URL scrape cache.
 
     scrape_fn should return mapping: {url: {"text": "...", "word_count": N, "headers": {...}, ...}}
     """
     cache_hits = 0
     cache_misses = 0
-    by_url: Dict[str, dict] = {}
-    misses: List[str] = []
+    by_url: dict[str, dict] = {}
+    misses: list[str] = []
 
     for url in urls_list:
         cached = get_cached_scrape_item(url)

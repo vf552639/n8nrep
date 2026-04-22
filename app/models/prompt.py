@@ -1,8 +1,11 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, Text, Boolean, Float, DateTime
+
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
+
 from app.database import Base
+
 
 class Prompt(Base):
     __tablename__ = "prompts"

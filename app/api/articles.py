@@ -1,14 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import HTMLResponse, StreamingResponse
-from sqlalchemy.orm import Session
-from sqlalchemy import desc
-from typing import Optional
 import io
 
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import HTMLResponse, StreamingResponse
+from sqlalchemy import desc
+from sqlalchemy.orm import Session
+
 from app.database import get_db
-from app.schemas.article import ArticleUpdate
 from app.models.article import GeneratedArticle
 from app.models.task import Task
+from app.schemas.article import ArticleUpdate
 from app.services.word_counter import count_content_words
 
 router = APIRouter()
@@ -16,17 +16,23 @@ router = APIRouter()
 
 @router.get("/")
 def get_articles(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
-    articles = db.query(GeneratedArticle).order_by(desc(GeneratedArticle.created_at)).offset(skip).limit(limit).all()
-    
-    return [{
-        "id": str(a.id),
-        "task_id": str(a.task_id),
-        "title": a.title,
-        "word_count": a.word_count,
-        "fact_check_status": a.fact_check_status,
-        "needs_review": a.needs_review,
-        "created_at": a.created_at.isoformat()
-    } for a in articles]
+    articles = (
+        db.query(GeneratedArticle).order_by(desc(GeneratedArticle.created_at)).offset(skip).limit(limit).all()
+    )
+
+    return [
+        {
+            "id": str(a.id),
+            "task_id": str(a.task_id),
+            "title": a.title,
+            "word_count": a.word_count,
+            "fact_check_status": a.fact_check_status,
+            "needs_review": a.needs_review,
+            "created_at": a.created_at.isoformat(),
+        }
+        for a in articles
+    ]
+
 
 @router.get("/{article_id}")
 def get_article(article_id: str, db: Session = Depends(get_db)):
@@ -36,7 +42,7 @@ def get_article(article_id: str, db: Session = Depends(get_db)):
 
     task = db.query(Task).filter(Task.id == article.task_id).first()
     html = article.html_content or ""
-        
+
     return {
         "id": str(article.id),
         "task_id": str(article.task_id),
@@ -101,32 +107,34 @@ def resolve_issue(article_id: str, issue_index: int, db: Session = Depends(get_d
     article = db.query(GeneratedArticle).filter(GeneratedArticle.id == article_id).first()
     if not article:
         raise HTTPException(status_code=404, detail="Article not found")
-        
+
     issues = list(article.fact_check_issues or [])
     if issue_index < 0 or issue_index >= len(issues):
         raise HTTPException(status_code=400, detail="Invalid issue index")
-        
+
     issues[issue_index]["resolved"] = True
-    
+
     # Check if all critical issues are resolved to potentially unset needs_review
     # But for now simply update the JSON
     article.fact_check_issues = issues
     db.commit()
-    return {"status": "ok"} 
+    return {"status": "ok"}
+
 
 @router.get("/{article_id}/preview", response_class=HTMLResponse)
 def preview_article(article_id: str, db: Session = Depends(get_db)):
     article = db.query(GeneratedArticle).filter(GeneratedArticle.id == article_id).first()
     if not article:
         raise HTTPException(status_code=404, detail="Article not found")
-        
+
     # Return full page template if available, otherwise just raw HTML
     return article.full_page_html or article.html_content
+
 
 @router.get("/{article_id}/download")
 def download_article(
     article_id: str,
-    file_format: Optional[str] = Query(None, alias="format"),
+    file_format: str | None = Query(None, alias="format"),
     db: Session = Depends(get_db),
 ):
     article = db.query(GeneratedArticle).filter(GeneratedArticle.id == article_id).first()
@@ -135,9 +143,7 @@ def download_article(
 
     fmt = (file_format or "html").strip().lower()
     if fmt not in ("html", "docx"):
-        raise HTTPException(
-            status_code=400, detail="Unsupported format; use html or docx"
-        )
+        raise HTTPException(status_code=400, detail="Unsupported format; use html or docx")
 
     safe_title = "".join(x for x in (article.title or "article") if x.isalnum() or x in " -_") or "article"
 

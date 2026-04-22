@@ -1,11 +1,9 @@
 import json
 import re
-from typing import Any, Dict, Optional, Set
+from typing import Any
 
 
-def clean_and_parse_json(
-    text: str, unwrap_keys: Optional[Set[str]] = None
-) -> Dict[str, Any]:
+def clean_and_parse_json(text: str, unwrap_keys: set[str] | None = None) -> dict[str, Any]:
     """
     Parse JSON string, stripping markdown fences.
     If direct parse fails, extracts the first JSON object from the text (e.g. prose
@@ -34,19 +32,13 @@ def clean_and_parse_json(
                     try:
                         data = json.loads(match.group())
                     except json.JSONDecodeError as e:
-                        print(
-                            f"Warning: clean_and_parse_json failed: {e} | text[:200]={text[:200]}"
-                        )
+                        print(f"Warning: clean_and_parse_json failed: {e} | text[:200]={text[:200]}")
                         return {}
                 else:
-                    print(
-                        f"Warning: clean_and_parse_json no JSON found | text[:200]={text[:200]}"
-                    )
+                    print(f"Warning: clean_and_parse_json no JSON found | text[:200]={text[:200]}")
                     return {}
         else:
-            print(
-                f"Warning: clean_and_parse_json no JSON found | text[:200]={text[:200]}"
-            )
+            print(f"Warning: clean_and_parse_json no JSON found | text[:200]={text[:200]}")
             return {}
 
     if not isinstance(data, dict):

@@ -34,6 +34,8 @@ export interface SiteProjectCreatePayload {
   };
   legal_template_map?: Record<string, string>;
   use_site_template?: boolean;
+  /** Merged into SERP organic URLs before scraping (max 50). */
+  competitor_urls?: string[];
 }
 
 export interface ClusterKeywordsResult {

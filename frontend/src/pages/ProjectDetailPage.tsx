@@ -312,6 +312,18 @@ export default function ProjectDetailPage() {
                 ))}
               </span>
             )}
+            {project.competitor_urls && project.competitor_urls.length > 0 && (
+              <span className="block w-full text-slate-600 text-sm">
+                <span className="font-medium text-slate-700">Custom competitor URLs: </span>
+                <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-600">
+                  {project.competitor_urls.map((u, idx) => (
+                    <li key={`${idx}-${u}`} className="break-all font-mono text-xs">
+                      {u}
+                    </li>
+                  ))}
+                </ul>
+              </span>
+            )}
             {legalTemplateLabels && legalTemplateLabels.length > 0 && (
               <span className="block w-full text-slate-600 text-sm">
                 Legal templates:{" "}

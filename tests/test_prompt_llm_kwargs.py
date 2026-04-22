@@ -1,9 +1,10 @@
 """Unit tests for prompt LLM sampling kwargs (task21 param flags)."""
+
 from types import SimpleNamespace
 
 from app.services.prompt_llm_kwargs import (
-    llm_sampling_kwargs_from_prompt,
     format_llm_params_log_line,
+    llm_sampling_kwargs_from_prompt,
 )
 
 
@@ -80,9 +81,7 @@ def test_enabled_params_present_in_kwargs():
 
 def test_test_overrides_ignore_db_when_passed():
     p = _prompt(temperature=0.9, temperature_enabled=False)
-    k = llm_sampling_kwargs_from_prompt(
-        p, temperature_enabled=True, temperature=0.1
-    )
+    k = llm_sampling_kwargs_from_prompt(p, temperature_enabled=True, temperature=0.1)
     assert k["temperature"] == 0.1
 
 

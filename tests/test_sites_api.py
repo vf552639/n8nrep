@@ -1,4 +1,5 @@
 """Contract tests for GET /api/sites payload shape (template_id for use_site_template UI)."""
+
 from __future__ import annotations
 
 import uuid

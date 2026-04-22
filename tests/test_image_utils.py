@@ -1,5 +1,3 @@
-import pytest
-
 from app.services.image_utils import extract_multimedia_blocks
 
 
@@ -275,4 +273,3 @@ def test_extract_multimedia_list_value():
     }
     blocks = extract_multimedia_blocks(outline)
     assert len(blocks) == 2
-

@@ -1,5 +1,7 @@
 import requests
+
 from app.config import settings
+
 
 def send_telegram_notification(text: str) -> bool:
     """
@@ -8,18 +10,14 @@ def send_telegram_notification(text: str) -> bool:
     """
     token = settings.TELEGRAM_BOT_TOKEN
     chat_id = settings.TELEGRAM_CHAT_ID
-    
+
     if not token or not chat_id:
         print("Telegram notifications are not configured (missing token or chat_id).")
         return False
-        
+
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "HTML"
-    }
-    
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+
     try:
         response = requests.post(url, json=payload, timeout=10)
         response.raise_for_status()
@@ -27,6 +25,7 @@ def send_telegram_notification(text: str) -> bool:
     except Exception as e:
         print(f"Failed to send Telegram notification: {e}")
         return False
+
 
 def notify_task_failed(task_id: str, keyword: str, error_msg: str, site_name: str) -> None:
     text = (
@@ -38,6 +37,7 @@ def notify_task_failed(task_id: str, keyword: str, error_msg: str, site_name: st
     )
     send_telegram_notification(text)
 
+
 def notify_task_success(task_id: str, keyword: str, site_name: str, word_count: int) -> None:
     text = (
         f"✅ <b>Статья успешно сгенерирована!</b>\n\n"
@@ -47,6 +47,7 @@ def notify_task_success(task_id: str, keyword: str, site_name: str, word_count: 
         f"Результат доступен в админ-панели (ID: {task_id})."
     )
     send_telegram_notification(text)
+
 
 def notify_serper_key_issue(error_detail: str) -> None:
     text = (

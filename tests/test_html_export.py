@@ -6,7 +6,7 @@ from app.services.html_export import clean_html_for_paste
 def test_clean_full_document_strips_wrapper_keeps_comment_and_content():
     inp = (
         "<!DOCTYPE html><html><head><title>x</title></head>"
-        '<body><h1>t</h1><!-- MEDIA: IMAGE: foo --><p>x</p></body></html>'
+        "<body><h1>t</h1><!-- MEDIA: IMAGE: foo --><p>x</p></body></html>"
     )
     out = clean_html_for_paste(inp)
     assert "<h1>t</h1>" in out
@@ -33,10 +33,7 @@ def test_comment_with_backticks_preserved():
 
 
 def test_mso_style_removed_on_top_level_p_only():
-    inp = (
-        '<p style="mso-font-size: 12pt;">outer</p>'
-        '<p>in <span style="color: red">inner</span></p>'
-    )
+    inp = '<p style="mso-font-size: 12pt;">outer</p><p>in <span style="color: red">inner</span></p>'
     out = clean_html_for_paste(inp)
     assert 'style="mso-font-size: 12pt;"' not in out
     assert 'style="color: red"' in out

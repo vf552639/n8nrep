@@ -4,6 +4,7 @@ from app.workers.celery_app import celery_app
 
 router = APIRouter()
 
+
 @router.get("/worker")
 def check_worker_health():
     """Check Celery worker availability and current load."""

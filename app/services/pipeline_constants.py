@@ -43,7 +43,7 @@ ALL_STEPS = [
     STEP_CONTENT_FACT_CHECK,
     STEP_HTML_STRUCT,
     STEP_IMAGE_INJECT,
-    STEP_META_GEN
+    STEP_META_GEN,
 ]
 
 CRITICAL_VARS = {
@@ -78,4 +78,3 @@ CRITICAL_VARS = {
 CRITICAL_VARS_ALLOW_EMPTY: dict[str, frozenset[str]] = {
     "primary_generation_legal": frozenset({"legal_reference"}),
 }
-

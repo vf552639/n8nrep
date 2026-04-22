@@ -1,9 +1,12 @@
-from sqlalchemy import Column, String, Text, Boolean, Integer, ForeignKey, DateTime
-from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import relationship
-from datetime import datetime
 import uuid
+from datetime import datetime
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import relationship
+
 from app.database import Base
+
 
 class SiteBlueprint(Base):
     __tablename__ = "site_blueprints"
@@ -18,14 +21,17 @@ class SiteBlueprint(Base):
     pages = relationship("BlueprintPage", back_populates="blueprint", cascade="all, delete-orphan")
     projects = relationship("SiteProject", back_populates="blueprint")
 
+
 class BlueprintPage(Base):
     __tablename__ = "blueprint_pages"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    blueprint_id = Column(UUID(as_uuid=True), ForeignKey('site_blueprints.id', ondelete="CASCADE"), nullable=False)
+    blueprint_id = Column(
+        UUID(as_uuid=True), ForeignKey("site_blueprints.id", ondelete="CASCADE"), nullable=False
+    )
     page_slug = Column(String(100), nullable=False)
     page_title = Column(String(300), nullable=False)
-    page_type = Column(String(50), nullable=False, default='article')
+    page_type = Column(String(50), nullable=False, default="article")
     keyword_template = Column(String(500), nullable=False)
     keyword_template_brand = Column(String(500), nullable=True)
     filename = Column(String(200), nullable=False)

@@ -2,13 +2,14 @@
 HTML export for MODX paste: resolve article body with same priority as DOCX/pipeline,
 optional cleanup stripping site chrome while preserving <!-- MEDIA: ... --> comments.
 """
+
 from __future__ import annotations
 
 import io
 import re
 import zipfile
 from html import escape
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from bs4 import BeautifulSoup, Tag
 from sqlalchemy.orm import Session
@@ -66,7 +67,7 @@ def resolve_export_body(
     article: Any,
     *,
     for_html_export: bool = False,
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     """
     Return (body, source_key). Same priority as DOCX / pick_structured_html_for_assembly order
     for step_results; article.html_content and extracted full_page_html first.
@@ -134,7 +135,7 @@ def clean_html_for_paste(html: str, *, drop_doctype: bool = True) -> str:
         for t in soup.find_all(sel):
             t.decompose()
 
-    top_nodes: List[Tag] = [t for t in soup.children if isinstance(t, Tag)]
+    top_nodes: list[Tag] = [t for t in soup.children if isinstance(t, Tag)]
     for node in top_nodes:
         if node.get("style"):
             del node["style"]
@@ -158,7 +159,7 @@ def sanitize_filename_component(s: str) -> str:
     return out.strip().replace(" ", "_")[:200]
 
 
-def html_filename_for_task(task: Any, page_slug: Optional[str] = None) -> str:
+def html_filename_for_task(task: Any, page_slug: str | None = None) -> str:
     base = (page_slug or "").strip() or (task.main_keyword or "page")
     return f"{sanitize_filename_component(base)}.html"
 
@@ -173,27 +174,27 @@ def build_project_html_zip(db: Session, project_id: str) -> bytes:
     if not project:
         raise ValueError("Project not found")
 
-    pages: List[BlueprintPage] = (
+    pages: list[BlueprintPage] = (
         db.query(BlueprintPage)
         .filter(BlueprintPage.blueprint_id == project.blueprint_id)
         .order_by(BlueprintPage.sort_order)
         .all()
     )
     tasks = db.query(Task).filter(Task.project_id == project_id).all()
-    by_bp: Dict[str, Task] = {}
+    by_bp: dict[str, Task] = {}
     for t in tasks:
         if t.blueprint_page_id:
             by_bp[str(t.blueprint_page_id)] = t
 
     task_ids = [t.id for t in tasks]
-    articles_by_task: Dict[str, GeneratedArticle] = {}
+    articles_by_task: dict[str, GeneratedArticle] = {}
     if task_ids:
         arts = db.query(GeneratedArticle).filter(GeneratedArticle.task_id.in_(task_ids)).all()
         for a in arts:
             articles_by_task[str(a.task_id)] = a
 
     buf = io.BytesIO()
-    toc_rows: List[Tuple[str, str]] = []
+    toc_rows: list[tuple[str, str]] = []
 
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for bp in pages:
@@ -213,9 +214,7 @@ def build_project_html_zip(db: Session, project_id: str) -> bytes:
         if not toc_rows:
             raise ValueError("No completed pages to export")
 
-        items = "".join(
-            f'<li><a href="{escape(fn)}">{escape(tit)}</a></li>' for fn, tit in toc_rows
-        )
+        items = "".join(f'<li><a href="{escape(fn)}">{escape(tit)}</a></li>' for fn, tit in toc_rows)
         index_html = (
             "<!DOCTYPE html>\n"
             '<html lang="en"><head><meta charset="utf-8">'
@@ -237,26 +236,26 @@ def build_project_html_concat(db: Session, project_id: str) -> str:
     if not project:
         raise ValueError("Project not found")
 
-    pages: List[BlueprintPage] = (
+    pages: list[BlueprintPage] = (
         db.query(BlueprintPage)
         .filter(BlueprintPage.blueprint_id == project.blueprint_id)
         .order_by(BlueprintPage.sort_order)
         .all()
     )
     tasks = db.query(Task).filter(Task.project_id == project_id).all()
-    by_bp: Dict[str, Task] = {}
+    by_bp: dict[str, Task] = {}
     for t in tasks:
         if t.blueprint_page_id:
             by_bp[str(t.blueprint_page_id)] = t
 
     task_ids = [t.id for t in tasks]
-    articles_by_task: Dict[str, GeneratedArticle] = {}
+    articles_by_task: dict[str, GeneratedArticle] = {}
     if task_ids:
         arts = db.query(GeneratedArticle).filter(GeneratedArticle.task_id.in_(task_ids)).all()
         for a in arts:
             articles_by_task[str(a.task_id)] = a
 
-    parts: List[str] = []
+    parts: list[str] = []
     for bp in pages:
         task = by_bp.get(str(bp.id))
         if not task or task.status != "completed":
@@ -273,4 +272,3 @@ def build_project_html_concat(db: Session, project_id: str) -> str:
         raise ValueError("No completed pages to export")
 
     return "\n\n".join(parts)
-

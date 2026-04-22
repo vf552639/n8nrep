@@ -1,28 +1,31 @@
-from fastapi import APIRouter, HTTPException
-from typing import Dict, Any
 import os
+from typing import Any
+
 import dotenv
+from fastapi import APIRouter, HTTPException
 
 from app.schemas.settings import SettingsUpdate
 
 router = APIRouter()
 
+
 def get_env_path():
     # Simple relative path to .env in project root
     return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env")
 
+
 @router.get("/")
-def get_settings() -> Dict[str, Any]:
+def get_settings() -> dict[str, Any]:
     """
-    Returns non-critical settings for UI. 
+    Returns non-critical settings for UI.
     Masks passwords/keys partially if needed, but for an admin panel we might just return them or hide entirely.
     """
     path = get_env_path()
     if not os.path.exists(path):
         return {}
-        
+
     env_vars = dotenv.dotenv_values(path)
-    
+
     # Mask API keys for safety in GET response
     result = {}
     for k, v in env_vars.items():
@@ -30,33 +33,36 @@ def get_settings() -> Dict[str, Any]:
             if v and len(v) > 8:
                 result[k] = f"{v[:6]}...****{v[-4:]}"
             else:
-                 result[k] = "***"
+                result[k] = "***"
         else:
             result[k] = v
-            
+
     return result
+
 
 @router.put("/")
 def update_settings(settings_in: SettingsUpdate):
     """
     Updates .env file natively. Requires app reload to fully take effect,
-    unless reading config fresh everywhere. Fastapi restart might be needed 
+    unless reading config fresh everywhere. Fastapi restart might be needed
     in production.
     """
     path = get_env_path()
     if not os.path.exists(path):
-         raise HTTPException(status_code=404, detail=".env file not found")
-         
+        raise HTTPException(status_code=404, detail=".env file not found")
+
     for key, value in settings_in.model_dump(exclude_unset=True).items():
         if value is not None and value != "***" and "..." not in value:
             dotenv.set_key(path, key, value)
-            
+
     return {"msg": "Settings updated in .env (Restart maybe required)"}
+
 
 @router.get("/openrouter-models")
 def get_openrouter_models():
     try:
         import requests
+
         r = requests.get("https://openrouter.ai/api/v1/models", timeout=10)
         if r.status_code == 200:
             data = r.json()
@@ -64,9 +70,14 @@ def get_openrouter_models():
             return {"models": models}
     except Exception:
         pass
-    return {"models": [
-        "openai/gpt-4o-mini", "openai/gpt-4o", 
-        "anthropic/claude-3-5-sonnet", "anthropic/claude-3-haiku",
-        "google/gemini-flash-1.5", "google/gemini-2.5-pro",
-        "meta-llama/llama-3-8b-instruct"
-    ]}
+    return {
+        "models": [
+            "openai/gpt-4o-mini",
+            "openai/gpt-4o",
+            "anthropic/claude-3-5-sonnet",
+            "anthropic/claude-3-haiku",
+            "google/gemini-flash-1.5",
+            "google/gemini-2.5-pro",
+            "meta-llama/llama-3-8b-instruct",
+        ]
+    }

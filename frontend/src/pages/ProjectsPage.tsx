@@ -49,6 +49,15 @@ function parseKeywords(raw: string): string[] {
     .slice(0, 100);
 }
 
+function parseUrls(raw: string): string[] {
+  if (!raw.trim()) return [];
+  return raw
+    .split(/[\n,]/)
+    .map((u) => u.trim())
+    .filter((u) => u.length > 0)
+    .slice(0, 50);
+}
+
 const STATUS_OPTIONS = [
   { value: "", label: "All statuses" },
   { value: "pending", label: "Pending" },
@@ -549,6 +558,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
     serp_device: "mobile" as "mobile" | "desktop",
     serp_os: "android" as "android" | "ios" | "windows" | "macos",
     additional_keywords_raw: "",
+    competitor_urls_raw: "",
     legal_template_map: {} as Record<string, string>,
     use_site_template: true,
     markup_only: false,
@@ -560,6 +570,11 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const parsedKeywords = useMemo(
     () => parseKeywords(formData.additional_keywords_raw),
     [formData.additional_keywords_raw]
+  );
+
+  const parsedCompetitorUrls = useMemo(
+    () => parseUrls(formData.competitor_urls_raw),
+    [formData.competitor_urls_raw]
   );
 
   useEffect(() => {
@@ -823,6 +838,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
       ...(project_keywords ? { project_keywords } : {}),
       ...(hasLegal ? { legal_template_map } : {}),
       use_site_template: formData.markup_only ? false : formData.use_site_template,
+      ...(parsedCompetitorUrls.length > 0 ? { competitor_urls: parsedCompetitorUrls } : {}),
     });
   };
 
@@ -1008,6 +1024,25 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   </button>
                 )}
               </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Competitor URLs (optional, max 50)
+              </label>
+              <textarea
+                rows={4}
+                placeholder={
+                  "One per line or comma-separated — merged with SERP results; duplicates by domain are dropped.\nhttps://competitor.example/article\nother-site.org/page"
+                }
+                value={formData.competitor_urls_raw}
+                onChange={(e) =>
+                  setFormData({ ...formData, competitor_urls_raw: e.target.value })
+                }
+                className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-mono text-xs"
+              />
+              <p className="text-xs text-slate-400 mt-1">
+                {parsedCompetitorUrls.length} / 50 URLs (normalized on save)
+              </p>
             </div>
             {clusterResult && clusterResult.total_assigned === 0 && clusterResult.total_keywords > 0 && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">

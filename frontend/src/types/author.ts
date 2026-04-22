@@ -2,6 +2,7 @@ export interface Author {
   id: string;
   author: string;
   country: string;
+  country_full?: string;
   language: string;
   bio?: string;
   co_short?: string;
@@ -18,6 +19,7 @@ export interface Author {
 export type AuthorFormPayload = {
   author: string;
   country: string;
+  country_full: string;
   language: string;
   bio: string;
   co_short: string;

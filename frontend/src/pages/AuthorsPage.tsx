@@ -9,6 +9,7 @@ import { Plus, User, X } from "lucide-react";
 const EMPTY_FORM: AuthorFormPayload = {
   author: "",
   country: "",
+  country_full: "",
   language: "",
   bio: "",
   co_short: "",
@@ -25,6 +26,7 @@ function authorToForm(a: Author): AuthorFormPayload {
   return {
     author: a.author ?? "",
     country: a.country ?? "",
+    country_full: a.country_full ?? "",
     language: a.language ?? "",
     bio: a.bio ?? "",
     co_short: a.co_short ?? "",
@@ -98,6 +100,17 @@ function AuthorFormFields({
                 {...field("language")}
               />
             </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              Страна (полное название, например: United Kingdom)
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. Germany, United Kingdom"
+              className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500"
+              {...field("country_full")}
+            />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>

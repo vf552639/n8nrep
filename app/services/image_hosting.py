@@ -3,8 +3,8 @@ Image hosting service — ImgBB implementation.
 """
 
 import base64
+
 import requests
-from typing import Optional
 
 
 class ImgBBUploader:

@@ -1,12 +1,13 @@
 """
 Build a single DOCX for a site project: title page, TOC, per-page meta table + content.
 """
+
 from __future__ import annotations
 
 import io
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 from docx import Document
@@ -33,18 +34,18 @@ def _strip_boilerplate_html(soup: BeautifulSoup) -> None:
             t.decompose()
 
 
-def _get_all_meta_from_task(task: Task, article: Optional[GeneratedArticle]) -> Dict[str, Any]:
+def _get_all_meta_from_task(task: Task, article: GeneratedArticle | None) -> dict[str, Any]:
     """
     Title/description/H1 via extract_meta_from_parsed; all_variants from results/variants (any case).
     """
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "title": "",
         "description": "",
         "h1": "",
         "all_variants": [],
     }
 
-    meta_data: Optional[Dict[str, Any]] = None
+    meta_data: dict[str, Any] | None = None
     if article and article.meta_data and isinstance(article.meta_data, dict):
         meta_data = article.meta_data
 
@@ -76,9 +77,7 @@ def _get_all_meta_from_task(task: Task, article: Optional[GeneratedArticle]) -> 
     return result
 
 
-def _resolve_single_article_body(
-    article: GeneratedArticle, task: Optional[Task]
-) -> Tuple[str, str]:
+def _resolve_single_article_body(article: GeneratedArticle, task: Task | None) -> tuple[str, str]:
     if task:
         body, mode = _get_content_from_task(task, article)
         if body.strip():
@@ -92,7 +91,7 @@ def _resolve_single_article_body(
 def _add_simple_article_meta_table(
     doc: Document, keyword: str, word_count: int, title: str, description: str
 ) -> None:
-    rows_data: List[Tuple[str, str]] = [
+    rows_data: list[tuple[str, str]] = [
         ("Keyword", keyword or ""),
         ("Word Count", str(int(word_count or 0))),
         ("Title", title or ""),
@@ -115,9 +114,7 @@ def _add_simple_article_meta_table(
             p.paragraph_format.space_after = Pt(3)
 
 
-def build_single_article_docx(
-    article: GeneratedArticle, task: Optional[Task] = None
-) -> bytes:
+def build_single_article_docx(article: GeneratedArticle, task: Task | None = None) -> bytes:
     """
     One article → .docx: H1 (or article title) as headline, meta table
     (Keyword, Word Count, Title from meta_generation, Description), then body.
@@ -174,11 +171,7 @@ def build_task_export_docx(db: Session, task: Task) -> bytes:
     Export one task to .docx: prefers saved GeneratedArticle; otherwise
     html_structure > final_editing > primary_generation from step_results.
     """
-    article = (
-        db.query(GeneratedArticle)
-        .filter(GeneratedArticle.task_id == task.id)
-        .first()
-    )
+    article = db.query(GeneratedArticle).filter(GeneratedArticle.task_id == task.id).first()
     if article:
         return build_single_article_docx(article, task)
 
@@ -197,9 +190,7 @@ def build_task_export_docx(db: Session, task: Task) -> bytes:
     return build_single_article_docx(synthetic, task)
 
 
-def _get_content_from_task(
-    task: Task, article: Optional[GeneratedArticle]
-) -> Tuple[str, str]:
+def _get_content_from_task(task: Task, article: GeneratedArticle | None) -> tuple[str, str]:
     """
     Returns (content, mode) where mode is 'html' or 'plain'.
     Prefer persisted article body and full_page extraction; otherwise same step order
@@ -258,7 +249,7 @@ def _html_table_to_docx(doc: Document, table_tag: Tag) -> None:
     if not rows:
         return
     max_cols = 0
-    parsed: List[List[str]] = []
+    parsed: list[list[str]] = []
     for tr in rows:
         cells = tr.find_all(["th", "td"])
         parsed.append([c.get_text(" ", strip=True) for c in cells])
@@ -361,12 +352,12 @@ def _add_meta_table(
     doc: Document,
     slug: str,
     filename: str,
-    meta_info: Dict[str, Any],
+    meta_info: dict[str, Any],
     main_keyword: str,
     word_count: int,
-    additional_keywords: List[str],
+    additional_keywords: list[str],
 ) -> None:
-    rows_data: List[Tuple[str, str]] = [
+    rows_data: list[tuple[str, str]] = [
         ("Slug", slug),
         ("Filename", filename),
         ("Meta Title", str(meta_info.get("title", "") or "")),
@@ -423,7 +414,7 @@ def build_project_docx(db: Session, project_id: str) -> bytes:
     if site:
         site_label = f"{site.name} / {site.domain}"
 
-    pages: List[BlueprintPage] = (
+    pages: list[BlueprintPage] = (
         db.query(BlueprintPage)
         .filter(BlueprintPage.blueprint_id == project.blueprint_id)
         .order_by(BlueprintPage.sort_order)
@@ -431,13 +422,13 @@ def build_project_docx(db: Session, project_id: str) -> bytes:
     )
 
     tasks = db.query(Task).filter(Task.project_id == project_id).all()
-    by_bp: Dict[str, Task] = {}
+    by_bp: dict[str, Task] = {}
     for t in tasks:
         if t.blueprint_page_id:
             by_bp[str(t.blueprint_page_id)] = t
 
     task_ids = [t.id for t in tasks]
-    articles_by_task: Dict[str, GeneratedArticle] = {}
+    articles_by_task: dict[str, GeneratedArticle] = {}
     if task_ids:
         arts = db.query(GeneratedArticle).filter(GeneratedArticle.task_id.in_(task_ids)).all()
         for a in arts:
@@ -466,9 +457,7 @@ def build_project_docx(db: Session, project_id: str) -> bytes:
         content, _ = _get_content_from_task(task, article) if task else ("", "plain")
         ok = bool(task and task.status == "completed" and content.strip())
         flag = "" if ok else " [не сгенерирована]"
-        doc.add_paragraph(
-            f"{idx}. {bp.page_title} (slug: {_fmt_slug(bp.page_slug)}){flag}"
-        )
+        doc.add_paragraph(f"{idx}. {bp.page_title} (slug: {_fmt_slug(bp.page_slug)}){flag}")
 
     doc.add_page_break()
 
@@ -479,7 +468,7 @@ def build_project_docx(db: Session, project_id: str) -> bytes:
         doc.add_heading(f"СТРАНИЦА {idx}: {bp.page_title}", level=1)
 
         cluster_info = clustered.get(bp.page_slug) if isinstance(clustered, dict) else None
-        add_kw: List[str] = []
+        add_kw: list[str] = []
         if isinstance(cluster_info, dict):
             ak = cluster_info.get("assigned_keywords")
             if isinstance(ak, list):
@@ -503,9 +492,7 @@ def build_project_docx(db: Session, project_id: str) -> bytes:
                 task.status,
             )
             p = doc.add_paragraph()
-            r = p.add_run(
-                "[Нет завершённого контента для этой страницы — пропуск основного текста.]"
-            )
+            r = p.add_run("[Нет завершённого контента для этой страницы — пропуск основного текста.]")
             r.italic = True
             wc = count_content_words(content) if content else 0
             _add_meta_table(

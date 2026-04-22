@@ -1,11 +1,15 @@
 import json
 import time
-from typing import Dict, Any, Optional, Tuple, Callable
-from openai import OpenAI
+from collections.abc import Callable
+from typing import Any
+
 import httpx
+from openai import OpenAI
+
 from app.config import settings
 
 _openai_client = None
+
 
 def get_openai_client() -> OpenAI:
     """Returns an OpenAI client configured for OpenRouter (Singleton)"""
@@ -18,35 +22,33 @@ def get_openai_client() -> OpenAI:
         )
     return _openai_client
 
+
 def generate_text(
     system_prompt: str,
     user_prompt: str,
     model: str = settings.DEFAULT_MODEL,
     temperature: float = 0.7,
-    frequency_penalty: Optional[float] = None,
-    presence_penalty: Optional[float] = None,
-    top_p: Optional[float] = None,
-    max_tokens: Optional[int] = None,
+    frequency_penalty: float | None = None,
+    presence_penalty: float | None = None,
+    top_p: float | None = None,
+    max_tokens: int | None = None,
     max_retries: int = 3,
-    response_format: Optional[Dict[str, str]] = None,
+    response_format: dict[str, str] | None = None,
     timeout: int = settings.LLM_REQUEST_TIMEOUT,
-    progress_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
-) -> Tuple[str, float, str, Optional[Dict[str, Any]]]:
+    progress_callback: Callable[[str, dict[str, Any]], None] | None = None,
+) -> tuple[str, float, str, dict[str, Any] | None]:
     """
     Generic LLM call with retry policy. Returns (generated_text, estimated_cost, actual_model, usage_or_none).
     """
     client = get_openai_client()
-    
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt}
-    ]
-    
+
+    messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
+
     last_error = None
     retries = 0
     while retries < max_retries:
         attempt_start = time.monotonic()
-        print(f"[LLM] Attempt {retries+1}/{max_retries}, model={model}, timeout={timeout}s")
+        print(f"[LLM] Attempt {retries + 1}/{max_retries}, model={model}, timeout={timeout}s")
         try:
             if progress_callback:
                 progress_callback(
@@ -64,8 +66,8 @@ def generate_text(
                 "messages": messages,
                 "temperature": temperature,
                 "extra_headers": {
-                    "HTTP-Referer": "https://example.com", # Update logically later
-                    "X-Title": "SEO-Generator"
+                    "HTTP-Referer": "https://example.com",  # Update logically later
+                    "X-Title": "SEO-Generator",
                 },
                 "timeout": timeout,
             }
@@ -78,13 +80,13 @@ def generate_text(
             if max_tokens is not None and max_tokens > 0:
                 kwargs["max_tokens"] = max_tokens
             if response_format:
-                 kwargs["response_format"] = response_format
-                 
+                kwargs["response_format"] = response_format
+
             raw_response = client.chat.completions.with_raw_response.create(**kwargs)
             response = raw_response.parse()
 
             cost = 0.0
-            usage_info: Optional[Dict[str, Any]] = None
+            usage_info: dict[str, Any] | None = None
 
             try:
                 raw_data = json.loads(raw_response.text)
@@ -144,15 +146,17 @@ def generate_text(
             elapsed = time.monotonic() - attempt_start
             print(f"[LLM] Response OK in {elapsed:.1f}s, model={actual_model}, tokens={usage_info}")
             return response.choices[0].message.content, cost, actual_model, usage_info
-            
+
         except Exception as e:
             last_error = str(e)
             error_msg = str(e)
             elapsed = time.monotonic() - attempt_start
-            print(f"[LLM] Error after {elapsed:.1f}s (Attempt {retries+1}/{max_retries}): {error_msg}")
+            print(f"[LLM] Error after {elapsed:.1f}s (Attempt {retries + 1}/{max_retries}): {error_msg}")
             sleep_seconds = 5
             reason = "unknown"
-            is_timeout = isinstance(e, (httpx.TimeoutException, TimeoutError)) or "timeout" in error_msg.lower()
+            is_timeout = (
+                isinstance(e, (httpx.TimeoutException, TimeoutError)) or "timeout" in error_msg.lower()
+            )
 
             # Rate limit or server error logic
             if "429" in error_msg or "rate limit" in error_msg.lower():
@@ -174,10 +178,9 @@ def generate_text(
                     },
                 )
             time.sleep(sleep_seconds)
-                 
+
             retries += 1
-            
+
     raise Exception(
-        f"LLM Generation failed after {max_retries} attempts. "
-        f"Model: {model}. Last error: {last_error}"
+        f"LLM Generation failed after {max_retries} attempts. Model: {model}. Last error: {last_error}"
     )
