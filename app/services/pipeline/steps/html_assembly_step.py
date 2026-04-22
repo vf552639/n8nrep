@@ -2,7 +2,7 @@ from app.config import settings
 from app.services.html_inserter import programmatic_html_insert
 from app.services.pipeline.errors import LLMError
 from app.services.pipeline.llm_client import call_agent
-from app.services.pipeline.persistence import _completed_step_body, add_log
+from app.services.pipeline.persistence import add_log, completed_step_body
 from app.services.pipeline.registry import register_step
 from app.services.pipeline.steps.base import StepPolicy, StepResult
 from app.services.pipeline.vars import setup_template_vars
@@ -24,10 +24,10 @@ class HtmlStructureStep:
 
     def run(self, ctx) -> StepResult:
         setup_template_vars(ctx)
-        final_html = _completed_step_body(ctx.task, STEP_FINAL_EDIT)
+        final_html = completed_step_body(ctx.task, STEP_FINAL_EDIT)
         if not final_html:
             for key in (STEP_IMPROVER, STEP_PRIMARY_GEN, STEP_PRIMARY_GEN_ABOUT, STEP_PRIMARY_GEN_LEGAL):
-                final_html = _completed_step_body(ctx.task, key)
+                final_html = completed_step_body(ctx.task, key)
                 if final_html:
                     break
 
