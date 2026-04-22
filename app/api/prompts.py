@@ -1,9 +1,11 @@
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import List, Optional, Dict, Any
+
 from app.database import get_db
-from app.schemas.prompt import PromptCreate, PromptTest, PromptTestContext, PromptUpdate
 from app.models.prompt import Prompt
+from app.schemas.prompt import PromptCreate, PromptTest, PromptTestContext, PromptUpdate
 from app.services.llm import generate_text
 from app.services.pipeline import apply_template_vars
 from app.services.prompt_llm_kwargs import llm_sampling_kwargs_from_prompt
@@ -11,45 +13,40 @@ from app.services.prompt_llm_kwargs import llm_sampling_kwargs_from_prompt
 router = APIRouter()
 
 
-def _sanitize(text: Optional[str]) -> str:
+def _sanitize(text: str | None) -> str:
     if text is None:
         return ""
-    return (
-        text.replace("\u2028", "\n")
-        .replace("\u2029", "\n\n")
-        .replace("\u00a0", " ")
-        .replace("\ufeff", "")
-    )
+    return text.replace("\u2028", "\n").replace("\u2029", "\n\n").replace("\u00a0", " ").replace("\ufeff", "")
 
 
 @router.get("/")
 def get_prompts(active_only: bool = Query(True), db: Session = Depends(get_db)):
     query = db.query(Prompt)
     if active_only:
-        query = query.filter(Prompt.is_active == True)
+        query = query.filter(Prompt.is_active.is_(True))
     prompts = query.order_by(Prompt.agent_name, Prompt.version.desc()).all()
-    return [{
-        "id": str(p.id),
-        "agent_name": p.agent_name,
-        "version": p.version,
-        "is_active": p.is_active,
-        "skip_in_pipeline": p.skip_in_pipeline,
-        "model": p.model,
-        "updated_at": p.updated_at.isoformat()
-    } for p in prompts]
+    return [
+        {
+            "id": str(p.id),
+            "agent_name": p.agent_name,
+            "version": p.version,
+            "is_active": p.is_active,
+            "skip_in_pipeline": p.skip_in_pipeline,
+            "model": p.model,
+            "updated_at": p.updated_at.isoformat(),
+        }
+        for p in prompts
+    ]
 
 
-@router.get("/{prompt_id}/versions", response_model=List[Dict[str, Any]])
+@router.get("/{prompt_id}/versions", response_model=list[dict[str, Any]])
 def list_prompt_versions(prompt_id: str, db: Session = Depends(get_db)):
     """All prompt rows for the same agent (version history), newest first."""
     current = db.query(Prompt).filter(Prompt.id == prompt_id).first()
     if not current:
         raise HTTPException(status_code=404, detail="Prompt not found")
     rows = (
-        db.query(Prompt)
-        .filter(Prompt.agent_name == current.agent_name)
-        .order_by(Prompt.version.desc())
-        .all()
+        db.query(Prompt).filter(Prompt.agent_name == current.agent_name).order_by(Prompt.version.desc()).all()
     )
     return [
         {
@@ -64,9 +61,7 @@ def list_prompt_versions(prompt_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{prompt_id}/versions/{source_prompt_id}/restore")
-def restore_prompt_version(
-    prompt_id: str, source_prompt_id: str, db: Session = Depends(get_db)
-):
+def restore_prompt_version(prompt_id: str, source_prompt_id: str, db: Session = Depends(get_db)):
     """Create a new active version by copying content from another row of the same agent."""
     current = db.query(Prompt).filter(Prompt.id == prompt_id).first()
     source = db.query(Prompt).filter(Prompt.id == source_prompt_id).first()
@@ -110,7 +105,7 @@ def restore_prompt_version(
     return {"id": str(new_prompt.id), "version": next_version}
 
 
-def _prompt_to_response(prompt: Prompt) -> Dict[str, Any]:
+def _prompt_to_response(prompt: Prompt) -> dict[str, Any]:
     return {
         "id": str(prompt.id),
         "agent_name": prompt.agent_name,
@@ -143,9 +138,7 @@ def get_prompt(prompt_id: str, db: Session = Depends(get_db)):
 
 
 @router.put("/{prompt_id}")
-def update_prompt_in_place(
-    prompt_id: str, body: PromptUpdate, db: Session = Depends(get_db)
-):
+def update_prompt_in_place(prompt_id: str, body: PromptUpdate, db: Session = Depends(get_db)):
     prompt = db.query(Prompt).filter(Prompt.id == prompt_id).first()
     if not prompt:
         raise HTTPException(status_code=404, detail="Prompt not found")
@@ -171,11 +164,16 @@ def update_prompt_in_place(
 @router.post("/")
 def create_prompt(prompt_in: PromptCreate, db: Session = Depends(get_db)):
     # Deactivate older prompts for this agent
-    existing = db.query(Prompt).filter(Prompt.agent_name == prompt_in.agent_name).order_by(Prompt.version.desc()).first()
+    existing = (
+        db.query(Prompt)
+        .filter(Prompt.agent_name == prompt_in.agent_name)
+        .order_by(Prompt.version.desc())
+        .first()
+    )
     next_version = (existing.version + 1) if existing else 1
-    
+
     db.query(Prompt).filter(Prompt.agent_name == prompt_in.agent_name).update({"is_active": False})
-    
+
     t_val = prompt_in.temperature if prompt_in.temperature is not None else 0.7
     f_val = prompt_in.frequency_penalty if prompt_in.frequency_penalty is not None else 0.0
     p_val = prompt_in.presence_penalty if prompt_in.presence_penalty is not None else 0.0
@@ -201,8 +199,9 @@ def create_prompt(prompt_in: PromptCreate, db: Session = Depends(get_db)):
     )
     db.add(new_prompt)
     db.commit()
-    
+
     return {"id": str(new_prompt.id), "version": next_version}
+
 
 @router.post("/test")
 def test_prompt(test_in: PromptTest):
@@ -212,17 +211,20 @@ def test_prompt(test_in: PromptTest):
     try:
         text, cost, actual_model, usage = generate_text(
             system_prompt=test_in.system_prompt,
-            user_prompt=f"{test_in.user_prompt}\n\n{test_in.test_data}" if test_in.user_prompt else test_in.test_data,
+            user_prompt=f"{test_in.user_prompt}\n\n{test_in.test_data}"
+            if test_in.user_prompt
+            else test_in.test_data,
             model=test_in.model,
             max_tokens=test_in.max_tokens,
             temperature=test_in.temperature,
             frequency_penalty=test_in.frequency_penalty,
             presence_penalty=test_in.presence_penalty,
-            top_p=test_in.top_p
+            top_p=test_in.top_p,
         )
         return {"result": text, "cost": cost, "model_used": actual_model, "usage": usage}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
 
 @router.post("/{prompt_id}/test")
 def test_prompt_by_id(prompt_id: str, test_ctx: PromptTestContext, db: Session = Depends(get_db)):
@@ -232,11 +234,11 @@ def test_prompt_by_id(prompt_id: str, test_ctx: PromptTestContext, db: Session =
     prompt = db.query(Prompt).filter(Prompt.id == prompt_id).first()
     if not prompt:
         raise HTTPException(status_code=404, detail="Prompt not found")
-        
+
     try:
         system_text, _ = apply_template_vars(prompt.system_prompt, test_ctx.context)
         user_text, _ = apply_template_vars(prompt.user_prompt or "", test_ctx.context)
-        
+
         target_model = test_ctx.model if test_ctx.model else prompt.model
 
         sampling = llm_sampling_kwargs_from_prompt(
@@ -259,7 +261,7 @@ def test_prompt_by_id(prompt_id: str, test_ctx: PromptTestContext, db: Session =
             model=target_model,
             **sampling,
         )
-        usage_out: Dict[str, Any] = {}
+        usage_out: dict[str, Any] = {}
         if usage:
             usage_out = dict(usage)
         return {
@@ -273,4 +275,4 @@ def test_prompt_by_id(prompt_id: str, test_ctx: PromptTestContext, db: Session =
             },
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

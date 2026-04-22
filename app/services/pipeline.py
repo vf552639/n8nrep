@@ -1,55 +1,64 @@
+import datetime
 import json
+import re
+import signal
 import traceback
-from sqlalchemy.orm import Session
-from bs4 import BeautifulSoup, Comment
 
-from app.models.task import Task
+from bs4 import BeautifulSoup, Comment
+from sqlalchemy.orm import Session
+
+from app.config import settings
 from app.models.article import GeneratedArticle
-from app.models.site import Site
 from app.models.author import Author
-from app.models.prompt import Prompt
 from app.models.blueprint import BlueprintPage
 from app.models.project import SiteProject
-from app.services.serp import fetch_serp_data
-from app.services.scraper import scrape_urls
-from app.services.llm import generate_text
-from app.services.prompt_llm_kwargs import (
-    llm_sampling_kwargs_from_prompt,
-    format_llm_params_log_line,
-)
-from app.services.template_engine import generate_full_page, get_template_for_reference
-from app.services.legal_reference import inject_legal_template_vars
-from app.services.notifier import notify_task_success, notify_task_failed
+from app.models.prompt import Prompt
+from app.models.site import Site
+from app.models.task import Task
+from app.schemas.jsonb_adapter import append_log_event
+from app.schemas.log_event import LogEvent, LogLevel
 from app.services.deduplication import ContentDeduplicator
-from app.config import settings
-
+from app.services.html_inserter import programmatic_html_insert
 from app.services.json_parser import clean_and_parse_json
+from app.services.legal_reference import inject_legal_template_vars
+from app.services.llm import generate_text
 from app.services.meta_parser import extract_meta_from_parsed
+from app.services.notifier import notify_task_failed, notify_task_success
 from app.services.pipeline_constants import *
 from app.services.pipeline_presets import (
     PIPELINE_PRESETS,
     pipeline_steps_use_serp,
     resolve_pipeline_steps,
 )
+from app.services.prompt_llm_kwargs import (
+    format_llm_params_log_line,
+    llm_sampling_kwargs_from_prompt,
+)
+from app.services.scraper import scrape_urls
+from app.services.serp import fetch_serp_data
+from app.services.template_engine import (
+    ensure_head_meta,
+    generate_full_page,
+    get_template_for_reference,
+    render_author_footer,
+)
+from app.services.url_utils import merge_urls_dedup_by_domain, normalize_url
 from app.services.word_counter import count_content_words
-from app.services.html_inserter import programmatic_html_insert
-import re
-import datetime
-import signal
+
 
 class PipelineContext:
     def __init__(self, db: Session, task_id: str, auto_mode: bool = False):
         self.db = db
         self.task_id = task_id
         self.auto_mode = auto_mode
-        
+
         self.task = db.query(Task).filter(Task.id == task_id).first()
         if not self.task:
             raise ValueError(f"Task {task_id} not found")
-            
+
         self.site = db.query(Site).filter(Site.id == self.task.target_site_id).first()
         self.site_name = self.site.name if self.site else "Unknown Site"
-        
+
         self.blueprint_page = None
         self.all_site_pages = []
         self.page_slug = ""
@@ -78,25 +87,46 @@ class PipelineContext:
                     {"slug": p.page_slug, "title": p.page_title, "type": p.page_type, "url": p.filename}
                     for p in all_pages_db
                 ]
-                    
+
         self.analysis_vars = {}
         self.template_vars = {}
         self.outline_data = self.task.outline or {}
 
+
 def get_prompt_obj(db: Session, agent_name: str) -> Prompt:
-    prompt_obj = db.query(Prompt).filter(Prompt.agent_name == agent_name, Prompt.is_active == True).first()
+    prompt_obj = db.query(Prompt).filter(Prompt.agent_name == agent_name, Prompt.is_active.is_(True)).first()
     if not prompt_obj and agent_name == "content_fact_checking":
-        prompt_obj = db.query(Prompt).filter(Prompt.agent_name == "fact_checking", Prompt.is_active == True).first()
+        prompt_obj = (
+            db.query(Prompt).filter(Prompt.agent_name == "fact_checking", Prompt.is_active.is_(True)).first()
+        )
     if not prompt_obj:
         raise Exception(f"No active prompt found for agent: {agent_name}")
     return prompt_obj
 
-def save_step_result(db: Session, task: Task, step_name: str, result: str, model: str = None, status: str = "completed", cost: float = 0.0, variables_snapshot: dict = None, resolved_prompts: dict = None, exclude_words_violations: dict = None, input_word_count: int = None, output_word_count: int = None, word_count_warning: bool = None, word_loss_percentage: float = None):
+
+def save_step_result(
+    db: Session,
+    task: Task,
+    step_name: str,
+    result: str,
+    model: str = None,
+    status: str = "completed",
+    cost: float = 0.0,
+    variables_snapshot: dict = None,
+    resolved_prompts: dict = None,
+    exclude_words_violations: dict = None,
+    input_word_count: int = None,
+    output_word_count: int = None,
+    word_count_warning: bool = None,
+    word_loss_percentage: float = None,
+):
     if task.step_results is None:
         task.step_results = {}
-    
+
     now_iso = datetime.datetime.utcnow().isoformat()
-    previous_step = (task.step_results or {}).get(step_name, {}) if isinstance(task.step_results, dict) else {}
+    previous_step = (
+        (task.step_results or {}).get(step_name, {}) if isinstance(task.step_results, dict) else {}
+    )
     step_data = {
         "status": status,
         "result": result[:50000] if result else None,
@@ -124,12 +154,13 @@ def save_step_result(db: Session, task: Task, step_name: str, result: str, model
         step_data["word_count_warning"] = word_count_warning
     if word_loss_percentage is not None:
         step_data["word_loss_percentage"] = word_loss_percentage
-    
+
     updated = dict(task.step_results)
     updated[step_name] = step_data
     task.step_results = updated
     task.last_heartbeat = datetime.datetime.utcnow()
-    db.commit() # Required to trigger SQLAlchemy JSON updates safely without flag_modified
+    db.commit()  # Required to trigger SQLAlchemy JSON updates safely without flag_modified
+
 
 def mark_step_running(db: Session, task: Task, step_key: str, model_name: str = None):
     """Mark pipeline step as running and preserve original started_at."""
@@ -142,18 +173,15 @@ def mark_step_running(db: Session, task: Task, step_key: str, model_name: str = 
         model=model_name,
     )
 
+
 def add_log(db: Session, task: Task, msg: str, level: str = "info", step: str = None):
-    entry = {
-        "ts": datetime.datetime.utcnow().isoformat(),
-        "level": level,
-        "msg": msg,
-    }
-    if step:
-        entry["step"] = step
-    
-    current_logs = list(task.log_events or [])
-    current_logs.append(entry)
-    task.log_events = current_logs[-500:]
+    event = LogEvent(
+        ts=datetime.datetime.utcnow(),
+        level=LogLevel(level),
+        msg=msg,
+        step=step,
+    )
+    task.log_events = append_log_event(task.log_events, event, max_len=500)
     db.commit()
 
 
@@ -204,17 +232,15 @@ def pick_html_for_meta(ctx: PipelineContext) -> str:
     return ""
 
 
-from typing import Optional, Tuple
-
-def apply_template_vars(text: str, variables: dict) -> Tuple[str, dict]:
+def apply_template_vars(text: str, variables: dict) -> tuple[str, dict]:
     """Replace {{variable_name}} placeholders in text with actual values and return a resolution report."""
     if not text:
         return text, {"resolved": [], "unresolved": [], "empty": []}
-        
+
     resolved = []
     unresolved = []
     empty = []
-    
+
     def replacer(match):
         key = match.group(1).strip()
         if key in variables:
@@ -231,70 +257,67 @@ def apply_template_vars(text: str, variables: dict) -> Tuple[str, dict]:
             if key not in unresolved:
                 unresolved.append(key)
             return match.group(0)  # keep original if not found
-            
-    replaced_text = re.sub(r'\{\{(.+?)\}\}', replacer, text)
-    report = {
-        "resolved": list(set(resolved)),
-        "unresolved": unresolved,
-        "empty": empty
-    }
+
+    replaced_text = re.sub(r"\{\{(.+?)\}\}", replacer, text)
+    report = {"resolved": list(set(resolved)), "unresolved": unresolved, "empty": empty}
     return replaced_text, report
 
-def call_agent(ctx: PipelineContext, agent_name: str, context: str, response_format=None, variables: dict = None) -> Tuple[str, float, str, dict, dict]:
+
+def call_agent(
+    ctx: PipelineContext, agent_name: str, context: str, response_format=None, variables: dict = None
+) -> tuple[str, float, str, dict, dict]:
     """Helper: load prompt config for agent_name, apply template vars, merge context, call LLM."""
     prompt = get_prompt_obj(ctx.db, agent_name)
-    
+
     if getattr(prompt, "skip_in_pipeline", False):
         print(f"Agent {agent_name} skipped (toggle off)")
         return "", 0.0, prompt.model, {}, {}
-    
+
     system_text = prompt.system_prompt
     user_template = prompt.user_prompt or ""
-    
+
     resolved_prompts = {}
     variables_snapshot = {}
-    
+
     if variables:
         system_text, sys_report = apply_template_vars(system_text, variables)
         user_template, user_report = apply_template_vars(user_template, variables)
-        
+
         # Merge reports
         all_resolved = list(set(sys_report["resolved"] + user_report["resolved"]))
         all_unresolved = list(set(sys_report["unresolved"] + user_report["unresolved"]))
         all_empty = list(set(sys_report["empty"] + user_report["empty"]))
-        
+
         log_msg = f"[VARS] agent={agent_name}"
         log_msg += f" | resolved: {', '.join(all_resolved) if all_resolved else '(none)'}"
         log_msg += f" | empty: {', '.join(all_empty) if all_empty else '(none)'}"
         log_msg += f" | unresolved: {', '.join(all_unresolved) if all_unresolved else '(none)'}"
-        
+
         level = "info"
         if all_unresolved:
             level = "warn"
-            
+
         add_log(ctx.db, ctx.task, log_msg, level=level, step=agent_name)
-        
+
         # Check Critical Vars
         critical = CRITICAL_VARS.get(agent_name, [])
         allow_empty_critical = CRITICAL_VARS_ALLOW_EMPTY.get(agent_name, frozenset())
         missing_critical = []
         for cv in critical:
-            if cv in all_unresolved:
+            if cv in all_unresolved or (cv in all_empty and cv not in allow_empty_critical):
                 missing_critical.append(cv)
-            elif cv in all_empty and cv not in allow_empty_critical:
-                missing_critical.append(cv)
-                
+
         if missing_critical:
             err_msg = f"CRITICAL VARIABLES MISSING OR EMPTY for {agent_name}: {', '.join(missing_critical)}"
             add_log(ctx.db, ctx.task, err_msg, level="error", step=agent_name)
             if getattr(settings, "STRICT_VARIABLE_CHECK", False):
                 raise ValueError(err_msg)
-                
+
         # Create truncated snapshot
         for k, v in variables.items():
             val_str = str(v)
             variables_snapshot[k] = val_str[:200] + "..." if len(val_str) > 200 else val_str
-            
+
         # --- INJECT EXCLUDE WORDS INTO PROMPT ---
         exclude_str = variables.get("exclude_words", "")
         if exclude_str.strip():
@@ -312,19 +335,19 @@ def call_agent(ctx: PipelineContext, agent_name: str, context: str, response_for
                 )
                 system_text += exclude_instruction
         # --- END INJECT ---
-        
+
         if agent_name == "final_editing":
             schema_instruction = (
                 "\n\n[SCHEMA/JSON-LD PROHIBITION — CRITICAL RULE]\n"
                 "You MUST NOT include any Schema.org markup, JSON-LD scripts, "
                 "or placeholder blocks like [SCHEMA: ...], [🛠️ SCHEMA: ...], "
-                "<script type=\"application/ld+json\">, or any references to structured data markup "
+                '<script type="application/ld+json">, or any references to structured data markup '
                 "in your output. Do NOT suggest, mention, or output any Schema.org related content. "
                 "Your output must be pure article HTML only (p, h2, h3, ul, ol, strong, em, a tags). "
                 "This rule has the HIGHEST priority."
             )
             system_text += schema_instruction
-    
+
     if user_template:
         ctx_text = (context or "").strip()
         if ctx_text:
@@ -333,29 +356,37 @@ def call_agent(ctx: PipelineContext, agent_name: str, context: str, response_for
             user_msg = user_template
     else:
         user_msg = context or ""
-    
+
     # --- INJECT RERUN FEEDBACK ---
     step_results = ctx.task.step_results or {}
     rerun_feedback = step_results.get("_rerun_feedback", {})
     if rerun_feedback.get("step") == agent_name and rerun_feedback.get("feedback"):
         user_msg += f"\n\n[HUMAN FEEDBACK ON PREVIOUS VERSION]\n{rerun_feedback['feedback']}"
-        add_log(ctx.db, ctx.task, f"Injected human feedback into prompt for {agent_name}", level="info", step=agent_name)
-        
+        add_log(
+            ctx.db,
+            ctx.task,
+            f"Injected human feedback into prompt for {agent_name}",
+            level="info",
+            step=agent_name,
+        )
+
         # Clear it so we don't apply it again later
         new_results = dict(step_results)
         del new_results["_rerun_feedback"]
         ctx.task.step_results = new_results
         ctx.db.commit()
     # -----------------------------
-    
+
     resolved_prompts["system_prompt"] = system_text[:6000]
     resolved_prompts["user_prompt"] = user_msg[:6000]
-    
+
     # Log context size for diagnostics
     total_chars = len(system_text) + len(user_msg)
-    print(f"[call_agent] {agent_name} | model={prompt.model} | "
-          f"system={len(system_text)} chars | user={len(user_msg)} chars | "
-          f"total={total_chars} chars (~{total_chars // 4} tokens est.)")
+    print(
+        f"[call_agent] {agent_name} | model={prompt.model} | "
+        f"system={len(system_text)} chars | user={len(user_msg)} chars | "
+        f"total={total_chars} chars (~{total_chars // 4} tokens est.)"
+    )
     est_tokens = total_chars // 4
     if est_tokens > 50000:
         add_log(
@@ -365,7 +396,7 @@ def call_agent(ctx: PipelineContext, agent_name: str, context: str, response_for
             level="warn",
             step=agent_name,
         )
-    
+
     sampling = llm_sampling_kwargs_from_prompt(prompt)
     kwargs = {
         "system_prompt": system_text,
@@ -432,12 +463,13 @@ def call_agent(ctx: PipelineContext, agent_name: str, context: str, response_for
     res, cost, model, _ = generate_text(**kwargs)
     return res, cost, model, resolved_prompts, variables_snapshot
 
+
 def call_agent_with_exclude_validation(
     ctx: PipelineContext,
     agent_name: str,
     context: str,
     step_constant: str,
-    max_retries: Optional[int] = None,
+    max_retries: int | None = None,
 ):
     from app.services.exclude_words_validator import ExcludeWordsValidator
 
@@ -504,13 +536,20 @@ def call_agent_with_exclude_validation(
         variables_snapshot = r_vars
 
         report = validator.validate(result_text)
-        
+
     violations_dict = None
     if not report["passed"]:
-        add_log(ctx.db, ctx.task, f"EXCLUDE_WORDS violation persists after retries: found {report['found_words']}", level="error", step=step_constant)
+        add_log(
+            ctx.db,
+            ctx.task,
+            f"EXCLUDE_WORDS violation persists after retries: found {report['found_words']}",
+            level="error",
+            step=step_constant,
+        )
         violations_dict = report["found_words"]
-        
+
     return result_text, total_cost, actual_model, resolved_prompts, variables_snapshot, violations_dict
+
 
 MAX_COMPETITOR_TITLES = 10
 MAX_COMPETITOR_DESCRIPTIONS = 10
@@ -520,6 +559,7 @@ MAX_AI_OVERVIEW_CHARS = 2000
 MAX_ANSWER_BOX_CHARS = 500
 MAX_KG_FACTS = 15
 
+
 def _safe_list(val) -> list:
     """Guarantees a list return even if val is None, a string, a number, etc."""
     if val is None:
@@ -528,16 +568,19 @@ def _safe_list(val) -> list:
         return [item for item in val if item is not None]
     return []
 
+
 def setup_vars(ctx: PipelineContext):
     try:
         scrape_info = ctx.outline_data.get("scrape_info", {}) if isinstance(ctx.outline_data, dict) else {}
         avg_words = scrape_info.get("avg_words", 800)
         headers_info = scrape_info.get("headers", [])
-        
+
         # === CRITICAL: Force safe dict ===
         raw_serp = ctx.task.serp_data
         if not isinstance(raw_serp, dict):
-            print(f"WARNING: serp_data is {type(raw_serp).__name__}, forcing empty dict. task_id={ctx.task_id}")
+            print(
+                f"WARNING: serp_data is {type(raw_serp).__name__}, forcing empty dict. task_id={ctx.task_id}"
+            )
             serp = {}
         else:
             serp = raw_serp
@@ -552,16 +595,21 @@ def setup_vars(ctx: PipelineContext):
             print(f"WARNING: _safe_list got {type(val).__name__}: {str(val)[:100]}")
             return []
 
-        paa = _safe_list(serp.get("paa"))
         related = _safe_list(serp.get("related_searches"))
         organic_results = [r for r in _safe_list(serp.get("organic_results")) if isinstance(r, dict)]
         paa_full = [p for p in _safe_list(serp.get("paa_full")) if isinstance(p, dict)]
-        featured_snippet = serp.get("featured_snippet") if isinstance(serp.get("featured_snippet"), dict) else None
-        knowledge_graph = serp.get("knowledge_graph") if isinstance(serp.get("knowledge_graph"), dict) else None
+        featured_snippet = (
+            serp.get("featured_snippet") if isinstance(serp.get("featured_snippet"), dict) else None
+        )
+        knowledge_graph = (
+            serp.get("knowledge_graph") if isinstance(serp.get("knowledge_graph"), dict) else None
+        )
         ai_overview = serp.get("ai_overview") if isinstance(serp.get("ai_overview"), dict) else None
         answer_box = serp.get("answer_box") if isinstance(serp.get("answer_box"), dict) else None
         serp_features = _safe_list(serp.get("serp_features"))
-        intent_signals = serp.get("search_intent_signals") if isinstance(serp.get("search_intent_signals"), dict) else {}
+        intent_signals = (
+            serp.get("search_intent_signals") if isinstance(serp.get("search_intent_signals"), dict) else {}
+        )
 
         competitor_titles = []
         for r in organic_results:
@@ -663,13 +711,22 @@ def setup_vars(ctx: PipelineContext):
                 level="info",
                 step="setup_vars",
             )
-        
-        paa_with_answers = "\n".join([
-            f"Q: {p['question']}\nA: {p['answer']}" 
-            for p in paa_full if isinstance(p, dict) and p.get("answer")
-        ][:MAX_PAA_WITH_ANSWERS]) if paa_full else ""
-        
-        add_kw_text = f"\nAdditional Keywords: {ctx.task.additional_keywords}" if ctx.task.additional_keywords else ""
+
+        paa_with_answers = (
+            "\n".join(
+                [
+                    f"Q: {p['question']}\nA: {p['answer']}"
+                    for p in paa_full
+                    if isinstance(p, dict) and p.get("answer")
+                ][:MAX_PAA_WITH_ANSWERS]
+            )
+            if paa_full
+            else ""
+        )
+
+        add_kw_text = (
+            f"\nAdditional Keywords: {ctx.task.additional_keywords}" if ctx.task.additional_keywords else ""
+        )
 
         ctx.base_context = (
             f"Keyword: {ctx.task.main_keyword}{add_kw_text}\n"
@@ -694,9 +751,9 @@ def setup_vars(ctx: PipelineContext):
                 f"Text: {featured_snippet.get('description')}\n"
                 f"Source: {featured_snippet.get('domain')}"
             )
-            
+
         if knowledge_graph:
-            facts = knowledge_graph.get('facts', [])[:MAX_KG_FACTS]
+            facts = knowledge_graph.get("facts", [])[:MAX_KG_FACTS]
             ctx.base_context += (
                 f"\n\nKnowledge Graph:\n"
                 f"Entity: {knowledge_graph.get('title')}"
@@ -704,18 +761,14 @@ def setup_vars(ctx: PipelineContext):
                 f"Description: {knowledge_graph.get('description', '')}\n"
                 f"Facts: {json.dumps(facts, ensure_ascii=False)}"
             )
-            
+
         if ai_overview:
             ctx.base_context += (
-                f"\n\nGoogle AI Overview:\n"
-                f"{ai_overview.get('text', '')[:MAX_AI_OVERVIEW_CHARS]}"
+                f"\n\nGoogle AI Overview:\n{ai_overview.get('text', '')[:MAX_AI_OVERVIEW_CHARS]}"
             )
-            
+
         if answer_box:
-            ctx.base_context += (
-                f"\n\nAnswer Box:\n"
-                f"{answer_box.get('text', '')[:MAX_ANSWER_BOX_CHARS]}"
-            )
+            ctx.base_context += f"\n\nAnswer Box:\n{answer_box.get('text', '')[:MAX_ANSWER_BOX_CHARS]}"
 
         ctx.analysis_vars = {
             "keyword": ctx.task.main_keyword,
@@ -750,13 +803,21 @@ def setup_vars(ctx: PipelineContext):
         # Restore results from previous pipeline phases (setup_vars recreates analysis_vars from scratch)
         if isinstance(ctx.outline_data, dict):
             if ctx.outline_data.get("ai_structure"):
-                ctx.analysis_vars["result_ai_structure_analysis"] = str(ctx.outline_data["ai_structure"])[:300]
+                ctx.analysis_vars["result_ai_structure_analysis"] = str(ctx.outline_data["ai_structure"])[
+                    :300
+                ]
             if ctx.outline_data.get("chunk_analysis"):
-                ctx.analysis_vars["result_chunk_cluster_analysis"] = str(ctx.outline_data["chunk_analysis"])[:300]
+                ctx.analysis_vars["result_chunk_cluster_analysis"] = str(ctx.outline_data["chunk_analysis"])[
+                    :300
+                ]
             if ctx.outline_data.get("competitor_structure"):
-                ctx.analysis_vars["result_competitor_structure_analysis"] = str(ctx.outline_data["competitor_structure"])[:300]
+                ctx.analysis_vars["result_competitor_structure_analysis"] = str(
+                    ctx.outline_data["competitor_structure"]
+                )[:300]
             if ctx.outline_data.get("final_structure"):
-                ctx.analysis_vars["result_final_structure_analysis"] = str(ctx.outline_data["final_structure"])[:300]
+                ctx.analysis_vars["result_final_structure_analysis"] = str(
+                    ctx.outline_data["final_structure"]
+                )[:300]
             # Parsed sub-variables from ai_structure
             parsed = ctx.outline_data.get("ai_structure_parsed", {})
             if isinstance(parsed, dict):
@@ -767,6 +828,7 @@ def setup_vars(ctx: PipelineContext):
     except Exception as e:
         print(f"CRITICAL: setup_vars failed: {e}. Using empty defaults. task_id={ctx.task_id}")
         import traceback
+
         print(traceback.format_exc())
         ctx.analysis_vars = {
             "keyword": ctx.task.main_keyword,
@@ -794,13 +856,22 @@ def setup_vars(ctx: PipelineContext):
         # Restore results even in fallback
         if isinstance(ctx.outline_data, dict):
             if ctx.outline_data.get("ai_structure"):
-                ctx.analysis_vars["result_ai_structure_analysis"] = str(ctx.outline_data["ai_structure"])[:300]
+                ctx.analysis_vars["result_ai_structure_analysis"] = str(ctx.outline_data["ai_structure"])[
+                    :300
+                ]
             if ctx.outline_data.get("chunk_analysis"):
-                ctx.analysis_vars["result_chunk_cluster_analysis"] = str(ctx.outline_data["chunk_analysis"])[:300]
+                ctx.analysis_vars["result_chunk_cluster_analysis"] = str(ctx.outline_data["chunk_analysis"])[
+                    :300
+                ]
             if ctx.outline_data.get("competitor_structure"):
-                ctx.analysis_vars["result_competitor_structure_analysis"] = str(ctx.outline_data["competitor_structure"])[:300]
+                ctx.analysis_vars["result_competitor_structure_analysis"] = str(
+                    ctx.outline_data["competitor_structure"]
+                )[:300]
             if ctx.outline_data.get("final_structure"):
-                ctx.analysis_vars["result_final_structure_analysis"] = str(ctx.outline_data["final_structure"])[:300]
+                ctx.analysis_vars["result_final_structure_analysis"] = str(
+                    ctx.outline_data["final_structure"]
+                )[:300]
+
 
 def setup_template_vars(ctx: PipelineContext):
     # Defaults in case no author is assigned
@@ -849,13 +920,16 @@ def setup_template_vars(ctx: PipelineContext):
     ctx.template_vars = {
         "already_covered_topics": already_covered_topics,
         "keyword": ctx.task.main_keyword,
-        "additional_keywords": ctx.task.additional_keywords or ctx.analysis_vars.get("additional_keywords", ""),
+        "additional_keywords": ctx.task.additional_keywords
+        or ctx.analysis_vars.get("additional_keywords", ""),
         "country": ctx.task.country,
         "language": ctx.task.language,
         "page_type": ctx.task.page_type,
-        "competitors_headers": json.dumps(ctx.task.outline.get('scrape_info', {}).get('headers', []), ensure_ascii=False),
+        "competitors_headers": json.dumps(
+            ctx.task.outline.get("scrape_info", {}).get("headers", []), ensure_ascii=False
+        ),
         "merged_markdown": ctx.task.competitors_text or "",
-        "avg_word_count": str(ctx.task.outline.get('scrape_info', {}).get('avg_words', 800)),
+        "avg_word_count": str(ctx.task.outline.get("scrape_info", {}).get("avg_words", 800)),
         "author": author_name,
         "author_style": author_style,
         "imitation": imitation,
@@ -872,7 +946,9 @@ def setup_template_vars(ctx: PipelineContext):
         "structura": ctx.task.outline.get("ai_structure_parsed", {}).get("structura", ""),
         "result_chunk_cluster_analysis": ctx.task.outline.get("chunk_analysis", ""),
         "result_competitor_structure_analysis": ctx.task.outline.get("competitor_structure", ""),
-        "result_final_structure_analysis": ctx.task.outline.get("final_structure", json.dumps(ctx.task.outline.get("final_outline", {}), ensure_ascii=False)),
+        "result_final_structure_analysis": ctx.task.outline.get(
+            "final_structure", json.dumps(ctx.task.outline.get("final_outline", {}), ensure_ascii=False)
+        ),
         "page_slug": ctx.page_slug,
         "page_title": ctx.page_title,
         "all_site_pages": json.dumps(ctx.all_site_pages, ensure_ascii=False),
@@ -888,7 +964,7 @@ def setup_template_vars(ctx: PipelineContext):
         "search_intent_signals": ctx.analysis_vars.get("search_intent_signals", ""),
         "related_searches": ctx.analysis_vars.get("related_searches", ""),
         "people_also_search": ctx.analysis_vars.get("people_also_search", ""),
-        "structure_fact_checking": ""
+        "structure_fact_checking": "",
     }
 
     # Completed pipeline steps → {{result_<step_key>}} (only if variable missing or empty)
@@ -909,11 +985,7 @@ def setup_template_vars(ctx: PipelineContext):
     # Fetch HTML template reference for LLM injection (optional per-project)
     use_template = True
     if ctx.task.project_id:
-        project = (
-            ctx.db.query(SiteProject)
-            .filter(SiteProject.id == ctx.task.project_id)
-            .first()
-        )
+        project = ctx.db.query(SiteProject).filter(SiteProject.id == ctx.task.project_id).first()
         if project and not getattr(project, "use_site_template", True):
             use_template = False
 
@@ -929,13 +1001,14 @@ def setup_template_vars(ctx: PipelineContext):
 
     inject_legal_template_vars(ctx)
 
+
 def run_phase(db: Session, task: Task, step_key: str, phase_func, *args, **kwargs):
     """Wrapper that skips phase_func if already completed."""
     if task.step_results and step_key in task.step_results:
         if task.step_results[step_key].get("status") == "completed":
             print(f"Skipping {step_key} - already completed")
             return
-            
+
     print(f"Running phase: {step_key}")
     task.last_heartbeat = datetime.datetime.utcnow()
     db.commit()
@@ -944,8 +1017,10 @@ def run_phase(db: Session, task: Task, step_key: str, phase_func, *args, **kwarg
     alarm_enabled = False
     try:
         if hasattr(signal, "SIGALRM"):
+
             def _handle_step_timeout(signum, frame):
                 raise TimeoutError(f"Step timed out after {timeout_seconds}s")
+
             try:
                 old_handler = signal.getsignal(signal.SIGALRM)
                 signal.signal(signal.SIGALRM, _handle_step_timeout)
@@ -966,6 +1041,7 @@ def run_phase(db: Session, task: Task, step_key: str, phase_func, *args, **kwarg
             if old_handler is not None:
                 signal.signal(signal.SIGALRM, old_handler)
 
+
 def phase_serp(ctx: PipelineContext):
     if not ctx.task.serp_data:
         add_log(ctx.db, ctx.task, "Fetching SERP data...", step=STEP_SERP)
@@ -981,7 +1057,7 @@ def phase_serp(ctx: PipelineContext):
             add_log(
                 ctx.db,
                 ctx.task,
-                f"❌ SERP fetch failed: {str(serp_err)}",
+                f"❌ SERP fetch failed: {serp_err!s}",
                 level="error",
                 step=STEP_SERP,
             )
@@ -993,9 +1069,31 @@ def phase_serp(ctx: PipelineContext):
                 status="failed",
             )
             raise
+
+        user_urls: list[str] = []
+        if ctx.task.project_id:
+            project_row = ctx.db.query(SiteProject).filter(SiteProject.id == ctx.task.project_id).first()
+            if project_row and project_row.competitor_urls:
+                user_urls = [u for u in (normalize_url(x) for x in project_row.competitor_urls) if u]
+
+        if user_urls and isinstance(serp_data, dict):
+            orig_urls = list(serp_data.get("urls") or [])
+            merged, duplicates = merge_urls_dedup_by_domain(orig_urls, user_urls)
+            serp_data["urls"] = merged
+            serp_data["user_competitor_urls"] = user_urls
+            serp_data["user_competitor_duplicates"] = duplicates
+            add_log(
+                ctx.db,
+                ctx.task,
+                f"Merged {len(user_urls)} user URLs ({len(duplicates)} duplicate domains skipped); "
+                f"SERP urls: {len(orig_urls)} → {len(merged)}",
+                step=STEP_SERP,
+            )
+
         ctx.task.serp_data = serp_data
         ctx.db.commit()
-        add_log(ctx.db, ctx.task, f"SERP Research completed.", step=STEP_SERP)
+        add_log(ctx.db, ctx.task, "SERP Research completed.", step=STEP_SERP)
+
         # Save summary for step_result (full data in task.serp_data)
         def _safe_len(val) -> int:
             return len(val) if isinstance(val, list) else 0
@@ -1004,23 +1102,53 @@ def phase_serp(ctx: PipelineContext):
             "source": serp_data.get("source", "unknown") if isinstance(serp_data, dict) else "unknown",
             "_from_cache": bool(serp_data.get("_from_cache")) if isinstance(serp_data, dict) else False,
             "urls_count": _safe_len(serp_data.get("urls")) if isinstance(serp_data, dict) else 0,
-            "organic_count": _safe_len(serp_data.get("organic_results")) if isinstance(serp_data, dict) else 0,
+            "organic_count": _safe_len(serp_data.get("organic_results"))
+            if isinstance(serp_data, dict)
+            else 0,
             "paa_count": _safe_len(serp_data.get("paa_full")) if isinstance(serp_data, dict) else 0,
-            "related_count": _safe_len(serp_data.get("related_searches")) if isinstance(serp_data, dict) else 0,
-            "has_featured_snippet": serp_data.get("featured_snippet") is not None if isinstance(serp_data, dict) else False,
-            "has_knowledge_graph": serp_data.get("knowledge_graph") is not None if isinstance(serp_data, dict) else False,
-            "has_ai_overview": serp_data.get("ai_overview") is not None if isinstance(serp_data, dict) else False,
-            "has_answer_box": serp_data.get("answer_box") is not None if isinstance(serp_data, dict) else False,
-            "ads_count": serp_data.get("search_intent_signals", {}).get("ads_count", 0) if isinstance(serp_data, dict) else 0,
-            "people_also_search_count": _safe_len(serp_data.get("people_also_search")) if isinstance(serp_data, dict) else 0,
-            "people_also_search": _safe_list(serp_data.get("people_also_search")) if isinstance(serp_data, dict) else [],
-            "serp_features": _safe_list(serp_data.get("serp_features")) if isinstance(serp_data, dict) else [],
+            "related_count": _safe_len(serp_data.get("related_searches"))
+            if isinstance(serp_data, dict)
+            else 0,
+            "has_featured_snippet": serp_data.get("featured_snippet") is not None
+            if isinstance(serp_data, dict)
+            else False,
+            "has_knowledge_graph": serp_data.get("knowledge_graph") is not None
+            if isinstance(serp_data, dict)
+            else False,
+            "has_ai_overview": serp_data.get("ai_overview") is not None
+            if isinstance(serp_data, dict)
+            else False,
+            "has_answer_box": serp_data.get("answer_box") is not None
+            if isinstance(serp_data, dict)
+            else False,
+            "ads_count": serp_data.get("search_intent_signals", {}).get("ads_count", 0)
+            if isinstance(serp_data, dict)
+            else 0,
+            "people_also_search_count": _safe_len(serp_data.get("people_also_search"))
+            if isinstance(serp_data, dict)
+            else 0,
+            "people_also_search": _safe_list(serp_data.get("people_also_search"))
+            if isinstance(serp_data, dict)
+            else [],
+            "serp_features": _safe_list(serp_data.get("serp_features"))
+            if isinstance(serp_data, dict)
+            else [],
             "urls": _safe_list(serp_data.get("urls")) if isinstance(serp_data, dict) else [],
+            "user_competitor_urls_count": len(user_urls) if isinstance(serp_data, dict) else 0,
+            "user_competitor_duplicates": list(serp_data.get("user_competitor_duplicates") or [])
+            if isinstance(serp_data, dict)
+            else [],
         }
         if isinstance(serp_data, dict) and serp_data.get("source") == "google+bing":
             serp_summary["google_data"] = serp_data.get("google_data")
             serp_summary["bing_data"] = serp_data.get("bing_data")
-        save_step_result(ctx.db, ctx.task, STEP_SERP, result=json.dumps(serp_summary, ensure_ascii=False), status="completed")
+        save_step_result(
+            ctx.db,
+            ctx.task,
+            STEP_SERP,
+            result=json.dumps(serp_summary, ensure_ascii=False),
+            status="completed",
+        )
         if not ctx.auto_mode:
             step_results = dict(ctx.task.step_results or {})
             step_results["_pipeline_pause"] = {"active": True, "reason": "serp_review"}
@@ -1034,36 +1162,47 @@ def phase_serp(ctx: PipelineContext):
                 step=STEP_SERP,
             )
 
+
 def phase_scraping(ctx: PipelineContext):
     if not ctx.task.competitors_text:
         serp_data = ctx.task.serp_data if isinstance(ctx.task.serp_data, dict) else {}
         urls = serp_data.get("urls", [])
         if not urls:
             serp_source = serp_data.get("source", "unknown")
-            add_log(ctx.db, ctx.task, 
-                    f"❌ No organic URLs in SERP data (source={serp_source}) — pipeline stopped. "
-                    "Check SERP step logs for debug info.", 
-                    level="error", step=STEP_SCRAPING)
-            save_step_result(ctx.db, ctx.task, STEP_SCRAPING, 
-                             result=json.dumps({"error": "No organic URLs", "serp_source": serp_source}), 
-                             status="failed")
-            raise Exception(f"Pipeline stopped: SERP returned 0 organic URLs (source={serp_source}). Cannot proceed without competitor data.")
-        
+            add_log(
+                ctx.db,
+                ctx.task,
+                f"❌ No organic URLs in SERP data (source={serp_source}) — pipeline stopped. "
+                "Check SERP step logs for debug info.",
+                level="error",
+                step=STEP_SCRAPING,
+            )
+            save_step_result(
+                ctx.db,
+                ctx.task,
+                STEP_SCRAPING,
+                result=json.dumps({"error": "No organic URLs", "serp_source": serp_source}),
+                status="failed",
+            )
+            raise Exception(
+                f"Pipeline stopped: SERP returned 0 organic URLs (source={serp_source}). Cannot proceed without competitor data."
+            )
+
         add_log(ctx.db, ctx.task, f"Scraping {len(urls)} competitors...", step=STEP_SCRAPING)
         mark_step_running(ctx.db, ctx.task, STEP_SCRAPING)
-    
+
         scrape_data = scrape_urls(urls)
         ctx.task.competitors_text = scrape_data["merged_text"]
-    
+
         ctx.task.outline = {
             "scrape_info": {
                 "avg_words": scrape_data["average_word_count"],
-                "headers": scrape_data["headers_structure"]
+                "headers": scrape_data["headers_structure"],
             }
         }
         ctx.db.commit()
         ctx.outline_data = ctx.task.outline
-        
+
         scrape_summary = {
             "total_from_serp": len(urls),
             "total_attempted": scrape_data["total_attempted"],
@@ -1083,8 +1222,20 @@ def phase_scraping(ctx: PipelineContext):
             "cache_misses": scrape_data.get("cache_misses", 0),
         }
 
-        add_log(ctx.db, ctx.task, f"Scraped competitors. Avg word count: {scrape_data['average_word_count']}", step=STEP_SCRAPING)
-        save_step_result(ctx.db, ctx.task, STEP_SCRAPING, result=json.dumps(scrape_summary, ensure_ascii=False), status="completed")
+        add_log(
+            ctx.db,
+            ctx.task,
+            f"Scraped competitors. Avg word count: {scrape_data['average_word_count']}",
+            step=STEP_SCRAPING,
+        )
+        save_step_result(
+            ctx.db,
+            ctx.task,
+            STEP_SCRAPING,
+            result=json.dumps(scrape_summary, ensure_ascii=False),
+            status="completed",
+        )
+
 
 def phase_ai_structure(ctx: PipelineContext):
     ctx.db.refresh(ctx.task)  # Force reload from DB
@@ -1092,16 +1243,25 @@ def phase_ai_structure(ctx: PipelineContext):
     add_log(ctx.db, ctx.task, "Starting AI Structure Analysis...", step=STEP_AI_ANALYSIS)
     mark_step_running(ctx.db, ctx.task, STEP_AI_ANALYSIS)
     ai_structure, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
-        ctx, "ai_structure_analysis", ctx.base_context, 
-        response_format={"type": "json_object"}, variables=ctx.analysis_vars
+        ctx,
+        "ai_structure_analysis",
+        ctx.base_context,
+        response_format={"type": "json_object"},
+        variables=ctx.analysis_vars,
     )
-    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
-    
+    ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + step_cost
+
     ctx.analysis_vars["result_ai_structure_analysis"] = ai_structure
     ctx.outline_data["ai_structure"] = ai_structure
-    
-    add_log(ctx.db, ctx.task, f"ai_structure raw (first 500): {ai_structure[:500]}", level="debug", step=STEP_AI_ANALYSIS)
-    
+
+    add_log(
+        ctx.db,
+        ctx.task,
+        f"ai_structure raw (first 500): {ai_structure[:500]}",
+        level="debug",
+        step=STEP_AI_ANALYSIS,
+    )
+
     ai_struct_data = clean_and_parse_json(
         ai_structure,
         unwrap_keys={"intent", "Taxonomy", "Attention", "structura"},
@@ -1112,18 +1272,48 @@ def phase_ai_structure(ctx: PipelineContext):
         ctx.analysis_vars["Attention"] = ai_struct_data.get("Attention", "")
         ctx.analysis_vars["structura"] = ai_struct_data.get("structura", "")
         ctx.outline_data["ai_structure_parsed"] = ai_struct_data
-        
+
         if not ai_struct_data.get("intent"):
-            add_log(ctx.db, ctx.task, f"Warning: 'intent' is empty after parsing ai_structure", level="warn", step=STEP_AI_ANALYSIS)
+            add_log(
+                ctx.db,
+                ctx.task,
+                "Warning: 'intent' is empty after parsing ai_structure",
+                level="warn",
+                step=STEP_AI_ANALYSIS,
+            )
     else:
-        add_log(ctx.db, ctx.task, f"Warning: Failed to parse ai_structure_analysis JSON", level="warn", step=STEP_AI_ANALYSIS)
+        add_log(
+            ctx.db,
+            ctx.task,
+            "Warning: Failed to parse ai_structure_analysis JSON",
+            level="warn",
+            step=STEP_AI_ANALYSIS,
+        )
 
     ctx.task.outline = ctx.outline_data
     ctx.db.commit()
-    
-    final_status = "completed_with_warnings" if not ai_struct_data or not ai_struct_data.get("intent") else "completed"
-    add_log(ctx.db, ctx.task, f"AI Structure Analysis completed ({len(ai_structure)} chars)", step=STEP_AI_ANALYSIS)
-    save_step_result(ctx.db, ctx.task, STEP_AI_ANALYSIS, result=ai_structure, model=actual_model, status=final_status, cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
+
+    final_status = (
+        "completed_with_warnings" if not ai_struct_data or not ai_struct_data.get("intent") else "completed"
+    )
+    add_log(
+        ctx.db,
+        ctx.task,
+        f"AI Structure Analysis completed ({len(ai_structure)} chars)",
+        step=STEP_AI_ANALYSIS,
+    )
+    save_step_result(
+        ctx.db,
+        ctx.task,
+        STEP_AI_ANALYSIS,
+        result=ai_structure,
+        model=actual_model,
+        status=final_status,
+        cost=step_cost,
+        variables_snapshot=variables_snapshot,
+        resolved_prompts=resolved_prompts,
+    )
+
 
 def phase_chunk_analysis(ctx: PipelineContext):
     ctx.db.refresh(ctx.task)  # Force reload from DB
@@ -1132,15 +1322,33 @@ def phase_chunk_analysis(ctx: PipelineContext):
     mark_step_running(ctx.db, ctx.task, STEP_CHUNK_ANALYSIS)
     ai_structure = ctx.outline_data.get("ai_structure", "")
     chunk_context = f"{ctx.base_context}\n\nAI Structure Analysis:\n{ai_structure}"
-    chunk_analysis, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, "chunk_cluster_analysis", chunk_context, variables=ctx.analysis_vars)
-    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
-    
+    chunk_analysis, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
+        ctx, "chunk_cluster_analysis", chunk_context, variables=ctx.analysis_vars
+    )
+    ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + step_cost
+
     ctx.analysis_vars["result_chunk_cluster_analysis"] = chunk_analysis
     ctx.outline_data["chunk_analysis"] = chunk_analysis
     ctx.task.outline = ctx.outline_data
     ctx.db.commit()
-    add_log(ctx.db, ctx.task, f"Chunk Cluster Analysis completed ({len(chunk_analysis)} chars)", step=STEP_CHUNK_ANALYSIS)
-    save_step_result(ctx.db, ctx.task, STEP_CHUNK_ANALYSIS, result=chunk_analysis, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
+    add_log(
+        ctx.db,
+        ctx.task,
+        f"Chunk Cluster Analysis completed ({len(chunk_analysis)} chars)",
+        step=STEP_CHUNK_ANALYSIS,
+    )
+    save_step_result(
+        ctx.db,
+        ctx.task,
+        STEP_CHUNK_ANALYSIS,
+        result=chunk_analysis,
+        model=actual_model,
+        status="completed",
+        cost=step_cost,
+        variables_snapshot=variables_snapshot,
+        resolved_prompts=resolved_prompts,
+    )
+
 
 def phase_competitor_structure(ctx: PipelineContext):
     ctx.db.refresh(ctx.task)  # Force reload from DB
@@ -1153,22 +1361,40 @@ def phase_competitor_structure(ctx: PipelineContext):
         f"Competitors Text:\n{ctx.task.competitors_text[:20000]}\n\n"
         f"Chunk Analysis:\n{chunk_analysis}"
     )
-    competitor_structure, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, "competitor_structure_analysis", competitor_context, variables=ctx.analysis_vars)
-    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
-    
+    competitor_structure, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
+        ctx, "competitor_structure_analysis", competitor_context, variables=ctx.analysis_vars
+    )
+    ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + step_cost
+
     ctx.analysis_vars["result_competitor_structure_analysis"] = competitor_structure
     ctx.outline_data["competitor_structure"] = competitor_structure
     ctx.task.outline = ctx.outline_data
     ctx.db.commit()
-    add_log(ctx.db, ctx.task, f"Competitor Structure Analysis completed ({len(competitor_structure)} chars)", step=STEP_COMP_STRUCTURE)
-    save_step_result(ctx.db, ctx.task, STEP_COMP_STRUCTURE, result=competitor_structure, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
+    add_log(
+        ctx.db,
+        ctx.task,
+        f"Competitor Structure Analysis completed ({len(competitor_structure)} chars)",
+        step=STEP_COMP_STRUCTURE,
+    )
+    save_step_result(
+        ctx.db,
+        ctx.task,
+        STEP_COMP_STRUCTURE,
+        result=competitor_structure,
+        model=actual_model,
+        status="completed",
+        cost=step_cost,
+        variables_snapshot=variables_snapshot,
+        resolved_prompts=resolved_prompts,
+    )
+
 
 def phase_final_structure(ctx: PipelineContext):
     ctx.db.refresh(ctx.task)  # Force reload from DB
     setup_vars(ctx)
     add_log(ctx.db, ctx.task, "Starting Final Structure Analysis (JSON)...", step=STEP_FINAL_ANALYSIS)
     mark_step_running(ctx.db, ctx.task, STEP_FINAL_ANALYSIS)
-    
+
     final_analysis_context = (
         f"{ctx.base_context}\n\n"
         f"AI Structure Analysis:\n{ctx.outline_data.get('ai_structure', '')}\n\n"
@@ -1176,34 +1402,72 @@ def phase_final_structure(ctx: PipelineContext):
         f"Competitor Structure Analysis:\n{ctx.outline_data.get('competitor_structure', '')}"
     )
     outline_json_str, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
-        ctx, "final_structure_analysis", final_analysis_context,
-        response_format={"type": "json_object"}, variables=ctx.analysis_vars
+        ctx,
+        "final_structure_analysis",
+        final_analysis_context,
+        response_format={"type": "json_object"},
+        variables=ctx.analysis_vars,
     )
-    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
-    
+    ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + step_cost
+
     ctx.outline_data["final_outline"] = clean_and_parse_json(outline_json_str)
     ctx.outline_data["final_structure"] = outline_json_str
     ctx.task.outline = ctx.outline_data
     ctx.db.commit()
-    add_log(ctx.db, ctx.task, f"Final Structure Analysis completed", step=STEP_FINAL_ANALYSIS)
-    save_step_result(ctx.db, ctx.task, STEP_FINAL_ANALYSIS, result=outline_json_str, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
+    add_log(ctx.db, ctx.task, "Final Structure Analysis completed", step=STEP_FINAL_ANALYSIS)
+    save_step_result(
+        ctx.db,
+        ctx.task,
+        STEP_FINAL_ANALYSIS,
+        result=outline_json_str,
+        model=actual_model,
+        status="completed",
+        cost=step_cost,
+        variables_snapshot=variables_snapshot,
+        resolved_prompts=resolved_prompts,
+    )
+
 
 def phase_structure_fact_check(ctx: PipelineContext):
     setup_template_vars(ctx)
     add_log(ctx.db, ctx.task, "Starting Structure Fact-Checking...", step=STEP_STRUCTURE_FACT_CHECK)
     mark_step_running(ctx.db, ctx.task, STEP_STRUCTURE_FACT_CHECK)
-    
-    fact_check_report, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, "structure_fact_checking", "", variables=ctx.template_vars)
-    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
-    
-    add_log(ctx.db, ctx.task, f"Structure Fact-Checking completed ({len(fact_check_report)} chars)", step=STEP_STRUCTURE_FACT_CHECK)
-    save_step_result(ctx.db, ctx.task, STEP_STRUCTURE_FACT_CHECK, result=fact_check_report, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
+
+    fact_check_report, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
+        ctx, "structure_fact_checking", "", variables=ctx.template_vars
+    )
+    ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + step_cost
+
+    add_log(
+        ctx.db,
+        ctx.task,
+        f"Structure Fact-Checking completed ({len(fact_check_report)} chars)",
+        step=STEP_STRUCTURE_FACT_CHECK,
+    )
+    save_step_result(
+        ctx.db,
+        ctx.task,
+        STEP_STRUCTURE_FACT_CHECK,
+        result=fact_check_report,
+        model=actual_model,
+        status="completed",
+        cost=step_cost,
+        variables_snapshot=variables_snapshot,
+        resolved_prompts=resolved_prompts,
+    )
+
 
 def phase_image_prompt_gen(ctx: PipelineContext):
     """LLM agent builds image prompts per multimedia block using template vars."""
     if not settings.IMAGE_GEN_ENABLED:
         add_log(ctx.db, ctx.task, "Image generation disabled globally — skipping", step=STEP_IMAGE_PROMPT_GEN)
-        save_step_result(ctx.db, ctx.task, STEP_IMAGE_PROMPT_GEN, result=json.dumps({"images": [], "skipped": True}), status="completed")
+        save_step_result(
+            ctx.db,
+            ctx.task,
+            STEP_IMAGE_PROMPT_GEN,
+            result=json.dumps({"images": [], "skipped": True}),
+            status="completed",
+        )
         return
 
     from app.services.image_utils import (
@@ -1213,8 +1477,15 @@ def phase_image_prompt_gen(ctx: PipelineContext):
 
     outline_raw = ctx.task.step_results.get(STEP_FINAL_ANALYSIS, {}).get("result", "")
     if not outline_raw:
-        add_log(ctx.db, ctx.task, "No final structure found — skipping image prompt gen", step=STEP_IMAGE_PROMPT_GEN)
-        save_step_result(ctx.db, ctx.task, STEP_IMAGE_PROMPT_GEN, result=json.dumps({"images": []}), status="completed")
+        add_log(
+            ctx.db,
+            ctx.task,
+            "No final structure found — skipping image prompt gen",
+            step=STEP_IMAGE_PROMPT_GEN,
+        )
+        save_step_result(
+            ctx.db, ctx.task, STEP_IMAGE_PROMPT_GEN, result=json.dumps({"images": []}), status="completed"
+        )
         return
 
     outline_json = clean_and_parse_json(outline_raw)
@@ -1230,8 +1501,7 @@ def phase_image_prompt_gen(ctx: PipelineContext):
             add_log(
                 ctx.db,
                 ctx.task,
-                f"Found {len(text_blocks)} MULTIMEDIA block(s) via raw text fallback "
-                f"(not in JSON keys)",
+                f"Found {len(text_blocks)} MULTIMEDIA block(s) via raw text fallback (not in JSON keys)",
                 level="info",
                 step=STEP_IMAGE_PROMPT_GEN,
             )
@@ -1241,8 +1511,7 @@ def phase_image_prompt_gen(ctx: PipelineContext):
         add_log(
             ctx.db,
             ctx.task,
-            f"[DEBUG] No MULTIMEDIA found anywhere. "
-            f"Outline snippet (first 1500 chars): {outline_snippet}",
+            f"[DEBUG] No MULTIMEDIA found anywhere. Outline snippet (first 1500 chars): {outline_snippet}",
             level="warn",
             step=STEP_IMAGE_PROMPT_GEN,
         )
@@ -1256,8 +1525,12 @@ def phase_image_prompt_gen(ctx: PipelineContext):
             level="warn",
             step=STEP_IMAGE_PROMPT_GEN,
         )
-        add_log(ctx.db, ctx.task, "No MULTIMEDIA blocks found in outline — skipping", step=STEP_IMAGE_PROMPT_GEN)
-        save_step_result(ctx.db, ctx.task, STEP_IMAGE_PROMPT_GEN, result=json.dumps({"images": []}), status="completed")
+        add_log(
+            ctx.db, ctx.task, "No MULTIMEDIA blocks found in outline — skipping", step=STEP_IMAGE_PROMPT_GEN
+        )
+        save_step_result(
+            ctx.db, ctx.task, STEP_IMAGE_PROMPT_GEN, result=json.dumps({"images": []}), status="completed"
+        )
         return
 
     TYPE_NORMALIZE_MAP = {
@@ -1323,10 +1596,7 @@ def phase_image_prompt_gen(ctx: PipelineContext):
 
     generatable_types = {"Image", "Infographic"}
     normalized_types = [(_norm_mm_type(b) or "Image") for b in multimedia_blocks]
-    eligible_blocks = [
-        b for b in multimedia_blocks
-        if (_norm_mm_type(b) or "Image") in generatable_types
-    ]
+    eligible_blocks = [b for b in multimedia_blocks if (_norm_mm_type(b) or "Image") in generatable_types]
     skipped_count = len(multimedia_blocks) - len(eligible_blocks)
     add_log(
         ctx.db,
@@ -1343,7 +1613,9 @@ def phase_image_prompt_gen(ctx: PipelineContext):
             "MULTIMEDIA blocks found, but no generatable types (Image/Infographic) — skipping",
             step=STEP_IMAGE_PROMPT_GEN,
         )
-        save_step_result(ctx.db, ctx.task, STEP_IMAGE_PROMPT_GEN, result=json.dumps({"images": []}), status="completed")
+        save_step_result(
+            ctx.db, ctx.task, STEP_IMAGE_PROMPT_GEN, result=json.dumps({"images": []}), status="completed"
+        )
         return
 
     add_log(
@@ -1380,18 +1652,17 @@ def phase_image_prompt_gen(ctx: PipelineContext):
             }
         )
 
-        block_context = (
-            "MULTIMEDIA block payload:\n"
-            f"{json.dumps(block, ensure_ascii=False, indent=2)}"
-        )
+        block_context = f"MULTIMEDIA block payload:\n{json.dumps(block, ensure_ascii=False, indent=2)}"
 
         try:
-            block_result_json, block_cost, block_model, block_resolved_prompts, block_variables_snapshot = call_agent(
-                ctx,
-                "image_prompt_generation",
-                block_context,
-                response_format={"type": "json_object"},
-                variables=block_vars,
+            block_result_json, block_cost, block_model, block_resolved_prompts, block_variables_snapshot = (
+                call_agent(
+                    ctx,
+                    "image_prompt_generation",
+                    block_context,
+                    response_format={"type": "json_object"},
+                    variables=block_vars,
+                )
             )
             total_cost += block_cost
             actual_model = block_model
@@ -1520,10 +1791,15 @@ def phase_image_prompt_gen(ctx: PipelineContext):
                     step=STEP_IMAGE_PROMPT_GEN,
                 )
 
-    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + total_cost
+    ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + total_cost
     result_json = json.dumps({"images": images}, ensure_ascii=False)
 
-    add_log(ctx.db, ctx.task, f"Image prompt generation completed: {len(images)} prompts built", step=STEP_IMAGE_PROMPT_GEN)
+    add_log(
+        ctx.db,
+        ctx.task,
+        f"Image prompt generation completed: {len(images)} prompts built",
+        step=STEP_IMAGE_PROMPT_GEN,
+    )
     save_step_result(
         ctx.db,
         ctx.task,
@@ -1541,12 +1817,22 @@ def phase_image_gen(ctx: PipelineContext):
     """Service step: OpenRouter image models (sync), upload to ImgBB."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    from app.services.image_generator import ImageResult, OpenRouterImageGenerator, resolve_image_generation_model
+    from app.services.image_generator import (
+        ImageResult,
+        OpenRouterImageGenerator,
+        resolve_image_generation_model,
+    )
     from app.services.image_hosting import ImgBBUploader
 
     if not settings.IMAGE_GEN_ENABLED:
         add_log(ctx.db, ctx.task, "Image generation disabled — skipping", step=STEP_IMAGE_GEN)
-        save_step_result(ctx.db, ctx.task, STEP_IMAGE_GEN, result=json.dumps({"images": [], "skipped": True}), status="completed")
+        save_step_result(
+            ctx.db,
+            ctx.task,
+            STEP_IMAGE_GEN,
+            result=json.dumps({"images": [], "skipped": True}),
+            status="completed",
+        )
         return
     if not settings.OPENROUTER_API_KEY:
         add_log(
@@ -1587,7 +1873,9 @@ def phase_image_gen(ctx: PipelineContext):
 
     if not images_to_gen or (isinstance(prompt_data, dict) and prompt_data.get("skipped")):
         add_log(ctx.db, ctx.task, "No image prompts to process — skipping", step=STEP_IMAGE_GEN)
-        save_step_result(ctx.db, ctx.task, STEP_IMAGE_GEN, result=json.dumps({"images": []}), status="completed")
+        save_step_result(
+            ctx.db, ctx.task, STEP_IMAGE_GEN, result=json.dumps({"images": []}), status="completed"
+        )
         return
 
     model_id = resolve_image_generation_model(ctx.db)
@@ -1674,7 +1962,9 @@ def phase_image_gen(ctx: PipelineContext):
                 except Exception as e:
                     row["status"] = "failed"
                     row["error"] = str(e)
-                    add_log(ctx.db, ctx.task, f"❌ {img.get('id')} ImgBB: {e}", level="warn", step=STEP_IMAGE_GEN)
+                    add_log(
+                        ctx.db, ctx.task, f"❌ {img.get('id')} ImgBB: {e}", level="warn", step=STEP_IMAGE_GEN
+                    )
             else:
                 row["status"] = "failed"
                 row["error"] = result.error or "Image generation failed"
@@ -1695,15 +1985,30 @@ def phase_image_gen(ctx: PipelineContext):
         "summary": {"total": len(images_result), "completed": completed_count, "failed": failed_count},
         "model": model_id,
     }
-    save_step_result(ctx.db, ctx.task, STEP_IMAGE_GEN, result=json.dumps(result_payload, ensure_ascii=False), status="completed")
+    save_step_result(
+        ctx.db,
+        ctx.task,
+        STEP_IMAGE_GEN,
+        result=json.dumps(result_payload, ensure_ascii=False),
+        status="completed",
+    )
 
     if completed_count > 0 or failed_count > 0:
         step_results = dict(ctx.task.step_results or {})
-        step_results["_pipeline_pause"] = {"active": True, "reason": "image_review", "message": "Waiting for image review"}
+        step_results["_pipeline_pause"] = {
+            "active": True,
+            "reason": "image_review",
+            "message": "Waiting for image review",
+        }
         ctx.task.step_results = step_results
         ctx.task.status = "processing"
         ctx.db.commit()
-        add_log(ctx.db, ctx.task, f"🖼️ Image generation done: {completed_count} ok, {failed_count} failed. Waiting for review.", step=STEP_IMAGE_GEN)
+        add_log(
+            ctx.db,
+            ctx.task,
+            f"🖼️ Image generation done: {completed_count} ok, {failed_count} failed. Waiting for review.",
+            step=STEP_IMAGE_GEN,
+        )
     else:
         add_log(ctx.db, ctx.task, "No images generated — continuing pipeline", step=STEP_IMAGE_GEN)
 
@@ -1713,41 +2018,80 @@ def phase_image_inject(ctx: PipelineContext):
     html_result = ctx.task.step_results.get(STEP_HTML_STRUCT, {}).get("result", "")
     if not html_result:
         add_log(ctx.db, ctx.task, "No HTML structure found — skipping image inject", step=STEP_IMAGE_INJECT)
-        save_step_result(ctx.db, ctx.task, STEP_IMAGE_INJECT, result="", status="completed", input_word_count=0, output_word_count=0)
+        save_step_result(
+            ctx.db,
+            ctx.task,
+            STEP_IMAGE_INJECT,
+            result="",
+            status="completed",
+            input_word_count=0,
+            output_word_count=0,
+        )
         return
 
     image_data_raw = ctx.task.step_results.get(STEP_IMAGE_GEN, {}).get("result", "")
     if not image_data_raw:
         add_log(ctx.db, ctx.task, "No image data — passing HTML through unchanged", step=STEP_IMAGE_INJECT)
         wc = count_content_words(html_result)
-        save_step_result(ctx.db, ctx.task, STEP_IMAGE_INJECT, result=html_result, status="completed", input_word_count=wc, output_word_count=wc)
+        save_step_result(
+            ctx.db,
+            ctx.task,
+            STEP_IMAGE_INJECT,
+            result=html_result,
+            status="completed",
+            input_word_count=wc,
+            output_word_count=wc,
+        )
         return
 
     image_data = clean_and_parse_json(image_data_raw) if isinstance(image_data_raw, str) else image_data_raw
     if not isinstance(image_data, dict):
         wc = count_content_words(html_result)
-        save_step_result(ctx.db, ctx.task, STEP_IMAGE_INJECT, result=html_result, status="completed", input_word_count=wc, output_word_count=wc)
+        save_step_result(
+            ctx.db,
+            ctx.task,
+            STEP_IMAGE_INJECT,
+            result=html_result,
+            status="completed",
+            input_word_count=wc,
+            output_word_count=wc,
+        )
         return
 
-    approved_images = [img for img in image_data.get("images", []) if img.get("approved") is True and img.get("hosted_url")]
+    approved_images = [
+        img for img in image_data.get("images", []) if img.get("approved") is True and img.get("hosted_url")
+    ]
 
     if not approved_images:
-        add_log(ctx.db, ctx.task, "No approved images — cleaning MEDIA comment markers", step=STEP_IMAGE_INJECT)
-        cleaned = re.sub(r'<!--\s*MEDIA:.*?-->', '', html_result, flags=re.IGNORECASE | re.DOTALL)
+        add_log(
+            ctx.db, ctx.task, "No approved images — cleaning MEDIA comment markers", step=STEP_IMAGE_INJECT
+        )
+        cleaned = re.sub(r"<!--\s*MEDIA:.*?-->", "", html_result, flags=re.IGNORECASE | re.DOTALL)
         in_w = count_content_words(html_result)
         out_w = count_content_words(cleaned)
-        save_step_result(ctx.db, ctx.task, STEP_IMAGE_INJECT, result=cleaned, status="completed", input_word_count=in_w, output_word_count=out_w)
+        save_step_result(
+            ctx.db,
+            ctx.task,
+            STEP_IMAGE_INJECT,
+            result=cleaned,
+            status="completed",
+            input_word_count=in_w,
+            output_word_count=out_w,
+        )
         return
 
-    add_log(ctx.db, ctx.task, f"Injecting {len(approved_images)} approved images into HTML...", step=STEP_IMAGE_INJECT)
+    add_log(
+        ctx.db,
+        ctx.task,
+        f"Injecting {len(approved_images)} approved images into HTML...",
+        step=STEP_IMAGE_INJECT,
+    )
     mark_step_running(ctx.db, ctx.task, STEP_IMAGE_INJECT)
 
     soup = BeautifulSoup(html_result, "html.parser")
     media_comments = [
         node
-        for node in soup.find_all(
-            string=lambda text: isinstance(text, Comment) and "MEDIA:" in str(text)
-        )
+        for node in soup.find_all(string=lambda text: isinstance(text, Comment) and "MEDIA:" in str(text))
     ]
     injected_count = 0
 
@@ -1757,7 +2101,7 @@ def phase_image_inject(ctx: PipelineContext):
         figure_html = (
             f'<figure class="article-image">'
             f'<img src="{hosted_url}" alt="{alt_text}" width="800" loading="lazy">'
-            f'<figcaption>{alt_text}</figcaption>'
+            f"<figcaption>{alt_text}</figcaption>"
             f"</figure>"
         )
         figure_fragment = BeautifulSoup(figure_html, "html.parser")
@@ -1775,12 +2119,25 @@ def phase_image_inject(ctx: PipelineContext):
                 injected_count += 1
 
     result_html = str(soup)
-    result_html = re.sub(r'<!--\s*MEDIA:.*?-->', "", result_html, flags=re.IGNORECASE | re.DOTALL)
+    result_html = re.sub(r"<!--\s*MEDIA:.*?-->", "", result_html, flags=re.IGNORECASE | re.DOTALL)
 
-    add_log(ctx.db, ctx.task, f"Image injection completed: {injected_count}/{len(approved_images)} inserted", step=STEP_IMAGE_INJECT)
+    add_log(
+        ctx.db,
+        ctx.task,
+        f"Image injection completed: {injected_count}/{len(approved_images)} inserted",
+        step=STEP_IMAGE_INJECT,
+    )
     in_w = count_content_words(html_result)
     out_w = count_content_words(result_html)
-    save_step_result(ctx.db, ctx.task, STEP_IMAGE_INJECT, result=result_html, status="completed", input_word_count=in_w, output_word_count=out_w)
+    save_step_result(
+        ctx.db,
+        ctx.task,
+        STEP_IMAGE_INJECT,
+        result=result_html,
+        status="completed",
+        input_word_count=in_w,
+        output_word_count=out_w,
+    )
 
 
 def phase_primary_gen(ctx: PipelineContext):
@@ -1794,12 +2151,30 @@ def phase_primary_gen(ctx: PipelineContext):
     )
     add_log(ctx.db, ctx.task, "Starting Primary Generation...", step=STEP_PRIMARY_GEN)
     mark_step_running(ctx.db, ctx.task, STEP_PRIMARY_GEN)
-    draft_html, step_cost, actual_model, resolved_prompts, variables_snapshot, violations = call_agent_with_exclude_validation(ctx, "primary_generation", gen_context, step_constant=STEP_PRIMARY_GEN)
-    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
-    
-    add_log(ctx.db, ctx.task, f"Primary Generation completed ({len(draft_html)} chars)", step=STEP_PRIMARY_GEN)
+    draft_html, step_cost, actual_model, resolved_prompts, variables_snapshot, violations = (
+        call_agent_with_exclude_validation(
+            ctx, "primary_generation", gen_context, step_constant=STEP_PRIMARY_GEN
+        )
+    )
+    ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + step_cost
+
+    add_log(
+        ctx.db, ctx.task, f"Primary Generation completed ({len(draft_html)} chars)", step=STEP_PRIMARY_GEN
+    )
     out_wc = count_content_words(draft_html)
-    save_step_result(ctx.db, ctx.task, STEP_PRIMARY_GEN, result=draft_html, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts, exclude_words_violations=violations, output_word_count=out_wc)
+    save_step_result(
+        ctx.db,
+        ctx.task,
+        STEP_PRIMARY_GEN,
+        result=draft_html,
+        model=actual_model,
+        status="completed",
+        cost=step_cost,
+        variables_snapshot=variables_snapshot,
+        resolved_prompts=resolved_prompts,
+        exclude_words_violations=violations,
+        output_word_count=out_wc,
+    )
 
 
 def phase_primary_gen_about(ctx: PipelineContext):
@@ -1878,17 +2253,27 @@ def phase_primary_gen_legal(ctx: PipelineContext):
 def phase_competitor_comparison(ctx: PipelineContext):
     setup_template_vars(ctx)
     draft_html = ctx.task.step_results.get(STEP_PRIMARY_GEN, {}).get("result", "")
-    comparison_context = (
-        f"Our article:\n{draft_html}\n\n"
-        f"Competitors:\n{ctx.task.competitors_text[:15000]}"
-    )
+    comparison_context = f"Our article:\n{draft_html}\n\nCompetitors:\n{ctx.task.competitors_text[:15000]}"
     add_log(ctx.db, ctx.task, "Starting Competitor Comparison...", step=STEP_COMP_COMPARISON)
     mark_step_running(ctx.db, ctx.task, STEP_COMP_COMPARISON)
-    comparison_review, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, "competitor_comparison", comparison_context, variables=ctx.template_vars)
-    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
-    
-    add_log(ctx.db, ctx.task, f"Competitor Comparison completed", step=STEP_COMP_COMPARISON)
-    save_step_result(ctx.db, ctx.task, STEP_COMP_COMPARISON, result=comparison_review, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
+    comparison_review, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
+        ctx, "competitor_comparison", comparison_context, variables=ctx.template_vars
+    )
+    ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + step_cost
+
+    add_log(ctx.db, ctx.task, "Competitor Comparison completed", step=STEP_COMP_COMPARISON)
+    save_step_result(
+        ctx.db,
+        ctx.task,
+        STEP_COMP_COMPARISON,
+        result=comparison_review,
+        model=actual_model,
+        status="completed",
+        cost=step_cost,
+        variables_snapshot=variables_snapshot,
+        resolved_prompts=resolved_prompts,
+    )
+
 
 def phase_reader_opinion(ctx: PipelineContext):
     setup_template_vars(ctx)
@@ -1896,11 +2281,24 @@ def phase_reader_opinion(ctx: PipelineContext):
     reader_context = f"Article:\n{draft_html}"
     add_log(ctx.db, ctx.task, "Starting Reader Opinion analysis...", step=STEP_READER_OPINION)
     mark_step_running(ctx.db, ctx.task, STEP_READER_OPINION)
-    reader_feedback, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, "reader_opinion", reader_context, variables=ctx.template_vars)
-    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
-    
-    add_log(ctx.db, ctx.task, f"Reader Opinion completed", step=STEP_READER_OPINION)
-    save_step_result(ctx.db, ctx.task, STEP_READER_OPINION, result=reader_feedback, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
+    reader_feedback, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
+        ctx, "reader_opinion", reader_context, variables=ctx.template_vars
+    )
+    ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + step_cost
+
+    add_log(ctx.db, ctx.task, "Reader Opinion completed", step=STEP_READER_OPINION)
+    save_step_result(
+        ctx.db,
+        ctx.task,
+        STEP_READER_OPINION,
+        result=reader_feedback,
+        model=actual_model,
+        status="completed",
+        cost=step_cost,
+        variables_snapshot=variables_snapshot,
+        resolved_prompts=resolved_prompts,
+    )
+
 
 def phase_interlink(ctx: PipelineContext):
     setup_template_vars(ctx)
@@ -1913,11 +2311,24 @@ def phase_interlink(ctx: PipelineContext):
     )
     add_log(ctx.db, ctx.task, "Starting Interlinking & Citations...", step=STEP_INTERLINK)
     mark_step_running(ctx.db, ctx.task, STEP_INTERLINK)
-    interlink_suggestions, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(ctx, "interlinking_citations", interlink_context, variables=ctx.template_vars)
-    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
-    
-    add_log(ctx.db, ctx.task, f"Interlinking & Citations completed", step=STEP_INTERLINK)
-    save_step_result(ctx.db, ctx.task, STEP_INTERLINK, result=interlink_suggestions, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
+    interlink_suggestions, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
+        ctx, "interlinking_citations", interlink_context, variables=ctx.template_vars
+    )
+    ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + step_cost
+
+    add_log(ctx.db, ctx.task, "Interlinking & Citations completed", step=STEP_INTERLINK)
+    save_step_result(
+        ctx.db,
+        ctx.task,
+        STEP_INTERLINK,
+        result=interlink_suggestions,
+        model=actual_model,
+        status="completed",
+        cost=step_cost,
+        variables_snapshot=variables_snapshot,
+        resolved_prompts=resolved_prompts,
+    )
+
 
 def phase_improver(ctx: PipelineContext):
     setup_template_vars(ctx)
@@ -1925,7 +2336,7 @@ def phase_improver(ctx: PipelineContext):
     comparison_review = ctx.task.step_results.get(STEP_COMP_COMPARISON, {}).get("result", "")
     reader_feedback = ctx.task.step_results.get(STEP_READER_OPINION, {}).get("result", "")
     interlink_suggestions = ctx.task.step_results.get(STEP_INTERLINK, {}).get("result", "")
-    
+
     improver_context = (
         f"Draft:\n{draft_html}\n\n"
         f"Competitor Comparison Review:\n{comparison_review}\n\n"
@@ -1934,13 +2345,29 @@ def phase_improver(ctx: PipelineContext):
     )
     add_log(ctx.db, ctx.task, "Starting Improver (draft enhancement)...", step=STEP_IMPROVER)
     mark_step_running(ctx.db, ctx.task, STEP_IMPROVER)
-    improved_html, step_cost, actual_model, resolved_prompts, variables_snapshot, violations = call_agent_with_exclude_validation(ctx, "improver", improver_context, step_constant=STEP_IMPROVER)
-    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
-    
+    improved_html, step_cost, actual_model, resolved_prompts, variables_snapshot, violations = (
+        call_agent_with_exclude_validation(ctx, "improver", improver_context, step_constant=STEP_IMPROVER)
+    )
+    ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + step_cost
+
     add_log(ctx.db, ctx.task, f"Improver completed ({len(improved_html)} chars)", step=STEP_IMPROVER)
     in_wc = count_content_words(draft_html)
     out_wc = count_content_words(improved_html)
-    save_step_result(ctx.db, ctx.task, STEP_IMPROVER, result=improved_html, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts, exclude_words_violations=violations, input_word_count=in_wc, output_word_count=out_wc)
+    save_step_result(
+        ctx.db,
+        ctx.task,
+        STEP_IMPROVER,
+        result=improved_html,
+        model=actual_model,
+        status="completed",
+        cost=step_cost,
+        variables_snapshot=variables_snapshot,
+        resolved_prompts=resolved_prompts,
+        exclude_words_violations=violations,
+        input_word_count=in_wc,
+        output_word_count=out_wc,
+    )
+
 
 def phase_final_editing(ctx: PipelineContext):
     setup_template_vars(ctx)
@@ -1966,36 +2393,64 @@ def phase_final_editing(ctx: PipelineContext):
     editing_context = ""
     add_log(ctx.db, ctx.task, "Starting Final Editing...", step=STEP_FINAL_EDIT)
     mark_step_running(ctx.db, ctx.task, STEP_FINAL_EDIT)
-    final_html, step_cost, actual_model, resolved_prompts, variables_snapshot, violations = call_agent_with_exclude_validation(ctx, "final_editing", editing_context, step_constant=STEP_FINAL_EDIT)
-    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
-    
+    final_html, step_cost, actual_model, resolved_prompts, variables_snapshot, violations = (
+        call_agent_with_exclude_validation(
+            ctx, "final_editing", editing_context, step_constant=STEP_FINAL_EDIT
+        )
+    )
+    ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + step_cost
+
     # Remove SCHEMA placeholder blocks and scripts
-    final_html = re.sub(r'\[.*?SCHEMA.*?\]', '', final_html, flags=re.IGNORECASE | re.DOTALL)
-    final_html = re.sub(r'<script[^>]*application/ld\+json[^>]*>.*?</script>', '', final_html, flags=re.IGNORECASE | re.DOTALL)
-    final_html = re.sub(r'\n{3,}', '\n\n', final_html)
+    final_html = re.sub(r"\[.*?SCHEMA.*?\]", "", final_html, flags=re.IGNORECASE | re.DOTALL)
+    final_html = re.sub(
+        r"<script[^>]*application/ld\+json[^>]*>.*?</script>", "", final_html, flags=re.IGNORECASE | re.DOTALL
+    )
+    final_html = re.sub(r"\n{3,}", "\n\n", final_html)
 
     # Force-remove any remaining exclude words as last resort
     exclude_str = ctx.template_vars.get("exclude_words", "")
     if exclude_str.strip():
         from app.services.exclude_words_validator import ExcludeWordsValidator
+
         validator = ExcludeWordsValidator(exclude_str)
         final_report = validator.validate(final_html)
         if not final_report["passed"]:
-            add_log(ctx.db, ctx.task, 
-                f"Force-removing remaining exclude words after final editing: {final_report['found_words']}", 
-                level="warn", step=STEP_FINAL_EDIT)
-            final_html, removal_report = validator.remove_violations(final_html)
+            add_log(
+                ctx.db,
+                ctx.task,
+                f"Force-removing remaining exclude words after final editing: {final_report['found_words']}",
+                level="warn",
+                step=STEP_FINAL_EDIT,
+            )
+            final_html, _ = validator.remove_violations(final_html)
 
     # Calculate output stats
     output_word_count = count_content_words(final_html)
     output_char_count = len(final_html)
 
-    add_log(ctx.db, ctx.task, 
+    add_log(
+        ctx.db,
+        ctx.task,
         f"Final Editing completed | input: {input_word_count} words / {input_char_count} chars | "
         f"output: {output_word_count} words / {output_char_count} chars | "
-        f"target avg: {avg_words} words", 
-        step=STEP_FINAL_EDIT)
-    save_step_result(ctx.db, ctx.task, STEP_FINAL_EDIT, result=final_html, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts, exclude_words_violations=violations, input_word_count=input_word_count, output_word_count=output_word_count)
+        f"target avg: {avg_words} words",
+        step=STEP_FINAL_EDIT,
+    )
+    save_step_result(
+        ctx.db,
+        ctx.task,
+        STEP_FINAL_EDIT,
+        result=final_html,
+        model=actual_model,
+        status="completed",
+        cost=step_cost,
+        variables_snapshot=variables_snapshot,
+        resolved_prompts=resolved_prompts,
+        exclude_words_violations=violations,
+        input_word_count=input_word_count,
+        output_word_count=output_word_count,
+    )
+
 
 def phase_html_structure(ctx: PipelineContext):
     setup_template_vars(ctx)
@@ -2115,7 +2570,9 @@ def phase_html_structure(ctx: PipelineContext):
         wc_kw["word_count_warning"] = True
         wc_kw["word_loss_percentage"] = round(loss_pct, 1)
 
-    add_log(ctx.db, ctx.task, f"HTML Structure completed ({len(structured_html)} chars)", step=STEP_HTML_STRUCT)
+    add_log(
+        ctx.db, ctx.task, f"HTML Structure completed ({len(structured_html)} chars)", step=STEP_HTML_STRUCT
+    )
     save_step_result(
         ctx.db,
         ctx.task,
@@ -2131,6 +2588,7 @@ def phase_html_structure(ctx: PipelineContext):
         **wc_kw,
     )
 
+
 def phase_content_fact_check(ctx: PipelineContext):
     if not settings.FACT_CHECK_ENABLED:
         save_step_result(
@@ -2144,32 +2602,60 @@ def phase_content_fact_check(ctx: PipelineContext):
 
     setup_template_vars(ctx)
     final_html = ctx.task.step_results.get(STEP_FINAL_EDIT, {}).get("result", "")
-    
+
     ctx.template_vars["final_article"] = final_html
-    ctx.template_vars["scraped_competitors_text"] = ctx.task.competitors_text[:15000] if ctx.task.competitors_text else ""
-    
+    ctx.template_vars["scraped_competitors_text"] = (
+        ctx.task.competitors_text[:15000] if ctx.task.competitors_text else ""
+    )
+
     fact_check_context = (
         f"Final Article HTML:\n{final_html}\n\n"
         f"Keyword: {ctx.task.main_keyword}\n"
         f"Language: {ctx.task.language}\n"
         f"Country: {ctx.task.country}"
     )
-    
+
     add_log(ctx.db, ctx.task, "Starting Fact-Checking...", step=STEP_CONTENT_FACT_CHECK)
     mark_step_running(ctx.db, ctx.task, STEP_CONTENT_FACT_CHECK)
-    
+
     try:
         fact_check_json_str, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
-            ctx, "content_fact_checking", fact_check_context,
-            response_format={"type": "json_object"}, variables=ctx.template_vars
+            ctx,
+            "content_fact_checking",
+            fact_check_context,
+            response_format={"type": "json_object"},
+            variables=ctx.template_vars,
         )
-        ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
-        
-        add_log(ctx.db, ctx.task, f"Fact-Checking completed", step=STEP_CONTENT_FACT_CHECK)
-        save_step_result(ctx.db, ctx.task, STEP_CONTENT_FACT_CHECK, result=fact_check_json_str, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
+        ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + step_cost
+
+        add_log(ctx.db, ctx.task, "Fact-Checking completed", step=STEP_CONTENT_FACT_CHECK)
+        save_step_result(
+            ctx.db,
+            ctx.task,
+            STEP_CONTENT_FACT_CHECK,
+            result=fact_check_json_str,
+            model=actual_model,
+            status="completed",
+            cost=step_cost,
+            variables_snapshot=variables_snapshot,
+            resolved_prompts=resolved_prompts,
+        )
     except Exception as e:
-        add_log(ctx.db, ctx.task, f"Fact-checking agent failed or not found: {str(e)}", level="warn", step=STEP_CONTENT_FACT_CHECK)
-        save_step_result(ctx.db, ctx.task, STEP_CONTENT_FACT_CHECK, result='{"verification_status": "warn", "issues": [], "summary": "Failed to run content_fact_checking agent."}', status="completed")
+        add_log(
+            ctx.db,
+            ctx.task,
+            f"Fact-checking agent failed or not found: {e!s}",
+            level="warn",
+            step=STEP_CONTENT_FACT_CHECK,
+        )
+        save_step_result(
+            ctx.db,
+            ctx.task,
+            STEP_CONTENT_FACT_CHECK,
+            result='{"verification_status": "warn", "issues": [], "summary": "Failed to run content_fact_checking agent."}',
+            status="completed",
+        )
+
 
 def phase_meta_generation(ctx: PipelineContext):
     setup_template_vars(ctx)
@@ -2178,10 +2664,13 @@ def phase_meta_generation(ctx: PipelineContext):
     add_log(ctx.db, ctx.task, "Generating Meta Tags (JSON)...", step=STEP_META_GEN)
     mark_step_running(ctx.db, ctx.task, STEP_META_GEN)
     meta_json_str, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
-        ctx, "meta_generation", meta_context,
-        response_format={"type": "json_object"}, variables=ctx.template_vars
+        ctx,
+        "meta_generation",
+        meta_context,
+        response_format={"type": "json_object"},
+        variables=ctx.template_vars,
     )
-    ctx.task.total_cost = getattr(ctx.task, 'total_cost', 0.0) + step_cost
+    ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + step_cost
     raw_preview = (meta_json_str or "")[:500]
     add_log(
         ctx.db,
@@ -2190,8 +2679,18 @@ def phase_meta_generation(ctx: PipelineContext):
         level="debug",
         step=STEP_META_GEN,
     )
-    add_log(ctx.db, ctx.task, f"Meta Tags Generation completed", step=STEP_META_GEN)
-    save_step_result(ctx.db, ctx.task, STEP_META_GEN, result=meta_json_str, model=actual_model, status="completed", cost=step_cost, variables_snapshot=variables_snapshot, resolved_prompts=resolved_prompts)
+    add_log(ctx.db, ctx.task, "Meta Tags Generation completed", step=STEP_META_GEN)
+    save_step_result(
+        ctx.db,
+        ctx.task,
+        STEP_META_GEN,
+        result=meta_json_str,
+        model=actual_model,
+        status="completed",
+        cost=step_cost,
+        variables_snapshot=variables_snapshot,
+        resolved_prompts=resolved_prompts,
+    )
 
 
 PHASE_REGISTRY = {
@@ -2233,7 +2732,12 @@ def _auto_approve_images(ctx: PipelineContext) -> None:
         step_results["_images_approved"] = True
         ctx.task.step_results = step_results
         ctx.db.commit()
-        add_log(ctx.db, ctx.task, "auto_mode: no image_generation payload — cleared image pause", step=STEP_IMAGE_GEN)
+        add_log(
+            ctx.db,
+            ctx.task,
+            "auto_mode: no image_generation payload — cleared image pause",
+            step=STEP_IMAGE_GEN,
+        )
         return
     try:
         data = _json.loads(image_gen_result) if isinstance(image_gen_result, str) else image_gen_result
@@ -2242,7 +2746,13 @@ def _auto_approve_images(ctx: PipelineContext) -> None:
         step_results["_images_approved"] = True
         ctx.task.step_results = step_results
         ctx.db.commit()
-        add_log(ctx.db, ctx.task, "auto_mode: could not parse image_generation JSON — cleared image pause", level="warn", step=STEP_IMAGE_GEN)
+        add_log(
+            ctx.db,
+            ctx.task,
+            "auto_mode: could not parse image_generation JSON — cleared image pause",
+            level="warn",
+            step=STEP_IMAGE_GEN,
+        )
         return
     images = data.get("images", [])
     approved_n = 0
@@ -2271,12 +2781,12 @@ def run_pipeline(db: Session, task_id: str, auto_mode: bool = False):
     ctx = PipelineContext(db, task_id, auto_mode=auto_mode)
 
     ctx.task.status = "processing"
-    
+
     if ctx.task.total_cost is None:
         ctx.task.total_cost = 0.0
-        
+
     db.commit()
-    
+
     add_log(db, ctx.task, "🚀 Pipeline started / resumed", step=None)
 
     try:
@@ -2398,7 +2908,12 @@ def run_pipeline(db: Session, task_id: str, auto_mode: bool = False):
                         updated["_pipeline_pause"] = {"active": False, "reason": "test_mode"}
                         ctx.task.step_results = updated
                         db.commit()
-                        add_log(db, ctx.task, "auto_mode: skipped TEST MODE pause after primary generation", step=None)
+                        add_log(
+                            db,
+                            ctx.task,
+                            "auto_mode: skipped TEST MODE pause after primary generation",
+                            step=None,
+                        )
                     else:
                         updated = dict(step_results_tm)
                         updated["waiting_for_approval"] = True
@@ -2437,9 +2952,7 @@ def run_pipeline(db: Session, task_id: str, auto_mode: bool = False):
             add_log(db, ctx.task, "Starting article assembly and saving...", step=None)
             structured_html = pick_structured_html_for_assembly(ctx)
             if not structured_html.strip():
-                raise ValueError(
-                    "No HTML body produced by pipeline steps — cannot assemble article."
-                )
+                raise ValueError("No HTML body produced by pipeline steps — cannot assemble article.")
             meta_json_str = ctx.task.step_results.get(STEP_META_GEN, {}).get("result", "{}")
             if not isinstance(meta_json_str, str):
                 meta_json_str = json.dumps(meta_json_str, ensure_ascii=False) if meta_json_str else "{}"
@@ -2486,11 +2999,29 @@ def run_pipeline(db: Session, task_id: str, auto_mode: bool = False):
                 project_id=str(ctx.task.project_id) if ctx.task.project_id else None,
             )
 
+            full_page = ensure_head_meta(
+                structured_html if full_page is None else full_page,
+                title,
+                description,
+            )
+
+            author_obj = (
+                db.query(Author).filter(Author.id == ctx.task.author_id).first()
+                if ctx.task.author_id
+                else None
+            )
+            author_html = render_author_footer(author_obj)
+            if author_html:
+                if "</body>" in full_page:
+                    full_page = full_page.replace("</body>", author_html + "\n</body>", 1)
+                else:
+                    full_page = full_page + author_html
+
             # Process fact_check results
             fact_check_status_val = ""
             fact_check_issues_val = []
             needs_review_val = False
-            
+
             if settings.FACT_CHECK_ENABLED:
                 fc_res_str = ctx.task.step_results.get(STEP_CONTENT_FACT_CHECK, {}).get("result", "{}")
                 if fc_res_str:
@@ -2498,17 +3029,34 @@ def run_pipeline(db: Session, task_id: str, auto_mode: bool = False):
                     if fc_data:
                         fact_check_status_val = fc_data.get("verification_status", "")
                         fact_check_issues_val = fc_data.get("issues", [])
-                        
-                        critical_count = sum(1 for issue in fact_check_issues_val if issue.get("severity") == "critical")
-                        
-                        if fact_check_status_val == "fail" or critical_count >= settings.FACT_CHECK_FAIL_THRESHOLD:
+
+                        critical_count = sum(
+                            1 for issue in fact_check_issues_val if issue.get("severity") == "critical"
+                        )
+
+                        if (
+                            fact_check_status_val == "fail"
+                            or critical_count >= settings.FACT_CHECK_FAIL_THRESHOLD
+                        ):
                             needs_review_val = True
-                            add_log(db, ctx.task, f"Fact-check marked for review ({critical_count} critical issues).", level="warn", step=STEP_CONTENT_FACT_CHECK)
-                            
+                            add_log(
+                                db,
+                                ctx.task,
+                                f"Fact-check marked for review ({critical_count} critical issues).",
+                                level="warn",
+                                step=STEP_CONTENT_FACT_CHECK,
+                            )
+
                             if getattr(settings, "FACT_CHECK_MODE", "soft") == "strict":
                                 raise Exception("Fact-check failed in strict mode. Task aborted.")
                         elif fact_check_status_val == "warn":
-                            add_log(db, ctx.task, f"Fact-check returned warnings.", level="warn", step=STEP_CONTENT_FACT_CHECK)
+                            add_log(
+                                db,
+                                ctx.task,
+                                "Fact-check returned warnings.",
+                                level="warn",
+                                step=STEP_CONTENT_FACT_CHECK,
+                            )
 
             existing = db.query(GeneratedArticle).filter(GeneratedArticle.task_id == ctx.task.id).first()
             if not existing:
@@ -2540,40 +3088,40 @@ def run_pipeline(db: Session, task_id: str, auto_mode: bool = False):
             if ctx.task.project_id:
                 deduplicator = ContentDeduplicator(db)
                 anchors = deduplicator.extract_anchors(
-                    article_html=structured_html,
-                    task_id=str(ctx.task.id),
-                    keyword=ctx.task.main_keyword
+                    article_html=structured_html, task_id=str(ctx.task.id), keyword=ctx.task.main_keyword
                 )
-                deduplicator.save_anchors(project_id=str(ctx.task.project_id), task_id=str(ctx.task.id), anchors=anchors)
-            
+                deduplicator.save_anchors(
+                    project_id=str(ctx.task.project_id), task_id=str(ctx.task.id), anchors=anchors
+                )
+
             # The last operation should be setting status and committing
             ctx.task.status = "completed"
             db.commit()
-            
+
             add_log(db, ctx.task, "✅ Pipeline finished successfully", step=None)
             notify_task_success(str(ctx.task.id), ctx.task.main_keyword, ctx.site_name, word_count)
-            
+
         except Exception as save_err:
             db.rollback()
-            add_log(db, ctx.task, f"❌ Error saving article: {str(save_err)}", level="error", step=None)
+            add_log(db, ctx.task, f"❌ Error saving article: {save_err!s}", level="error", step=None)
             ctx.task.status = "failed"
             ctx.task.error_log = traceback.format_exc()
             db.commit()
             notify_task_failed(str(ctx.task.id), ctx.task.main_keyword, str(save_err), ctx.site_name)
 
     except Exception as e:
-        db.rollback() # VERY IMPORTANT: reset session to allow updating error status
+        db.rollback()  # VERY IMPORTANT: reset session to allow updating error status
         # Mark any running step as failed
         if ctx.task.step_results:
             updated_steps = dict(ctx.task.step_results)
-            for step_key, step_val in updated_steps.items():
+            for _, step_val in updated_steps.items():
                 if isinstance(step_val, dict) and step_val.get("status") == "running":
                     step_val["status"] = "failed"
                     step_val["error"] = str(e)[:2000]
             ctx.task.step_results = updated_steps
-        
+
         ctx.task.status = "failed"
         ctx.task.error_log = traceback.format_exc()
         db.commit()
-        add_log(db, ctx.task, f"❌ Pipeline failed: {str(e)}", level="error", step=None)
+        add_log(db, ctx.task, f"❌ Pipeline failed: {e!s}", level="error", step=None)
         notify_task_failed(str(ctx.task.id), ctx.task.main_keyword, str(e), ctx.site_name)

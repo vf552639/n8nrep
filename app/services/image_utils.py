@@ -168,7 +168,7 @@ _TYPE_NAMES = [
     "Obraz",
 ]
 _TYPE_BRACKET_PATTERN = re.compile(
-    rf'\[({"|".join(re.escape(t) for t in _TYPE_NAMES)})\s*:\s*(.+?)\]',
+    rf"\[({'|'.join(re.escape(t) for t in _TYPE_NAMES)})\s*:\s*(.+?)\]",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -213,9 +213,7 @@ def _parse_multimedia_from_text(text: str) -> dict:
                 text = text[len(starter) :].lstrip(" :—-–,.")
                 break
 
-    desc_match = re.search(
-        r"[Dd]escription\s*[:=]\s*(.+?)(?:\.|,\s*[A-Z]|$)", text, re.DOTALL
-    )
+    desc_match = re.search(r"[Dd]escription\s*[:=]\s*(.+?)(?:\.|,\s*[A-Z]|$)", text, re.DOTALL)
     if desc_match:
         result["Description"] = desc_match.group(1).strip()
     else:
@@ -350,9 +348,7 @@ def extract_multimedia_blocks(outline_json) -> list:
                                     "id": f"img_{counter}",
                                     "section": parent_key,
                                     "section_content": section_content,
-                                    "multimedia": _ensure_default_multimedia_type(
-                                        item
-                                    ),
+                                    "multimedia": _ensure_default_multimedia_type(item),
                                 }
                             )
                         elif isinstance(item, str) and len(item.strip()) > 10:
@@ -370,9 +366,7 @@ def extract_multimedia_blocks(outline_json) -> list:
                 if _is_multimedia_key(key):
                     continue
                 if isinstance(value, str) and len(value) > 30:
-                    text_blocks = _extract_multimedia_from_text_content(
-                        value, str(key)
-                    )
+                    text_blocks = _extract_multimedia_from_text_content(value, str(key))
                     for tb in text_blocks:
                         counter += 1
                         tb["id"] = f"img_{counter}"

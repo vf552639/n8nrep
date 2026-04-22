@@ -1,63 +1,64 @@
+import csv
+import io
 import logging
+import os
+import uuid
+from collections import defaultdict
+from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, Response, StreamingResponse
-from sqlalchemy.orm import Session
 from sqlalchemy import desc
+from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
-from typing import Optional, Any, Dict, List, Tuple
-from collections import defaultdict
-import uuid
-import os
-import csv
-import io
-from datetime import datetime
 
-from app.database import get_db
 from app.api.tasks import calculate_progress
-from app.models.project import SiteProject
-from app.models.blueprint import SiteBlueprint, BlueprintPage
-from app.models.site import Site
-from app.models.template import Template, LegalPageTemplate, LEGAL_PAGE_TYPES
-from app.models.author import Author
-from app.models.task import Task
-from app.models.article import GeneratedArticle
-from app.workers.celery_app import celery_app
-
-# Imported to defer circular dep issues, will verify app.workers.tasks is available
-from app.workers.tasks import process_site_project, advance_project
 from app.config import settings
-from app.services.pipeline_presets import pipeline_steps_use_serp, resolve_pipeline_steps
+from app.database import get_db
+from app.models.article import GeneratedArticle
+from app.models.author import Author
+from app.models.blueprint import BlueprintPage, SiteBlueprint
+from app.models.project import SiteProject
+from app.models.site import Site
+from app.models.task import Task
+from app.models.template import LEGAL_PAGE_TYPES, LegalPageTemplate, Template
+from app.schemas.jsonb_adapter import append_log_event, read_log_events, read_step_results
+from app.schemas.log_event import LogEvent, LogLevel
 from app.schemas.project import (
     ClusterKeywordsRequest,
     DeleteSelectedProjectsRequest,
     ProjectPreviewRequest,
     SiteProjectCloneBody,
     SiteProjectCreate,
-    SiteProjectResponse,
 )
+from app.services.pipeline_presets import pipeline_steps_use_serp, resolve_pipeline_steps
+from app.workers.celery_app import celery_app
+
+# Imported to defer circular dep issues, will verify app.workers.tasks is available
+from app.workers.tasks import advance_project, process_site_project
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _revoke_project_celery_task(celery_task_id: Optional[str]) -> None:
+def _revoke_project_celery_task(celery_task_id: str | None) -> None:
     if not celery_task_id or not str(celery_task_id).strip():
         return
     try:
         celery_app.control.revoke(str(celery_task_id), terminate=True)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("Celery revoke failed for task_id=%s: %s", celery_task_id, exc)
 
 
 def _validate_legal_template_map(
-    db: Session, legal_template_map: Optional[Dict[str, Any]]
-) -> Optional[Dict[str, str]]:
+    db: Session, legal_template_map: dict[str, Any] | None
+) -> dict[str, str] | None:
     if not legal_template_map:
         return None
     if not isinstance(legal_template_map, dict):
         raise HTTPException(status_code=400, detail="legal_template_map must be an object")
-    out: Dict[str, str] = {}
+    out: dict[str, str] = {}
     for page_type, template_id in legal_template_map.items():
         if page_type not in LEGAL_PAGE_TYPES:
             raise HTTPException(
@@ -70,7 +71,7 @@ def _validate_legal_template_map(
             raise HTTPException(
                 status_code=400,
                 detail=f"Invalid template id for {page_type}",
-            )
+            ) from None
         tpl = (
             db.query(LegalPageTemplate)
             .filter(
@@ -93,7 +94,7 @@ def _validate_legal_template_map(
     return out or None
 
 
-def _validate_serp_config(cfg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def _validate_serp_config(cfg: dict[str, Any] | None) -> dict[str, Any]:
     """Validate and normalize SERP config; returns dict (possibly empty)."""
     if not cfg:
         return {}
@@ -138,9 +139,7 @@ def _validate_serp_config(cfg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def _resolve_site_readonly(
-    db: Session, target_site: str
-) -> Tuple[Optional[Site], bool, str, str]:
+def _resolve_site_readonly(db: Session, target_site: str) -> tuple[Site | None, bool, str, str]:
     """
     Resolve site by UUID or domain/name without creating.
     Returns (site_or_none, will_be_created, name, domain).
@@ -153,10 +152,14 @@ def _resolve_site_readonly(
         pass
 
     if not site:
-        site = db.query(Site).filter(
-            (func.lower(Site.domain) == func.lower(target_site))
-            | (func.lower(Site.name) == func.lower(target_site))
-        ).first()
+        site = (
+            db.query(Site)
+            .filter(
+                (func.lower(Site.domain) == func.lower(target_site))
+                | (func.lower(Site.name) == func.lower(target_site))
+            )
+            .first()
+        )
 
     if site:
         return site, False, site.name, site.domain
@@ -173,10 +176,14 @@ def _resolve_site(db: Session, target_site: str, country: str, language: str) ->
         pass
 
     if not site:
-        site = db.query(Site).filter(
-            (func.lower(Site.domain) == func.lower(target_site))
-            | (func.lower(Site.name) == func.lower(target_site))
-        ).first()
+        site = (
+            db.query(Site)
+            .filter(
+                (func.lower(Site.domain) == func.lower(target_site))
+                | (func.lower(Site.name) == func.lower(target_site))
+            )
+            .first()
+        )
 
     if not site:
         site = Site(
@@ -197,11 +204,11 @@ MARKUP_ONLY_SITE_KEY = "__markup_only__"
 
 def _resolve_site_or_markup_only(
     db: Session,
-    target_site: Optional[str],
+    target_site: str | None,
     country: str,
     language: str,
     use_site_template: bool,
-) -> Tuple[Site, bool]:
+) -> tuple[Site, bool]:
     """Resolve site; empty target_site uses a reserved placeholder and disables site HTML wrapper."""
     ts = (target_site or "").strip()
     if ts:
@@ -222,20 +229,20 @@ def _ensure_worker_available() -> None:
             )
     except HTTPException:
         raise
-    except Exception:
+    except Exception as e:
         raise HTTPException(
             status_code=503,
             detail="Не удалось проверить доступность worker. Проверьте Redis и Celery worker.",
-        )
+        ) from e
 
 
-def _task_cost_sum(tasks: List[Task]) -> float:
+def _task_cost_sum(tasks: list[Task]) -> float:
     return float(sum((t.total_cost or 0) for t in tasks))
 
 
 def _project_detail_extras(
-    project: SiteProject, tasks: List[Task], blueprint_page_count: int
-) -> Dict[str, Any]:
+    project: SiteProject, tasks: list[Task], blueprint_page_count: int
+) -> dict[str, Any]:
     completed_n = sum(1 for t in tasks if t.status == "completed")
     total_cost = _task_cost_sum(tasks)
     avg_cost_per_page = round(total_cost / max(completed_n, 1), 4) if tasks else 0.0
@@ -250,7 +257,9 @@ def _project_detail_extras(
         "total_cost": round(total_cost, 4),
         "avg_cost_per_page": avg_cost_per_page,
         "started_at": project.started_at.isoformat() if project.started_at else None,
-        "generation_started_at": project.generation_started_at.isoformat() if getattr(project, "generation_started_at", None) else None,
+        "generation_started_at": project.generation_started_at.isoformat()
+        if getattr(project, "generation_started_at", None)
+        else None,
         "completed_at": project.completed_at.isoformat() if project.completed_at else None,
         "duration_seconds": duration_seconds,
         "avg_seconds_per_page": avg_seconds_per_page,
@@ -261,13 +270,14 @@ def _project_detail_extras(
         else (project.log_events or []),
     }
 
+
 @router.get("/")
 def get_projects(
     skip: int = 0,
     limit: int = 50,
     archived: bool = False,
-    status: Optional[str] = None,
-    search: Optional[str] = None,
+    status: str | None = None,
+    search: str | None = None,
     db: Session = Depends(get_db),
 ):
     q = db.query(SiteProject).filter(SiteProject.is_archived == archived)
@@ -293,29 +303,34 @@ def get_projects(
         failed_n = sum(1 for t in tasks if t.status == "failed")
         progress = round((completed / total) * 100) if total > 0 else 0
         total_cost = round(_task_cost_sum(tasks), 4)
-        out.append({
-            "id": str(p.id),
-            "name": p.name,
-            "blueprint_id": str(p.blueprint_id),
-            "site_id": str(p.site_id),
-            "seed_keyword": p.seed_keyword,
-            "seed_is_brand": getattr(p, "seed_is_brand", False),
-            "status": p.status,
-            "current_page_index": p.current_page_index,
-            "build_zip_url": p.build_zip_url,
-            "created_at": p.created_at.isoformat(),
-            "progress": progress,
-            "generation_started_at": p.generation_started_at.isoformat() if getattr(p, "generation_started_at", None) else None,
-            "is_archived": bool(getattr(p, "is_archived", False)),
-            "country": p.country,
-            "language": p.language,
-            "total_tasks": total,
-            "completed_tasks": completed,
-            "failed_tasks": failed_n,
-            "total_cost": total_cost,
-            "serp_config": getattr(p, "serp_config", None) or {},
-            "use_site_template": bool(getattr(p, "use_site_template", True)),
-        })
+        out.append(
+            {
+                "id": str(p.id),
+                "name": p.name,
+                "blueprint_id": str(p.blueprint_id),
+                "site_id": str(p.site_id),
+                "seed_keyword": p.seed_keyword,
+                "seed_is_brand": getattr(p, "seed_is_brand", False),
+                "status": p.status,
+                "current_page_index": p.current_page_index,
+                "build_zip_url": p.build_zip_url,
+                "created_at": p.created_at.isoformat(),
+                "progress": progress,
+                "generation_started_at": p.generation_started_at.isoformat()
+                if getattr(p, "generation_started_at", None)
+                else None,
+                "is_archived": bool(getattr(p, "is_archived", False)),
+                "country": p.country,
+                "language": p.language,
+                "total_tasks": total,
+                "completed_tasks": completed,
+                "failed_tasks": failed_n,
+                "total_cost": total_cost,
+                "serp_config": getattr(p, "serp_config", None) or {},
+                "use_site_template": bool(getattr(p, "use_site_template", True)),
+                "competitor_urls": list(getattr(p, "competitor_urls", None) or []),
+            }
+        )
     return out
 
 
@@ -332,11 +347,11 @@ def preview_project(body: ProjectPreviewRequest, db: Session = Depends(get_db)):
         .all()
     )
 
+    warnings: list[str] = []
+
     ts = (body.target_site or "").strip()
     if not ts:
-        site, site_will_create, site_name, site_domain = _resolve_site_readonly(
-            db, MARKUP_ONLY_SITE_KEY
-        )
+        site, site_will_create, site_name, site_domain = _resolve_site_readonly(db, MARKUP_ONLY_SITE_KEY)
         effective_use_site_template = False
         warnings.append(
             "Markup-only mode: no target site — using reserved placeholder site; "
@@ -363,13 +378,11 @@ def preview_project(body: ProjectPreviewRequest, db: Session = Depends(get_db)):
 
     has_template = bool(has_template_site and effective_use_site_template)
     if has_template_site and not effective_use_site_template:
-        warnings.append(
-            "Site template disabled for this project. Articles will be raw HTML."
-        )
+        warnings.append("Site template disabled for this project. Articles will be raw HTML.")
 
     author_source = "none"
-    author_id: Optional[int] = None
-    author_name: Optional[str] = None
+    author_id: int | None = None
+    author_name: str | None = None
 
     if body.author_id is not None:
         au = db.query(Author).filter(Author.id == body.author_id).first()
@@ -380,10 +393,14 @@ def preview_project(body: ProjectPreviewRequest, db: Session = Depends(get_db)):
         else:
             warnings.append("Given author_id not found; will try auto-assign.")
     if author_id is None:
-        au = db.query(Author).filter(
-            func.lower(Author.country) == body.country.lower(),
-            func.lower(Author.language) == body.language.lower(),
-        ).first()
+        au = (
+            db.query(Author)
+            .filter(
+                func.lower(Author.country) == body.country.lower(),
+                func.lower(Author.language) == body.language.lower(),
+            )
+            .first()
+        )
         if au:
             author_id = int(au.id)
             author_name = (au.author or "").strip() or str(au.id)
@@ -404,11 +421,7 @@ def preview_project(body: ProjectPreviewRequest, db: Session = Depends(get_db)):
     for pg in pages:
         use_brand = bool(body.seed_is_brand) and bool(getattr(pg, "keyword_template_brand", None))
         template_used = "brand" if use_brand else "standard"
-        tmpl = (
-            pg.keyword_template_brand
-            if use_brand and pg.keyword_template_brand
-            else pg.keyword_template
-        )
+        tmpl = pg.keyword_template_brand if use_brand and pg.keyword_template_brand else pg.keyword_template
         kw = tmpl.replace("{seed}", body.seed_keyword)
         _steps = resolve_pipeline_steps(pg)
         page_rows.append(
@@ -436,9 +449,7 @@ def preview_project(body: ProjectPreviewRequest, db: Session = Depends(get_db)):
     avg_cost_per_page = round(sum(costs) / len(costs), 4) if costs else None
     n_pages = len(pages)
     estimated_cost = (
-        round(avg_cost_per_page * n_pages, 4)
-        if avg_cost_per_page is not None and n_pages
-        else None
+        round(avg_cost_per_page * n_pages, 4) if avg_cost_per_page is not None and n_pages else None
     )
 
     from app.services.serp import get_serp_health
@@ -446,13 +457,9 @@ def preview_project(body: ProjectPreviewRequest, db: Session = Depends(get_db)):
     serp_health = get_serp_health()
     overall = serp_health.get("overall")
     if overall == "error":
-        warnings.append(
-            "⚠️ SERP providers are partially or fully unavailable. Pages with SERP may fail."
-        )
+        warnings.append("⚠️ SERP providers are partially or fully unavailable. Pages with SERP may fail.")
     if overall == "unconfigured":
-        warnings.append(
-            "⚠️ No SERP API keys configured. SERP-dependent pages will fail."
-        )
+        warnings.append("⚠️ No SERP API keys configured. SERP-dependent pages will fail.")
 
     return {
         "blueprint": {
@@ -559,11 +566,11 @@ def create_project(project_in: SiteProjectCreate, db: Session = Depends(get_db))
             },
         )
 
-    serp_normalized: Dict[str, Any] = {}
+    serp_normalized: dict[str, Any] = {}
     if project_in.serp_config is not None:
         serp_normalized = _validate_serp_config(project_in.serp_config)
 
-    pk_val: Optional[Dict[str, Any]] = None
+    pk_val: dict[str, Any] | None = None
     if project_in.project_keywords is not None:
         d = project_in.project_keywords
         if isinstance(d, dict):
@@ -578,10 +585,14 @@ def create_project(project_in: SiteProjectCreate, db: Session = Depends(get_db))
     # Auto-assign author
     final_author_id = project_in.author_id
     if not final_author_id:
-        author = db.query(Author).filter(
-            func.lower(Author.country) == project_in.country.lower(),
-            func.lower(Author.language) == project_in.language.lower(),
-        ).first()
+        author = (
+            db.query(Author)
+            .filter(
+                func.lower(Author.country) == project_in.country.lower(),
+                func.lower(Author.language) == project_in.language.lower(),
+            )
+            .first()
+        )
         if author:
             final_author_id = author.id
 
@@ -601,6 +612,7 @@ def create_project(project_in: SiteProjectCreate, db: Session = Depends(get_db))
         project_keywords=pk_val,
         legal_template_map=ltm_norm,
         use_site_template=bool(effective_use_site_template),
+        competitor_urls=list(project_in.competitor_urls or []),
     )
     db.add(new_project)
     db.commit()
@@ -619,18 +631,13 @@ def create_project(project_in: SiteProjectCreate, db: Session = Depends(get_db))
         health = get_serp_health()
         if health.get("overall") == "error":
             providers_down = [
-                k
-                for k, v in health.items()
-                if isinstance(v, dict) and v.get("status") == "error"
+                k for k, v in health.items() if isinstance(v, dict) and v.get("status") == "error"
             ]
             serp_warning = (
-                f"SERP providers may be unavailable: {', '.join(providers_down)}. "
-                "Some pages may fail."
+                f"SERP providers may be unavailable: {', '.join(providers_down)}. Some pages may fail."
             )
         elif health.get("overall") == "unconfigured":
-            serp_warning = (
-                "No SERP providers configured. Pages with use_serp=true will fail."
-            )
+            serp_warning = "No SERP providers configured. Pages with use_serp=true will fail."
     except Exception:
         pass
 
@@ -642,14 +649,12 @@ def create_project(project_in: SiteProjectCreate, db: Session = Depends(get_db))
 
 
 @router.post("/delete-selected")
-def delete_selected_projects(
-    payload: DeleteSelectedProjectsRequest, db: Session = Depends(get_db)
-):
+def delete_selected_projects(payload: DeleteSelectedProjectsRequest, db: Session = Depends(get_db)):
     """Deletes selected projects and their tasks; skips pending/generating (same rules as DELETE /{id})."""
     if not payload.project_ids:
         return {"deleted": 0, "skipped": 0}
 
-    id_list: List[uuid.UUID] = []
+    id_list: list[uuid.UUID] = []
     for pid in payload.project_ids:
         try:
             id_list.append(uuid.UUID(str(pid)))
@@ -685,19 +690,15 @@ def export_project_csv(id: str, db: Session = Depends(get_db)):
     task_ids = [t.id for t in tasks]
     blueprint_page_ids = [t.blueprint_page_id for t in tasks if t.blueprint_page_id]
 
-    articles_map: Dict[str, GeneratedArticle] = {}
+    articles_map: dict[str, GeneratedArticle] = {}
     if task_ids:
-        articles = (
-            db.query(GeneratedArticle).filter(GeneratedArticle.task_id.in_(task_ids)).all()
-        )
+        articles = db.query(GeneratedArticle).filter(GeneratedArticle.task_id.in_(task_ids)).all()
         for a in articles:
             articles_map[str(a.task_id)] = a
 
-    pages_map: Dict[str, BlueprintPage] = {}
+    pages_map: dict[str, BlueprintPage] = {}
     if blueprint_page_ids:
-        bp_pages = (
-            db.query(BlueprintPage).filter(BlueprintPage.id.in_(blueprint_page_ids)).all()
-        )
+        bp_pages = db.query(BlueprintPage).filter(BlueprintPage.id.in_(blueprint_page_ids)).all()
         for p in bp_pages:
             pages_map[str(p.id)] = p
 
@@ -773,10 +774,7 @@ def export_project_docx(id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Project not found")
 
     n_done = (
-        db.query(func.count(Task.id))
-        .filter(Task.project_id == id, Task.status == "completed")
-        .scalar()
-        or 0
+        db.query(func.count(Task.id)).filter(Task.project_id == id, Task.status == "completed").scalar() or 0
     )
     if n_done == 0:
         raise HTTPException(status_code=400, detail="No completed pages to export")
@@ -784,9 +782,7 @@ def export_project_docx(id: str, db: Session = Depends(get_db)):
     from app.services.docx_builder import build_project_docx
 
     docx_bytes = build_project_docx(db, str(project.id))
-    safe_name = (
-        "".join(c for c in project.name if c.isalnum() or c in " -_").strip() or "project"
-    )
+    safe_name = "".join(c for c in project.name if c.isalnum() or c in " -_").strip() or "project"
     filename = f"{safe_name}.docx"
     return StreamingResponse(
         iter([docx_bytes]),
@@ -806,19 +802,14 @@ def export_project_html(
         raise HTTPException(status_code=404, detail="Project not found")
 
     n_done = (
-        db.query(func.count(Task.id))
-        .filter(Task.project_id == id, Task.status == "completed")
-        .scalar()
-        or 0
+        db.query(func.count(Task.id)).filter(Task.project_id == id, Task.status == "completed").scalar() or 0
     )
     if n_done == 0:
         raise HTTPException(status_code=400, detail="No completed pages to export")
 
     from app.services.html_export import build_project_html_concat, build_project_html_zip
 
-    safe_name = (
-        "".join(c for c in project.name if c.isalnum() or c in " -_").strip() or "project"
-    )
+    safe_name = "".join(c for c in project.name if c.isalnum() or c in " -_").strip() or "project"
     m = (mode or "zip").strip().lower()
     if m not in ("zip", "concat"):
         raise HTTPException(status_code=400, detail="mode must be zip or concat")
@@ -862,6 +853,9 @@ def get_project_details(id: str, db: Session = Depends(get_db)):
         or 0
     )
     extras = _project_detail_extras(project, tasks, int(blueprint_page_count))
+    log_events = [
+        event.model_dump(mode="json", exclude_none=True) for event in read_log_events(project.log_events)
+    ]
 
     return {
         "id": str(project.id),
@@ -879,7 +873,9 @@ def get_project_details(id: str, db: Session = Depends(get_db)):
         "failed_count": failed_count,
         "is_archived": bool(getattr(project, "is_archived", False)),
         "created_at": project.created_at.isoformat(),
-        "generation_started_at": project.generation_started_at.isoformat() if getattr(project, "generation_started_at", None) else None,
+        "generation_started_at": project.generation_started_at.isoformat()
+        if getattr(project, "generation_started_at", None)
+        else None,
         "celery_task_id": project.celery_task_id,
         "total_tasks": total_tasks,
         "completed_tasks": completed_tasks,
@@ -891,7 +887,9 @@ def get_project_details(id: str, db: Session = Depends(get_db)):
         if isinstance(getattr(project, "legal_template_map", None), dict)
         else {},
         "use_site_template": bool(getattr(project, "use_site_template", True)),
+        "competitor_urls": list(getattr(project, "competitor_urls", None) or []),
         **extras,
+        "log_events": log_events,
         "tasks": [
             {
                 "id": str(t.id),
@@ -899,11 +897,11 @@ def get_project_details(id: str, db: Session = Depends(get_db)):
                 "status": t.status,
                 "main_keyword": t.main_keyword,
                 "page_type": t.page_type,
-                "progress": calculate_progress(t.step_results),
+                "progress": calculate_progress(read_step_results(t.step_results)),
                 "current_step": next(
                     (
                         k
-                        for k, v in (t.step_results or {}).items()
+                        for k, v in read_step_results(t.step_results).items()
                         if isinstance(v, dict) and v.get("status") == "running"
                     ),
                     None,
@@ -932,8 +930,8 @@ def clone_project(id: str, body: SiteProjectCloneBody, db: Session = Depends(get
 
     name = body.name if body.name is not None else f"{src.name} (copy)"
     seed_keyword = body.seed_keyword if body.seed_keyword is not None else src.seed_keyword
-    seed_is_brand = body.seed_is_brand if body.seed_is_brand is not None else bool(
-        getattr(src, "seed_is_brand", False)
+    seed_is_brand = (
+        body.seed_is_brand if body.seed_is_brand is not None else bool(getattr(src, "seed_is_brand", False))
     )
     country = body.country if body.country is not None else src.country
     language = body.language if body.language is not None else src.language
@@ -959,10 +957,14 @@ def clone_project(id: str, body: SiteProjectCloneBody, db: Session = Depends(get
 
     author_id = body.author_id if body.author_id is not None else src.author_id
     if author_id is None:
-        author = db.query(Author).filter(
-            func.lower(Author.country) == country.lower(),
-            func.lower(Author.language) == language.lower(),
-        ).first()
+        author = (
+            db.query(Author)
+            .filter(
+                func.lower(Author.country) == country.lower(),
+                func.lower(Author.language) == language.lower(),
+            )
+            .first()
+        )
         if author:
             author_id = author.id
 
@@ -986,12 +988,13 @@ def clone_project(id: str, body: SiteProjectCloneBody, db: Session = Depends(get
             status_code=409,
             detail={
                 "message": (
-                    f"Active project with same blueprint + seed + site already exists "
-                    f"(status: {dup.status})"
+                    f"Active project with same blueprint + seed + site already exists (status: {dup.status})"
                 ),
                 "existing_project_id": str(dup.id),
             },
         )
+
+    clone_competitor_urls: list[str] = list(body.competitor_urls) if body.competitor_urls is not None else []
 
     new_p = SiteProject(
         name=name,
@@ -1016,6 +1019,7 @@ def clone_project(id: str, body: SiteProjectCloneBody, db: Session = Depends(get
         project_keywords=getattr(src, "project_keywords", None),
         legal_template_map=legal_map if isinstance(legal_map, dict) else None,
         use_site_template=use_site_template,
+        competitor_urls=clone_competitor_urls,
     )
     db.add(new_p)
     db.commit()
@@ -1132,29 +1136,30 @@ def stop_project(id: str, db: Session = Depends(get_db)):
     project = db.query(SiteProject).filter(SiteProject.id == id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    
+
     if project.status not in ("pending", "generating"):
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail=f"Cannot stop project in status '{project.status}'. "
-                   f"Only 'pending' or 'generating' can be stopped."
+            f"Only 'pending' or 'generating' can be stopped.",
         )
-    
+
     project.stopping_requested = True
     db.commit()
-    
+
     return {
         "msg": "Stop requested. Project will stop after current task completes.",
         "project_id": str(project.id),
-        "status": project.status
+        "status": project.status,
     }
+
 
 @router.post("/{id}/resume")
 def resume_project(id: str, db: Session = Depends(get_db)):
     project = db.query(SiteProject).filter(SiteProject.id == id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    
+
     if project.status != "stopped":
         raise HTTPException(status_code=400, detail="Can only resume stopped projects")
 
@@ -1162,11 +1167,12 @@ def resume_project(id: str, db: Session = Depends(get_db)):
     project.stopping_requested = False
     project.completed_at = None
     db.commit()
-    
+
     # Resume from where we left off
     process_site_project.delay(str(project.id))
-    
+
     return {"msg": "Project resumed", "project_id": str(project.id)}
+
 
 @router.post("/{id}/approve-page")
 def approve_page(id: str, db: Session = Depends(get_db)):
@@ -1181,13 +1187,17 @@ def approve_page(id: str, db: Session = Depends(get_db)):
         )
 
     project.status = "generating"
-    logs = list(project.log_events or [])
-    logs.append({"ts": datetime.utcnow().isoformat() + "Z", "msg": "Page approved. Continuing generation.", "level": "info"})
-    project.log_events = logs[-500:]
+    log_event = LogEvent(
+        ts=datetime.utcnow(),
+        msg="Page approved. Continuing generation.",
+        level=LogLevel.info,
+    )
+    project.log_events = append_log_event(project.log_events, log_event, max_len=500)
     db.commit()
 
     advance_project.delay(str(project.id), True)
     return {"msg": "Page approved, generation resumed", "project_id": str(project.id)}
+
 
 @router.post("/{id}/rebuild-zip")
 def rebuild_project_zip(id: str, db: Session = Depends(get_db)):
@@ -1206,15 +1216,18 @@ def rebuild_project_zip(id: str, db: Session = Depends(get_db)):
         zip_path = build_site(db, str(project.id))
         return {"msg": "ZIP rebuilt successfully", "zip_path": zip_path}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
 
 @router.get("/{id}/download")
 def download_project_zip(id: str, db: Session = Depends(get_db)):
     project = db.query(SiteProject).filter(SiteProject.id == id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-        
+
     if not project.build_zip_url or not os.path.exists(project.build_zip_url):
         raise HTTPException(status_code=404, detail="ZIP file not found or not built yet")
-        
-    return FileResponse(project.build_zip_url, media_type="application/zip", filename=os.path.basename(project.build_zip_url))
+
+    return FileResponse(
+        project.build_zip_url, media_type="application/zip", filename=os.path.basename(project.build_zip_url)
+    )

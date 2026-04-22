@@ -1,12 +1,12 @@
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import cast, Date, func
+from sqlalchemy import Date, cast, func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.task import Task
 from app.models.site import Site
+from app.models.task import Task
 
 router = APIRouter()
 
@@ -46,24 +46,23 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
         "cost_by_day": cost_by_day,
     }
 
+
 @router.get("/queue")
 def get_queue_status():
     """
-    Very basic queue status. For accurate info, 
+    Very basic queue status. For accurate info,
     one would query Redis or use Celery Inspector.
     """
     try:
         from app.workers.celery_app import celery_app
+
         i = celery_app.control.inspect()
         active = i.active()
         reserved = i.reserved()
         return {
-            "celery_workers_online": True if active else False,
+            "celery_workers_online": bool(active),
             "active_tasks": active if active else {},
-            "queued_tasks": reserved if reserved else {}
+            "queued_tasks": reserved if reserved else {},
         }
     except Exception as e:
-        return {
-            "celery_workers_online": False,
-            "error": str(e)
-        }
+        return {"celery_workers_online": False, "error": str(e)}

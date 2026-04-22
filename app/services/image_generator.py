@@ -2,11 +2,10 @@
 Image generation — OpenRouter image models (FLUX, Gemini Image, Riverflow, etc.).
 """
 
-import base64
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 import requests
 
@@ -33,11 +32,7 @@ def resolve_image_generation_model(db) -> str:
     """Model from active Prompt `image_generation`, else IMAGE_MODEL_DEFAULT."""
     from app.models.prompt import Prompt
 
-    p = (
-        db.query(Prompt)
-        .filter(Prompt.agent_name == "image_generation", Prompt.is_active == True)
-        .first()
-    )
+    p = db.query(Prompt).filter(Prompt.agent_name == "image_generation", Prompt.is_active.is_(True)).first()
     if p and getattr(p, "model", None) and str(p.model).strip():
         return str(p.model).strip()
     return settings.IMAGE_MODEL_DEFAULT
@@ -47,9 +42,9 @@ def resolve_image_generation_model(db) -> str:
 class ImageResult:
     status: str  # "pending" | "processing" | "completed" | "failed"
     provider_task_id: str = ""
-    image_url: Optional[str] = None  # optional data URL or remote URL (legacy)
-    hosted_url: Optional[str] = None
-    error: Optional[str] = None
+    image_url: str | None = None  # optional data URL or remote URL (legacy)
+    hosted_url: str | None = None
+    error: str | None = None
 
 
 class ImageGeneratorBase(ABC):
@@ -58,7 +53,7 @@ class ImageGeneratorBase(ABC):
         self,
         prompt: str,
         aspect_ratio: str = "16:9",
-        model: Optional[str] = None,
+        model: str | None = None,
     ) -> ImageResult:
         """Generate an image synchronously; return final ImageResult."""
 
@@ -80,7 +75,7 @@ def _normalize_aspect_for_config(aspect_ratio: str) -> str:
     return ar if ar in allowed else "16:9"
 
 
-def extract_image_data_url_from_openrouter_response(data: dict[str, Any]) -> Optional[str]:
+def extract_image_data_url_from_openrouter_response(data: dict[str, Any]) -> str | None:
     """Parse OpenRouter chat/completions JSON; return first image as data:... URL."""
     if not isinstance(data, dict):
         return None
@@ -135,7 +130,7 @@ class OpenRouterImageGenerator(ImageGeneratorBase):
         self,
         api_key: str,
         model: str,
-        fallback_model: Optional[str] = None,
+        fallback_model: str | None = None,
         timeout: int = 180,
     ):
         self.api_key = api_key
@@ -192,7 +187,7 @@ class OpenRouterImageGenerator(ImageGeneratorBase):
         self,
         prompt: str,
         aspect_ratio: str = "16:9",
-        model: Optional[str] = None,
+        model: str | None = None,
     ) -> ImageResult:
         use_model = model or self.model
         try:

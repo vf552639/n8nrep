@@ -1,27 +1,27 @@
 import logging
-from typing import Optional, Any, List
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.schemas.site import SiteCreate, SiteUpdate
+from app.models.project import SiteProject
 from app.models.site import Site
 from app.models.task import Task
-from app.models.project import SiteProject
 from app.models.template import Template
+from app.schemas.site import SiteCreate, SiteUpdate
 from app.workers.celery_app import celery_app
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _revoke_site_project_celery(celery_task_id: Optional[str]) -> None:
+def _revoke_site_project_celery(celery_task_id: str | None) -> None:
     if not celery_task_id or not str(celery_task_id).strip():
         return
     try:
         celery_app.control.revoke(str(celery_task_id), terminate=True)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("Celery revoke failed for task_id=%s: %s", celery_task_id, exc)
 
 
@@ -46,7 +46,7 @@ def _site_out(s: Site, db: Session) -> dict[str, Any]:
 
 
 @router.get("/")
-def get_sites(db: Session = Depends(get_db)) -> List[dict[str, Any]]:
+def get_sites(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
     sites = db.query(Site).order_by(Site.name).all()
     return [_site_out(s, db) for s in sites]
 
@@ -112,9 +112,7 @@ def delete_site(
     project_count = len(projects)
 
     if not force and (task_count > 0 or project_count > 0):
-        projects_out = [
-            {"id": str(p.id), "name": p.name, "status": p.status} for p in projects
-        ]
+        projects_out = [{"id": str(p.id), "name": p.name, "status": p.status} for p in projects]
         raise HTTPException(
             status_code=409,
             detail={

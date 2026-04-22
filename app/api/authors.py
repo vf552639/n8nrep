@@ -1,13 +1,13 @@
-from typing import Optional
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.orm import Session
+
 from app.database import get_db
-from app.schemas.author import AuthorCreate
 from app.models.author import Author
 from app.models.task import Task
+from app.schemas.author import AuthorCreate
 
 router = APIRouter()
 
@@ -35,23 +35,27 @@ def get_authors(db: Session = Depends(get_db)):
         .all()
     )
     usage_counts = {int(row[0]): int(row[1]) for row in usage_rows}
-    return [{
-        "id": str(a.id),
-        "name": a.author,
-        "author": a.author,
-        "country": a.country,
-        "language": a.language,
-        "co_short": a.co_short,
-        "city": a.city,
-        "bio": a.bio,
-        "imitation": a.imitation,
-        "year": _format_year(a.year),
-        "face": a.face,
-        "target_audience": a.target_audience,
-        "rhythms_style": a.rhythms_style,
-        "exclude_words": a.exclude_words,
-        "usage_count": usage_counts.get(int(a.id), 0),
-    } for a in authors]
+    return [
+        {
+            "id": str(a.id),
+            "name": a.author,
+            "author": a.author,
+            "country": a.country,
+            "country_full": a.country_full,
+            "language": a.language,
+            "co_short": a.co_short,
+            "city": a.city,
+            "bio": a.bio,
+            "imitation": a.imitation,
+            "year": _format_year(a.year),
+            "face": a.face,
+            "target_audience": a.target_audience,
+            "rhythms_style": a.rhythms_style,
+            "exclude_words": a.exclude_words,
+            "usage_count": usage_counts.get(int(a.id), 0),
+        }
+        for a in authors
+    ]
 
 
 @router.post("/")
@@ -68,7 +72,7 @@ def update_author(author_id: str, data: AuthorCreate, db: Session = Depends(get_
     try:
         aid = int(author_id)
     except ValueError:
-        raise HTTPException(status_code=404, detail="Author not found")
+        raise HTTPException(status_code=404, detail="Author not found") from None
     author = db.query(Author).filter(Author.id == aid).first()
     if not author:
         raise HTTPException(status_code=404, detail="Author not found")
@@ -86,7 +90,7 @@ def delete_author(author_id: str, db: Session = Depends(get_db)):
     try:
         aid = int(author_id)
     except ValueError:
-        raise HTTPException(status_code=404, detail="Author not found")
+        raise HTTPException(status_code=404, detail="Author not found") from None
     author = db.query(Author).filter(Author.id == aid).first()
     if not author:
         raise HTTPException(status_code=404, detail="Author not found")

@@ -3,26 +3,23 @@ import csv
 import io
 import uuid
 from datetime import datetime
-from typing import List, Optional
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
+from sqlalchemy import desc
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
-from sqlalchemy import desc
 from sqlalchemy.sql import func
 
-from app.database import get_db
-from app.models.task import Task
-from app.models.site import Site
-from app.models.author import Author
-from app.models.article import GeneratedArticle
-from app.workers.tasks import process_generation_task
 from app.config import settings
-from app.services.pipeline_constants import ALL_STEPS
-from app.services.serp_cache import invalidate_serp_cache
-from app.services.scraper import fetch_url_meta
+from app.database import get_db
+from app.models.article import GeneratedArticle
+from app.models.author import Author
+from app.models.site import Site
+from app.models.task import Task
+from app.schemas.jsonb_adapter import append_log_event, read_log_events, read_step_results
+from app.schemas.log_event import LogEvent, LogLevel
 from app.schemas.task import (
     ApproveImagesRequest,
     ApproveSerpUrlsRequest,
@@ -34,6 +31,10 @@ from app.schemas.task import (
     TaskCreate,
     UpdateStepResultRequest,
 )
+from app.services.pipeline_constants import ALL_STEPS
+from app.services.scraper import fetch_url_meta
+from app.services.serp_cache import invalidate_serp_cache
+from app.workers.tasks import process_generation_task
 
 router = APIRouter()
 
@@ -47,13 +48,14 @@ def fetch_url_meta_endpoint(payload: FetchUrlMetaRequest):
         raise HTTPException(status_code=400, detail="URL must start with http:// or https://")
     return fetch_url_meta(url, timeout=12)
 
+
 @router.get("/")
 def get_tasks(
     skip: int = 0,
     limit: int = 50,
-    status: Optional[str] = None,
-    search: Optional[str] = None,
-    site_id: Optional[str] = None,
+    status: str | None = None,
+    search: str | None = None,
+    site_id: str | None = None,
     db: Session = Depends(get_db),
 ):
     query = db.query(Task)
@@ -86,12 +88,13 @@ def get_tasks(
     ]
     return {"items": items, "total": total}
 
+
 @router.get("/{task_id}")
 def get_task(task_id: str, db: Session = Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-        
+
     return {
         "id": str(task.id),
         "main_keyword": task.main_keyword,
@@ -102,12 +105,15 @@ def get_task(task_id: str, db: Session = Depends(get_db)):
         "page_type": task.page_type,
         "outline": task.outline,
         "serp_data": task.serp_data,
-        "step_results": task.step_results or {},
+        "step_results": read_step_results(task.step_results),
         "serp_config": task.serp_config or {},
         "error_log": task.error_log,
         "created_at": task.created_at.isoformat(),
-        "log_events": task.log_events or [],
+        "log_events": [
+            e.model_dump(mode="json", exclude_none=True) for e in read_log_events(task.log_events)
+        ],
     }
+
 
 def calculate_progress(step_results: dict) -> int:
     """Progress 0–100 from _pipeline_plan when present, else legacy estimate."""
@@ -137,19 +143,23 @@ def calculate_progress(step_results: dict) -> int:
     )
     return int(min(100, (completed / total_steps) * 100))
 
+
 @router.get("/{task_id}/steps")
 def get_task_steps(task_id: str, db: Session = Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    
+
+    step_results = read_step_results(task.step_results)
     return {
         "task_id": str(task.id),
         "status": task.status,
         "total_cost": task.total_cost or 0.0,
-        "progress": calculate_progress(task.step_results),
-        "step_results": task.step_results or {},
-        "current_step": next((k for k, v in (task.step_results or {}).items() if isinstance(v, dict) and v.get("status") == "running"), None)
+        "progress": calculate_progress(step_results),
+        "step_results": step_results,
+        "current_step": next(
+            (k for k, v in step_results.items() if isinstance(v, dict) and v.get("status") == "running"), None
+        ),
     }
 
 
@@ -169,7 +179,7 @@ def update_task_step_result(
     if payload.step_name not in ALL_STEPS:
         raise HTTPException(status_code=400, detail=f"Invalid step_name: {payload.step_name}")
 
-    step_results = dict(task.step_results or {})
+    step_results = dict(read_step_results(task.step_results))
     step_data = step_results.get(payload.step_name)
     if not isinstance(step_data, dict) or step_data.get("status") != "completed":
         raise HTTPException(
@@ -208,8 +218,7 @@ def export_task_docx(task_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     safe_name = (
-        "".join(c for c in (task.main_keyword or "task") if c.isalnum() or c in " -_").strip()
-        or "task"
+        "".join(c for c in (task.main_keyword or "task") if c.isalnum() or c in " -_").strip() or "task"
     )
     filename = f"{safe_name}.docx"
     return StreamingResponse(
@@ -229,13 +238,17 @@ def create_task(task_in: TaskCreate, db: Session = Depends(get_db)):
         site = db.query(Site).filter(Site.id == str(uuid_obj)).first()
     except ValueError:
         pass
-        
+
     if not site:
-        site = db.query(Site).filter(
-            (func.lower(Site.domain) == func.lower(task_in.target_site)) | 
-            (func.lower(Site.name) == func.lower(task_in.target_site))
-        ).first()
-        
+        site = (
+            db.query(Site)
+            .filter(
+                (func.lower(Site.domain) == func.lower(task_in.target_site))
+                | (func.lower(Site.name) == func.lower(task_in.target_site))
+            )
+            .first()
+        )
+
     if not site:
         # Automatically create the site if it wasn't found
         site = Site(
@@ -243,7 +256,7 @@ def create_task(task_in: TaskCreate, db: Session = Depends(get_db)):
             domain=task_in.target_site,
             country=task_in.country,
             language=task_in.language,
-            is_active=True
+            is_active=True,
         )
         db.add(site)
         db.commit()
@@ -252,10 +265,14 @@ def create_task(task_in: TaskCreate, db: Session = Depends(get_db)):
     # Auto-assign author if not provided
     final_author_id = task_in.author_id
     if not final_author_id:
-        author = db.query(Author).filter(
-            func.lower(Author.country) == task_in.country.lower(),
-            func.lower(Author.language) == task_in.language.lower()
-        ).first()
+        author = (
+            db.query(Author)
+            .filter(
+                func.lower(Author.country) == task_in.country.lower(),
+                func.lower(Author.language) == task_in.language.lower(),
+            )
+            .first()
+        )
         if author:
             final_author_id = author.id
 
@@ -268,12 +285,12 @@ def create_task(task_in: TaskCreate, db: Session = Depends(get_db)):
         author_id=final_author_id,
         additional_keywords=task_in.additional_keywords,
         priority=task_in.priority,
-        serp_config=task_in.serp_config.model_dump() if task_in.serp_config else None
+        serp_config=task_in.serp_config.model_dump() if task_in.serp_config else None,
     )
     db.add(new_task)
     db.commit()
     db.refresh(new_task)
-    
+
     # Dispatch Celery task (conditional on mode)
     if not settings.SEQUENTIAL_MODE:
         process_generation_task.delay(str(new_task.id))
@@ -281,17 +298,18 @@ def create_task(task_in: TaskCreate, db: Session = Depends(get_db)):
     else:
         return {"id": str(new_task.id), "status": "Task created (waiting for manual start)"}
 
+
 @router.post("/bulk")
 async def create_tasks_bulk(file: UploadFile = File(...), db: Session = Depends(get_db)):
     """
     CSV must have columns: keyword, country, language, site_name
     """
     contents = await file.read()
-    reader = csv.DictReader(io.StringIO(contents.decode('utf-8')))
-    
+    reader = csv.DictReader(io.StringIO(contents.decode("utf-8")))
+
     tasks_created = 0
     errors = []
-    
+
     for row in reader:
         try:
             site_name = row.get("site_name")
@@ -299,26 +317,27 @@ async def create_tasks_bulk(file: UploadFile = File(...), db: Session = Depends(
             if not site:
                 errors.append(f"Site {site_name} not found for keyword {row['keyword']}")
                 continue
-                
+
             new_task = Task(
                 main_keyword=row["keyword"],
                 country=row["country"],
                 language=row["language"],
                 page_type=row.get("page_type", "article"),
-                target_site_id=site.id
+                target_site_id=site.id,
             )
             db.add(new_task)
             db.commit()
             db.refresh(new_task)
-            
+
             if not settings.SEQUENTIAL_MODE:
                 process_generation_task.delay(str(new_task.id))
             tasks_created += 1
         except Exception as e:
             errors.append(f"Error processing row {row}: {e}")
             db.rollback()
-            
+
     return {"tasks_created": tasks_created, "errors": errors}
+
 
 @router.post("/next")
 def start_next_task(db: Session = Depends(get_db)):
@@ -332,28 +351,28 @@ def start_next_task(db: Session = Depends(get_db)):
             "status": "busy",
             "msg": "Есть задача в работе — дождитесь завершения",
             "running_task_id": str(running.id),
-            "running_keyword": running.main_keyword
+            "running_keyword": running.main_keyword,
         }
-    
-    next_task = db.query(Task).filter(
-        Task.status == "pending",
-        Task.project_id == None
-    ).order_by(
-        Task.priority.desc(),
-        Task.created_at.asc()
-    ).first()
-    
+
+    next_task = (
+        db.query(Task)
+        .filter(Task.status == "pending", Task.project_id.is_(None))
+        .order_by(Task.priority.desc(), Task.created_at.asc())
+        .first()
+    )
+
     if not next_task:
         return {"status": "empty", "msg": "Нет задач в очереди"}
-    
+
     process_generation_task.delay(str(next_task.id))
-    
+
     return {
         "status": "started",
         "task_id": str(next_task.id),
         "keyword": next_task.main_keyword,
-        "msg": f"Задача '{next_task.main_keyword}' запущена"
+        "msg": f"Задача '{next_task.main_keyword}' запущена",
     }
+
 
 @router.post("/start-all")
 def start_all_pending(db: Session = Depends(get_db)):
@@ -361,27 +380,24 @@ def start_all_pending(db: Session = Depends(get_db)):
     Запускает все pending-задачи (не принадлежащие проектам) в Celery последовательно (chain).
     """
     from celery import chain
-    
-    pending_tasks = db.query(Task).filter(
-        Task.status == "pending",
-        Task.project_id == None
-    ).order_by(
-        Task.priority.desc(),
-        Task.created_at.asc()
-    ).all()
-    
+
+    pending_tasks = (
+        db.query(Task)
+        .filter(Task.status == "pending", Task.project_id.is_(None))
+        .order_by(Task.priority.desc(), Task.created_at.asc())
+        .all()
+    )
+
     if not pending_tasks:
         return {"started": 0, "msg": "Нет задач в очереди"}
-    
+
     # Celery chain — каждая задача ждёт завершения предыдущей
-    task_chain = chain(
-        *[process_generation_task.si(str(t.id)) for t in pending_tasks]
-    )
+    task_chain = chain(*[process_generation_task.si(str(t.id)) for t in pending_tasks])
     task_chain.apply_async()
-    
+
     return {
-        "started": len(pending_tasks), 
-        "msg": f"Запущена цепочка из {len(pending_tasks)} задач (последовательно)"
+        "started": len(pending_tasks),
+        "msg": f"Запущена цепочка из {len(pending_tasks)} задач (последовательно)",
     }
 
 
@@ -395,7 +411,7 @@ def start_selected_tasks(payload: StartSelectedRequest, db: Session = Depends(ge
     if not payload.task_ids:
         return {"started": 0, "msg": "Нет задач для запуска"}
 
-    id_list: List[uuid.UUID] = []
+    id_list: list[uuid.UUID] = []
     for tid in payload.task_ids:
         try:
             id_list.append(uuid.UUID(str(tid)))
@@ -434,7 +450,7 @@ def delete_selected_tasks(payload: StartSelectedRequest, db: Session = Depends(g
     if not payload.task_ids:
         return {"deleted": 0}
 
-    id_list: List[uuid.UUID] = []
+    id_list: list[uuid.UUID] = []
     for tid in payload.task_ids:
         try:
             id_list.append(uuid.UUID(str(tid)))
@@ -446,7 +462,9 @@ def delete_selected_tasks(payload: StartSelectedRequest, db: Session = Depends(g
         task = db.query(Task).filter(Task.id == uid).first()
         if not task:
             continue
-        db.query(GeneratedArticle).filter(GeneratedArticle.task_id == task.id).delete(synchronize_session=False)
+        db.query(GeneratedArticle).filter(GeneratedArticle.task_id == task.id).delete(
+            synchronize_session=False
+        )
         db.delete(task)
         deleted += 1
 
@@ -460,9 +478,9 @@ def get_task_serp_data(task_id: str, db: Session = Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    
+
     serp = task.serp_data or {}
-    
+
     return {
         "source": serp.get("source", "unknown"),
         "total_results": serp.get("total_results", 0),
@@ -477,28 +495,38 @@ def get_task_serp_data(task_id: str, db: Session = Depends(get_db)):
         "answer_box": serp.get("answer_box"),
     }
 
+
 @router.get("/{task_id}/serp-export")
 def export_serp_csv(task_id: str, db: Session = Depends(get_db)):
     """Экспортирует SERP-данные задачи как ZIP с несколькими CSV-файлами."""
     import csv as csv_module
     import io
     import zipfile
+
     from fastapi.responses import StreamingResponse
-    
+
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    
+
     serp = task.serp_data or {}
     zip_buffer = io.BytesIO()
-    
-    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
         # 1. organic_results.csv
         organic = serp.get("organic_results") or []
         if organic:
             csv_buf = io.StringIO()
-            fieldnames = ["rank_group", "rank_absolute", "title", "url", "domain",
-                          "description", "is_featured_snippet", "highlighted"]
+            fieldnames = [
+                "rank_group",
+                "rank_absolute",
+                "title",
+                "url",
+                "domain",
+                "description",
+                "is_featured_snippet",
+                "highlighted",
+            ]
             writer = csv_module.DictWriter(csv_buf, fieldnames=fieldnames)
             writer.writeheader()
             for r in organic:
@@ -506,7 +534,7 @@ def export_serp_csv(task_id: str, db: Session = Depends(get_db)):
                 row["highlighted"] = "; ".join(r.get("highlighted") or [])
                 writer.writerow(row)
             zf.writestr("organic_results.csv", csv_buf.getvalue())
-        
+
         # 2. paa.csv
         paa = serp.get("paa_full") or []
         if paa:
@@ -517,7 +545,7 @@ def export_serp_csv(task_id: str, db: Session = Depends(get_db)):
             for p in paa:
                 writer.writerow({k: p.get(k, "") for k in fieldnames})
             zf.writestr("paa.csv", csv_buf.getvalue())
-        
+
         # 3. related_searches.csv
         related = serp.get("related_searches_full") or serp.get("related_searches") or []
         if related:
@@ -526,7 +554,10 @@ def export_serp_csv(task_id: str, db: Session = Depends(get_db)):
                 writer = csv_module.DictWriter(csv_buf, fieldnames=["query", "highlighted"])
                 writer.writeheader()
                 for rs in related:
-                    row = {"query": rs.get("query", ""), "highlighted": "; ".join(rs.get("highlighted") or [])}
+                    row = {
+                        "query": rs.get("query", ""),
+                        "highlighted": "; ".join(rs.get("highlighted") or []),
+                    }
                     writer.writerow(row)
             else:
                 writer = csv_module.writer(csv_buf)
@@ -534,30 +565,45 @@ def export_serp_csv(task_id: str, db: Session = Depends(get_db)):
                 for rs in related:
                     writer.writerow([rs])
             zf.writestr("related_searches.csv", csv_buf.getvalue())
-        
+
         # 4. snippets.csv
         snippets_rows = []
         fs = serp.get("featured_snippet")
         if fs:
-            snippets_rows.append({
-                "type": "featured_snippet", "title": fs.get("title", ""),
-                "text": fs.get("description", ""), "url": fs.get("url", ""),
-                "domain": fs.get("domain", ""), "snippet_type": fs.get("type", ""),
-            })
+            snippets_rows.append(
+                {
+                    "type": "featured_snippet",
+                    "title": fs.get("title", ""),
+                    "text": fs.get("description", ""),
+                    "url": fs.get("url", ""),
+                    "domain": fs.get("domain", ""),
+                    "snippet_type": fs.get("type", ""),
+                }
+            )
         ab = serp.get("answer_box")
         if ab:
-            snippets_rows.append({
-                "type": "answer_box", "title": "",
-                "text": ab.get("text", ""), "url": ab.get("url", ""),
-                "domain": "", "snippet_type": ab.get("type", ""),
-            })
+            snippets_rows.append(
+                {
+                    "type": "answer_box",
+                    "title": "",
+                    "text": ab.get("text", ""),
+                    "url": ab.get("url", ""),
+                    "domain": "",
+                    "snippet_type": ab.get("type", ""),
+                }
+            )
         ai_ov = serp.get("ai_overview")
         if ai_ov:
-            snippets_rows.append({
-                "type": "ai_overview", "title": "",
-                "text": ai_ov.get("text", "")[:5000], "url": "",
-                "domain": "", "snippet_type": "",
-            })
+            snippets_rows.append(
+                {
+                    "type": "ai_overview",
+                    "title": "",
+                    "text": ai_ov.get("text", "")[:5000],
+                    "url": "",
+                    "domain": "",
+                    "snippet_type": "",
+                }
+            )
         if snippets_rows:
             csv_buf = io.StringIO()
             fieldnames = ["type", "title", "text", "url", "domain", "snippet_type"]
@@ -566,7 +612,7 @@ def export_serp_csv(task_id: str, db: Session = Depends(get_db)):
             for row in snippets_rows:
                 writer.writerow(row)
             zf.writestr("snippets.csv", csv_buf.getvalue())
-        
+
         # 5. knowledge_graph.csv
         kg = serp.get("knowledge_graph")
         if kg:
@@ -579,7 +625,7 @@ def export_serp_csv(task_id: str, db: Session = Depends(get_db)):
             for fact in kg.get("facts") or []:
                 writer.writerow([fact.get("label", ""), fact.get("value", "")])
             zf.writestr("knowledge_graph.csv", csv_buf.getvalue())
-        
+
         # 6. serp_meta.csv
         csv_buf = io.StringIO()
         writer = csv_module.writer(csv_buf)
@@ -591,31 +637,31 @@ def export_serp_csv(task_id: str, db: Session = Depends(get_db)):
         for k, v in signals.items():
             writer.writerow([k, v])
         zf.writestr("serp_meta.csv", csv_buf.getvalue())
-    
+
     zip_buffer.seek(0)
     safe_keyword = "".join(c for c in (task.main_keyword or "serp") if c.isalnum() or c in " -_")
-    
-    from fastapi.responses import StreamingResponse
+
     return StreamingResponse(
         iter([zip_buffer.getvalue()]),
         media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename=serp_{safe_keyword}.zip"}
+        headers={"Content-Disposition": f"attachment; filename=serp_{safe_keyword}.zip"},
     )
+
 
 @router.post("/{task_id}/retry")
 def retry_task(task_id: str, db: Session = Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-        
+
     if task.status != "failed":
         raise HTTPException(status_code=400, detail="Can only retry failed tasks")
-        
+
     task.status = "pending"
     task.error_log = None
     task.retry_count += 1
     db.commit()
-    
+
     process_generation_task.delay(str(task.id))
     return {"msg": "Task queued for retry"}
 
@@ -635,36 +681,38 @@ def clear_task_cache(task_id: str, db: Session = Depends(get_db)):
     )
     return {"msg": "Task cache invalidated", "serp_cache_deleted": bool(deleted)}
 
+
 @router.post("/{task_id}/approve")
 def approve_task(task_id: str, db: Session = Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-        
+
     # Check if we are waiting for approval
-    step_results = dict(task.step_results or {})
+    step_results = dict(read_step_results(task.step_results))
     if not step_results.get("waiting_for_approval"):
         raise HTTPException(status_code=400, detail="Task is not waiting for approval")
-        
+
     # Mark as approved and remove the waiting flag
     step_results["waiting_for_approval"] = False
     step_results["test_mode_approved"] = True
     task.step_results = step_results
-    
+
     # Needs to be back in processing or pending to resume cleanly
-    task.status = "pending" 
+    task.status = "pending"
     db.commit()
-    
+
     # Resume pipeline
     process_generation_task.delay(str(task.id))
     return {"msg": "Task approved and queued for continuation"}
+
 
 @router.delete("/{task_id}")
 def delete_task(task_id: str, db: Session = Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-        
+
     db.delete(task)
     db.commit()
     return {"msg": "Task deleted"}
@@ -675,13 +723,13 @@ def force_task_status(task_id: str, payload: ForceStatusRequest, db: Session = D
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-        
+
     if task.status not in ("processing", "stale", "paused"):
         raise HTTPException(
             status_code=400,
             detail="Only 'processing', 'stale', or 'paused' tasks can be forced",
         )
-        
+
     if payload.action == "fail":
         task.status = "failed"
         task.error_log = "Force-failed by user"
@@ -702,28 +750,30 @@ def rerun_task_step(task_id: str, payload: RerunStepRequest, db: Session = Depen
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-        
+
     if task.status not in ("completed", "processing", "failed", "pending", "paused"):
         raise HTTPException(status_code=400, detail="Task status does not allow rerunning steps")
-        
+
     step_results = dict(task.step_results or {})
     if payload.step_name not in step_results or step_results[payload.step_name].get("status") != "completed":
-        raise HTTPException(status_code=400, detail=f"Step '{payload.step_name}' is not completed or does not exist")
-        
+        raise HTTPException(
+            status_code=400, detail=f"Step '{payload.step_name}' is not completed or does not exist"
+        )
+
     invalidated_steps = []
-    
+
     if payload.cascade:
         try:
             step_idx = ALL_STEPS.index(payload.step_name)
             steps_to_remove = ALL_STEPS[step_idx:]
         except ValueError:
             steps_to_remove = [payload.step_name]
-            
+
         for s in steps_to_remove:
             if s in step_results:
                 invalidated_steps.append(s)
                 del step_results[s]
-                
+
         # Delete generated article if exists since we are cascading
         article = db.query(GeneratedArticle).filter(GeneratedArticle.task_id == task_id).first()
         if article:
@@ -731,7 +781,7 @@ def rerun_task_step(task_id: str, payload: RerunStepRequest, db: Session = Depen
     else:
         invalidated_steps.append(payload.step_name)
         del step_results[payload.step_name]
-        
+
         # Image chain special-casing:
         # - image_prompt_generation -> affects image_generation -> image_inject
         # - image_generation -> affects image_inject
@@ -746,7 +796,7 @@ def rerun_task_step(task_id: str, payload: RerunStepRequest, db: Session = Depen
             if "image_inject" in step_results:
                 invalidated_steps.append("image_inject")
                 del step_results["image_inject"]
-    
+
     # --- Clear cached data so pipeline phases re-fetch ---
     try:
         serp_idx = ALL_STEPS.index("serp_research")
@@ -770,50 +820,45 @@ def rerun_task_step(task_id: str, payload: RerunStepRequest, db: Session = Depen
     elif rerun_idx <= scraping_idx:
         task.competitors_text = None
         task.outline = None
-        
+
     # Save feedback
     step_results["_rerun_feedback"] = {
         "step": payload.step_name,
         "feedback": payload.feedback,
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.utcnow().isoformat(),
     }
-    
+
     # Store previous version of the step for history
     prev_versions_key = f"{payload.step_name}_prev_versions"
     if prev_versions_key not in step_results:
         step_results[prev_versions_key] = []
-        
+
     # We retrieve the actual previous output from the DB task before it was deleted in step_results
     old_step_data = task.step_results.get(payload.step_name)
     if old_step_data:
         step_results[prev_versions_key].append(old_step_data)
-        
+
     task.step_results = step_results
     task.status = "pending"
-    
+
     # Log the action
     log_msg = f"🔄 Rerun requested for step '{payload.step_name}' with feedback: '{payload.feedback[:200]}'. Cascade: {payload.cascade}. Invalidated steps: {invalidated_steps}"
 
-    log_events = list(task.log_events or [])
-    log_events.append(
-        {
-            "ts": datetime.utcnow().isoformat(),
-            "level": "info",
-            "msg": log_msg,
-            "step": payload.step_name,
-        }
+    log_event = LogEvent(
+        ts=datetime.utcnow(),
+        level=LogLevel.info,
+        msg=log_msg,
+        step=payload.step_name,
     )
-    task.log_events = log_events[-500:]
+    task.log_events = append_log_event(task.log_events, log_event, max_len=500)
     flag_modified(task, "log_events")
 
     db.commit()
-    
+
     process_generation_task.delay(str(task.id))
-    
-    return {
-        "msg": f"Step '{payload.step_name}' queued for re-run",
-        "invalidated_steps": invalidated_steps
-    }
+
+    return {"msg": f"Step '{payload.step_name}' queued for re-run", "invalidated_steps": invalidated_steps}
+
 
 # ========================
 # SERP URL REVIEW ENDPOINTS
@@ -851,7 +896,7 @@ def get_serp_urls(task_id: str, db: Session = Depends(get_db)):
             }
         )
 
-    step_results = task.step_results or {}
+    step_results = read_step_results(task.step_results)
     pause_state = step_results.get("_pipeline_pause", {})
     is_paused = (
         isinstance(pause_state, dict)
@@ -886,7 +931,7 @@ def approve_serp_urls(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    step_results = dict(task.step_results or {})
+    step_results = dict(read_step_results(task.step_results))
     pause_state = step_results.get("_pipeline_pause", {})
     if not (
         isinstance(pause_state, dict)
@@ -946,6 +991,7 @@ def approve_serp_urls(
 # IMAGE REVIEW ENDPOINTS
 # ========================
 
+
 @router.get("/{task_id}/images")
 def get_task_images(task_id: str, db: Session = Depends(get_db)):
     """Get generated images for review."""
@@ -953,20 +999,25 @@ def get_task_images(task_id: str, db: Session = Depends(get_db)):
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    step_results = task.step_results or {}
+    step_results = read_step_results(task.step_results)
     image_gen_result = step_results.get("image_generation", {}).get("result", "")
-    
+
     if not image_gen_result:
         return {"images": [], "summary": {}, "paused": False}
 
     import json as _json
+
     try:
         data = _json.loads(image_gen_result) if isinstance(image_gen_result, str) else image_gen_result
     except Exception:
         data = {"images": []}
 
     pause_state = step_results.get("_pipeline_pause", {})
-    is_paused = isinstance(pause_state, dict) and pause_state.get("active") and pause_state.get("reason") == "image_review"
+    is_paused = (
+        isinstance(pause_state, dict)
+        and pause_state.get("active")
+        and pause_state.get("reason") == "image_review"
+    )
 
     return {
         "images": data.get("images", []),
@@ -982,17 +1033,18 @@ def approve_images(task_id: str, payload: ApproveImagesRequest, db: Session = De
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    step_results = dict(task.step_results or {})
+    step_results = dict(read_step_results(task.step_results))
     image_gen_result = step_results.get("image_generation", {}).get("result", "")
 
     if not image_gen_result:
         raise HTTPException(status_code=400, detail="No image generation data found")
 
     import json as _json
+
     try:
         data = _json.loads(image_gen_result) if isinstance(image_gen_result, str) else image_gen_result
-    except Exception:
-        raise HTTPException(status_code=400, detail="Could not parse image data")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Could not parse image data") from e
 
     images = data.get("images", [])
     approved_set = set(payload.approved_ids)
@@ -1043,10 +1095,11 @@ def regenerate_image(task_id: str, payload: RegenerateImageRequest, db: Session 
         raise HTTPException(status_code=400, detail="No image generation data found")
 
     import json as _json
+
     try:
         data = _json.loads(image_gen_result) if isinstance(image_gen_result, str) else image_gen_result
-    except Exception:
-        raise HTTPException(status_code=400, detail="Could not parse image data")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Could not parse image data") from e
 
     images = data.get("images", [])
     target_img = next((img for img in images if img["id"] == payload.image_id), None)
@@ -1101,4 +1154,3 @@ def regenerate_image(task_id: str, payload: RegenerateImageRequest, db: Session 
     db.commit()
 
     return {"image": target_img}
-

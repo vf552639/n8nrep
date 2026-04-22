@@ -2,16 +2,15 @@ import json
 import time as time_module
 import traceback
 from datetime import datetime, timedelta
-from typing import List, Optional
 
 import structlog
 from celery.exceptions import SoftTimeLimitExceeded
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.workers.celery_app import celery_app
+from app.config import settings
 from app.database import SessionLocal
 from app.services.pipeline import run_pipeline
-from app.config import settings
+from app.workers.celery_app import celery_app
 
 
 def _append_project_log(db, project, msg: str, level: str = "info") -> None:
@@ -26,6 +25,7 @@ def _append_project_log(db, project, msg: str, level: str = "info") -> None:
     project.log_events = logs[-500:]
     flag_modified(project, "log_events")
 
+
 def _load_failed_pages(project) -> list:
     if not project.error_log:
         return []
@@ -37,14 +37,15 @@ def _load_failed_pages(project) -> list:
         pass
     return []
 
+
 def _save_failed_page(project, failed_page: dict) -> None:
     failed_pages = _load_failed_pages(project)
     failed_pages.append(failed_page)
     project.error_log = json.dumps(failed_pages, ensure_ascii=False)
 
 
-def _merge_additional_keywords(existing: Optional[str], new_list: List[str]) -> str:
-    parts: List[str] = []
+def _merge_additional_keywords(existing: str | None, new_list: list[str]) -> str:
+    parts: list[str] = []
     seen = set()
     if existing:
         for x in existing.split(","):
@@ -67,7 +68,7 @@ def _merge_additional_keywords(existing: Optional[str], new_list: List[str]) -> 
 
 
 def _fmt_duration(seconds: float) -> str:
-    s = int(round(seconds))
+    s = round(seconds)
     m, s = divmod(s, 60)
     h, m = divmod(m, 60)
     if h:
@@ -93,16 +94,18 @@ def process_generation_task(self, task_id: str):
 
     except SoftTimeLimitExceeded:
         from app.models.task import Task
+
         task = db.query(Task).filter(Task.id == task_id).first()
         if task:
             task.status = "failed"
             task.error_log = "Celery task soft time limit exceeded (timeout)."
             db.commit()
-            
+
     except Exception as exc:
         import traceback
+
         from app.models.task import Task
-        
+
         task = db.query(Task).filter(Task.id == task_id).first()
         if task and task.status != "failed":
             task.status = "failed"
@@ -111,9 +114,10 @@ def process_generation_task(self, task_id: str):
     finally:
         db.close()
 
+
 def finalize_project(db, project_id: str):
-    from app.models.project import SiteProject
     from app.models.blueprint import BlueprintPage
+    from app.models.project import SiteProject
     from app.models.task import Task
     from app.services.site_builder import build_site
 
@@ -150,11 +154,12 @@ def finalize_project(db, project_id: str):
     )
     db.commit()
 
+
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=120)
 def process_project_page(self, project_id: str, page_index: int):
     db = SessionLocal()
-    from app.models.project import SiteProject
     from app.models.blueprint import BlueprintPage
+    from app.models.project import SiteProject
     from app.models.task import Task
 
     project = None
@@ -196,11 +201,15 @@ def process_project_page(self, project_id: str, page_index: int):
         keyword = template.replace("{seed}", project.seed_keyword)
         proj_serp = getattr(project, "serp_config", None) or {}
 
-        existing_task = db.query(Task).filter(
-            Task.project_id == project.id,
-            Task.blueprint_page_id == page.id,
-            Task.status.in_(["pending", "failed"]),
-        ).first()
+        existing_task = (
+            db.query(Task)
+            .filter(
+                Task.project_id == project.id,
+                Task.blueprint_page_id == page.id,
+                Task.status.in_(["pending", "failed"]),
+            )
+            .first()
+        )
         if existing_task:
             project_task = existing_task
             project_task.status = "pending"
@@ -227,9 +236,7 @@ def process_project_page(self, project_id: str, page_index: int):
         db.refresh(project)
         pk_data = getattr(project, "project_keywords", None) or {}
         clustered_data = pk_data.get("clustered") if isinstance(pk_data, dict) else {}
-        page_cluster = (
-            clustered_data.get(page.page_slug, {}) if isinstance(clustered_data, dict) else {}
-        )
+        page_cluster = clustered_data.get(page.page_slug, {}) if isinstance(clustered_data, dict) else {}
         assigned = page_cluster.get("assigned_keywords") if isinstance(page_cluster, dict) else []
         if isinstance(assigned, list) and assigned:
             clustered_kws = [str(x).strip() for x in assigned if str(x).strip()]
@@ -323,11 +330,12 @@ def process_project_page(self, project_id: str, page_index: int):
 
     advance_project.delay(project_id, False)
 
+
 @celery_app.task(bind=True)
 def advance_project(self, project_id: str, approved: bool = False):
     db = SessionLocal()
-    from app.models.project import SiteProject
     from app.models.blueprint import BlueprintPage
+    from app.models.project import SiteProject
     from app.models.task import Task
 
     try:
@@ -349,10 +357,14 @@ def advance_project(self, project_id: str, approved: bool = False):
             .order_by(BlueprintPage.sort_order)
             .all()
         )
-        done_tasks = db.query(Task).filter(
-            Task.project_id == project.id,
-            Task.status.in_(["completed", "failed", "stale"]),
-        ).all()
+        done_tasks = (
+            db.query(Task)
+            .filter(
+                Task.project_id == project.id,
+                Task.status.in_(["completed", "failed", "stale"]),
+            )
+            .all()
+        )
         done_page_ids = {str(t.blueprint_page_id) for t in done_tasks if t.blueprint_page_id}
 
         next_page_index = None
@@ -366,10 +378,12 @@ def advance_project(self, project_id: str, approved: bool = False):
             return
 
         if getattr(settings, "PROJECT_PAGE_APPROVAL", False) and not approved:
-            last_completed = db.query(Task).filter(
-                Task.project_id == project.id,
-                Task.status == "completed"
-            ).order_by(Task.updated_at.desc()).first()
+            last_completed = (
+                db.query(Task)
+                .filter(Task.project_id == project.id, Task.status == "completed")
+                .order_by(Task.updated_at.desc())
+                .first()
+            )
             if last_completed:
                 project.status = "awaiting_page_approval"
                 _append_project_log(
@@ -397,6 +411,7 @@ def advance_project(self, project_id: str, approved: bool = False):
             pass
     finally:
         db.close()
+
 
 @celery_app.task(bind=True, max_retries=1, default_retry_delay=60)
 def process_site_project(self, project_id: str):
@@ -440,28 +455,33 @@ def cleanup_stale_tasks():
     and re-queue stale pending projects.
     """
     db = SessionLocal()
-    from app.models.task import Task
     from app.models.project import SiteProject
+    from app.models.task import Task
     from app.services.pipeline import add_log
-    
+
     try:
-        from sqlalchemy import or_, and_
+        from sqlalchemy import and_, or_
+
         now = datetime.utcnow()
         stale_minutes = int(getattr(settings, "STALE_TASK_TIMEOUT_MINUTES", 15))
         stale_threshold = now - timedelta(minutes=stale_minutes)
         step_timeout = timedelta(minutes=int(getattr(settings, "STEP_TIMEOUT_MINUTES", 15)))
-        stale_tasks = db.query(Task).filter(
-            Task.status == "processing",
-            or_(
-                Task.last_heartbeat < stale_threshold,
-                and_(Task.last_heartbeat.is_(None), Task.updated_at < stale_threshold)
+        stale_tasks = (
+            db.query(Task)
+            .filter(
+                Task.status == "processing",
+                or_(
+                    Task.last_heartbeat < stale_threshold,
+                    and_(Task.last_heartbeat.is_(None), Task.updated_at < stale_threshold),
+                ),
             )
-        ).all()
-        
+            .all()
+        )
+
         for t in stale_tasks:
             t.status = "stale"
             t.error_log = "Task timed out and was cleaned up by Celery Beat (Stale state)."
-            
+
         if stale_tasks:
             db.commit()
             print(f"Cleaned up {len(stale_tasks)} stale tasks.")
@@ -491,9 +511,7 @@ def cleanup_stale_tasks():
                     )
                     task.step_results = dict(step_results)
                     task.status = "stale"
-                    task.error_log = (
-                        f"Step '{step_name}' timed out after {int(getattr(settings, 'STEP_TIMEOUT_MINUTES', 15))}min"
-                    )
+                    task.error_log = f"Step '{step_name}' timed out after {int(getattr(settings, 'STEP_TIMEOUT_MINUTES', 15))}min"
                     add_log(
                         db,
                         task,
@@ -506,18 +524,19 @@ def cleanup_stale_tasks():
         if step_timed_out:
             db.commit()
             print(f"Marked {step_timed_out} tasks stale by step timeout.")
-        
+
         # Re-queue pending projects older than 10 minutes
         project_cutoff = datetime.utcnow() - timedelta(minutes=10)
-        stale_projects = db.query(SiteProject).filter(
-            SiteProject.status == "pending",
-            SiteProject.created_at < project_cutoff
-        ).all()
-        
+        stale_projects = (
+            db.query(SiteProject)
+            .filter(SiteProject.status == "pending", SiteProject.created_at < project_cutoff)
+            .all()
+        )
+
         for proj in stale_projects:
             print(f"Re-queuing stale project {proj.id}")
             process_site_project.delay(str(proj.id))
-            
+
     except Exception as e:
         print(f"Error in cleanup_stale_tasks: {e}")
     finally:

@@ -1,15 +1,13 @@
 import uuid
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.blueprint import BlueprintPage, SiteBlueprint
+from app.models.template import LEGAL_PAGE_TYPES, LegalPageTemplate
 from app.schemas.blueprint import BlueprintPageCreate, SiteBlueprintCreate
-from app.models.blueprint import SiteBlueprint, BlueprintPage
-from app.models.template import LegalPageTemplate, LEGAL_PAGE_TYPES
 from app.services.pipeline_presets import (
-    VALID_PRESETS,
     pipeline_steps_use_serp,
     resolve_steps_from_payload,
 )
@@ -20,8 +18,8 @@ router = APIRouter()
 def _validate_default_legal_template(
     db: Session,
     page_type: str,
-    default_legal_template_id: Optional[str],
-) -> Optional[str]:
+    default_legal_template_id: str | None,
+) -> str | None:
     """Validate and return normalized template_id or None."""
     if not default_legal_template_id or not str(default_legal_template_id).strip():
         return None
@@ -54,8 +52,7 @@ def _validate_default_legal_template(
     if tpl.page_type != page_type:
         raise HTTPException(
             status_code=400,
-            detail=f"Template page_type '{tpl.page_type}' doesn't match "
-            f"blueprint page_type '{page_type}'",
+            detail=f"Template page_type '{tpl.page_type}' doesn't match blueprint page_type '{page_type}'",
         )
     return str(tpl.id)
 
@@ -112,7 +109,7 @@ def create_blueprint(blueprint_in: SiteBlueprintCreate, db: Session = Depends(ge
         db.refresh(db_blueprint)
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return {
         "id": str(db_blueprint.id),
         "name": db_blueprint.name,
@@ -172,9 +169,7 @@ def create_blueprint_page(id: str, page_in: BlueprintPageCreate, db: Session = D
 @router.put("/{id}/pages/{page_id}")
 def update_blueprint_page(id: str, page_id: str, page_in: BlueprintPageCreate, db: Session = Depends(get_db)):
     db_page = (
-        db.query(BlueprintPage)
-        .filter(BlueprintPage.id == page_id, BlueprintPage.blueprint_id == id)
-        .first()
+        db.query(BlueprintPage).filter(BlueprintPage.id == page_id, BlueprintPage.blueprint_id == id).first()
     )
     if not db_page:
         raise HTTPException(status_code=404, detail="Page not found")
@@ -195,9 +190,7 @@ def update_blueprint_page(id: str, page_id: str, page_in: BlueprintPageCreate, d
 @router.delete("/{id}/pages/{page_id}")
 def delete_blueprint_page(id: str, page_id: str, db: Session = Depends(get_db)):
     db_page = (
-        db.query(BlueprintPage)
-        .filter(BlueprintPage.id == page_id, BlueprintPage.blueprint_id == id)
-        .first()
+        db.query(BlueprintPage).filter(BlueprintPage.id == page_id, BlueprintPage.blueprint_id == id).first()
     )
     if not db_page:
         raise HTTPException(status_code=404, detail="Page not found")
