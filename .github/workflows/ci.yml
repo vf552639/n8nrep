@@ -32,10 +32,10 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: pip install -r requirements.txt -r requirements-dev.txt
-      - name: Ruff check (schemas + logging)
-        run: ruff check app/schemas app/logging_config.py app/workers/celery_app.py
+      - name: Ruff check
+        run: ruff check app tests
       - name: Ruff format
-        run: ruff format --check app/schemas app/logging_config.py app/workers/celery_app.py
+        run: ruff format --check app tests
       - name: Apply database migrations
         env:
           SUPABASE_DB_URL: postgresql://postgres:postgres@localhost:5432/seo_test
@@ -49,7 +49,7 @@ jobs:
           SUPABASE_KEY: test
           API_KEY: ""
           OPENROUTER_API_KEY: test
-        run: pytest -m "not integration" --cov=app --cov-report=term-missing -q
+        run: pytest -m "not integration" --cov=app --cov-fail-under=55 --cov-report=term-missing -q
 
   frontend:
     runs-on: ubuntu-latest
