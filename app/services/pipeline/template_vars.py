@@ -1,3 +1,9 @@
+"""Template context assembly for LLM steps.
+
+This module enriches step context with author/site/legal data and
+`result_*` variables from completed pipeline steps.
+"""
+
 import json
 
 from app.config import settings

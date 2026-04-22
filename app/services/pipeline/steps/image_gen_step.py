@@ -1,3 +1,9 @@
+"""Image generation step implementation.
+
+This module is responsible for generating and uploading images.
+Pause/resume auto-approval orchestration lives in `pipeline/runner.py`.
+"""
+
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -171,59 +177,5 @@ class ImageGenStep:
             add_log(ctx.db, ctx.task, "No images generated — continuing pipeline", step=STEP_IMAGE_GEN)
 
         return StepResult(status="completed", result=json.dumps(result_payload, ensure_ascii=False))
-
-
-def _auto_approve_images(ctx) -> None:
-    step_results = dict(ctx.task.step_results or {})
-    image_gen_result = step_results.get(STEP_IMAGE_GEN, {}).get("result", "")
-    if not image_gen_result:
-        step_results["_pipeline_pause"] = {"active": False, "reason": "image_review"}
-        step_results["_images_approved"] = True
-        ctx.task.step_results = step_results
-        ctx.db.commit()
-        add_log(
-            ctx.db,
-            ctx.task,
-            "auto_mode: no image_generation payload — cleared image pause",
-            step=STEP_IMAGE_GEN,
-        )
-        return
-    try:
-        data = json.loads(image_gen_result) if isinstance(image_gen_result, str) else image_gen_result
-    except Exception:
-        step_results["_pipeline_pause"] = {"active": False, "reason": "image_review"}
-        step_results["_images_approved"] = True
-        ctx.task.step_results = step_results
-        ctx.db.commit()
-        add_log(
-            ctx.db,
-            ctx.task,
-            "auto_mode: could not parse image_generation JSON — cleared image pause",
-            level="warn",
-            step=STEP_IMAGE_GEN,
-        )
-        return
-    images = data.get("images", [])
-    approved_n = 0
-    for img in images:
-        if img.get("status") == "completed" and img.get("hosted_url"):
-            img["approved"] = True
-            approved_n += 1
-        else:
-            img["approved"] = False
-    step_data = dict(step_results.get(STEP_IMAGE_GEN, {}))
-    step_data["result"] = json.dumps(data, ensure_ascii=False)
-    step_results[STEP_IMAGE_GEN] = step_data
-    step_results["_pipeline_pause"] = {"active": False, "reason": "image_review"}
-    step_results["_images_approved"] = True
-    ctx.task.step_results = step_results
-    ctx.db.commit()
-    add_log(
-        ctx.db,
-        ctx.task,
-        f"auto_mode: approved {approved_n} image(s) with completed status, continuing pipeline",
-        step=STEP_IMAGE_GEN,
-    )
-
 
 register_step(ImageGenStep())

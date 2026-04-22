@@ -1,3 +1,4 @@
+import json
 import signal
 import traceback
 
@@ -12,7 +13,6 @@ from app.services.pipeline.errors import StepTimeoutError
 from app.services.pipeline.persistence import add_log, mark_step_running, save_step_result
 from app.services.pipeline.registry import STEP_REGISTRY
 from app.services.pipeline.steps.base import PipelineStep, StepResult
-from app.services.pipeline.steps.image_gen_step import _auto_approve_images
 from app.services.pipeline_constants import (
     STEP_FINAL_EDIT,
     STEP_HTML_STRUCT,
@@ -32,6 +32,59 @@ ALLOWED_EXTRA_FIELDS = frozenset(
         "word_loss_percentage",
     }
 )
+
+
+def _auto_approve_images(ctx: PipelineContext) -> None:
+    step_results = dict(ctx.task.step_results or {})
+    image_gen_result = step_results.get(STEP_IMAGE_GEN, {}).get("result", "")
+    if not image_gen_result:
+        step_results["_pipeline_pause"] = {"active": False, "reason": "image_review"}
+        step_results["_images_approved"] = True
+        ctx.task.step_results = step_results
+        ctx.db.commit()
+        add_log(
+            ctx.db,
+            ctx.task,
+            "auto_mode: no image_generation payload — cleared image pause",
+            step=STEP_IMAGE_GEN,
+        )
+        return
+    try:
+        data = json.loads(image_gen_result) if isinstance(image_gen_result, str) else image_gen_result
+    except Exception:
+        step_results["_pipeline_pause"] = {"active": False, "reason": "image_review"}
+        step_results["_images_approved"] = True
+        ctx.task.step_results = step_results
+        ctx.db.commit()
+        add_log(
+            ctx.db,
+            ctx.task,
+            "auto_mode: could not parse image_generation JSON — cleared image pause",
+            level="warn",
+            step=STEP_IMAGE_GEN,
+        )
+        return
+    images = data.get("images", [])
+    approved_n = 0
+    for img in images:
+        if img.get("status") == "completed" and img.get("hosted_url"):
+            img["approved"] = True
+            approved_n += 1
+        else:
+            img["approved"] = False
+    step_data = dict(step_results.get(STEP_IMAGE_GEN, {}))
+    step_data["result"] = json.dumps(data, ensure_ascii=False)
+    step_results[STEP_IMAGE_GEN] = step_data
+    step_results["_pipeline_pause"] = {"active": False, "reason": "image_review"}
+    step_results["_images_approved"] = True
+    ctx.task.step_results = step_results
+    ctx.db.commit()
+    add_log(
+        ctx.db,
+        ctx.task,
+        f"auto_mode: approved {approved_n} image(s) with completed status, continuing pipeline",
+        step=STEP_IMAGE_GEN,
+    )
 
 
 def _call_with_timeout(step: PipelineStep, ctx: PipelineContext, timeout_sec: int) -> StepResult:

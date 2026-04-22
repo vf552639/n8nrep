@@ -1,3 +1,9 @@
+"""SERP/analysis variable preparation and template placeholder substitution.
+
+`setup_vars()` builds base context and analysis vars from SERP + scraping data.
+`apply_template_vars()` performs Jinja-like `{{var}}` substitution with a report.
+"""
+
 import json
 import re
 
