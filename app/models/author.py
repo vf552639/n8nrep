@@ -1,14 +1,15 @@
-import uuid
-from sqlalchemy import Column, String, Text, BigInteger, DateTime, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import BigInteger, Column, DateTime, String, Text, func
+
 from app.database import Base
+
 
 class Author(Base):
     __tablename__ = "authors"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    author = Column(Text, nullable=True)        # имя автора (поле называется "author", не "name")
+    author = Column(Text, nullable=True)  # имя автора (поле называется "author", не "name")
     country = Column(Text, nullable=True)
+    country_full = Column(Text, nullable=True)  # full country name, e.g. "Germany"
     language = Column(Text, nullable=True)
     bio = Column(Text, nullable=True)
     co_short = Column(Text, nullable=True)

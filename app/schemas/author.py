@@ -7,6 +7,7 @@ class AuthorCreate(BaseModel):
     author: str
     country: str
     language: str
+    country_full: str | None = None
     bio: str | None = None
     co_short: str | None = None
     city: str | None = None
