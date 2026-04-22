@@ -7,7 +7,7 @@ from app.services.pipeline.llm_client import call_agent
 from app.services.pipeline.persistence import add_log
 from app.services.pipeline.registry import register_step
 from app.services.pipeline.steps.base import StepPolicy, StepResult
-from app.services.pipeline.vars import setup_template_vars
+from app.services.pipeline.template_vars import setup_template_vars
 from app.services.pipeline_constants import STEP_FINAL_ANALYSIS, STEP_IMAGE_PROMPT_GEN
 
 

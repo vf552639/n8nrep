@@ -1,9 +1,10 @@
-from app.services.pipeline.errors import LLMError
+from app.services.json_parser import clean_and_parse_json
+from app.services.pipeline.errors import LLMError, ParseError
 from app.services.pipeline.llm_client import call_agent
 from app.services.pipeline.persistence import add_log
 from app.services.pipeline.registry import register_step
 from app.services.pipeline.steps.base import StepPolicy, StepResult
-from app.services.pipeline.vars import setup_template_vars
+from app.services.pipeline.template_vars import setup_template_vars
 from app.services.pipeline.assembly import pick_html_for_meta
 from app.services.pipeline_constants import STEP_META_GEN
 
@@ -25,6 +26,8 @@ class MetaGenerationStep:
             variables=ctx.template_vars,
         )
         ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + step_cost
+        if meta_json_str and not clean_and_parse_json(meta_json_str):
+            raise ParseError("meta_generation returned unparseable JSON")
         raw_preview = (meta_json_str or "")[:500]
         add_log(
             ctx.db,

@@ -8,4 +8,3 @@ from app.services.pipeline.steps import legal_step  # noqa: F401
 from app.services.pipeline.steps import meta_step  # noqa: F401
 from app.services.pipeline.steps import outline_step  # noqa: F401
 from app.services.pipeline.steps import serp_step  # noqa: F401
-from app.services.pipeline.steps import docx_step  # noqa: F401

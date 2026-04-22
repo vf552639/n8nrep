@@ -5,7 +5,7 @@ from app.services.pipeline.llm_client import call_agent_with_exclude_validation
 from app.services.pipeline.persistence import add_log
 from app.services.pipeline.registry import register_step
 from app.services.pipeline.steps.base import StepPolicy, StepResult
-from app.services.pipeline.vars import setup_template_vars
+from app.services.pipeline.template_vars import setup_template_vars
 from app.services.pipeline_constants import (
     STEP_FINAL_EDIT,
     STEP_IMPROVER,
@@ -18,7 +18,7 @@ from app.services.word_counter import count_content_words
 
 class FinalEditingStep:
     name = STEP_FINAL_EDIT
-    policy = StepPolicy(retryable_errors=(LLMError,), max_retries=1)
+    policy = StepPolicy(retryable_errors=(LLMError,), max_retries=2)
 
     def run(self, ctx) -> StepResult:
         setup_template_vars(ctx)

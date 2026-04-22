@@ -5,7 +5,7 @@ from app.services.pipeline.llm_client import call_agent, call_agent_with_exclude
 from app.services.pipeline.persistence import add_log
 from app.services.pipeline.registry import register_step
 from app.services.pipeline.steps.base import StepPolicy, StepResult
-from app.services.pipeline.vars import setup_template_vars
+from app.services.pipeline.template_vars import setup_template_vars
 from app.services.pipeline_constants import (
     STEP_COMP_COMPARISON,
     STEP_IMPROVER,
@@ -19,7 +19,7 @@ from app.services.word_counter import count_content_words
 
 class PrimaryGenStep:
     name = STEP_PRIMARY_GEN
-    policy = StepPolicy(retryable_errors=(LLMError,), max_retries=1)
+    policy = StepPolicy(retryable_errors=(LLMError,), max_retries=2)
 
     def run(self, ctx) -> StepResult:
         setup_template_vars(ctx)
@@ -54,7 +54,7 @@ class PrimaryGenStep:
 
 class PrimaryGenAboutStep:
     name = STEP_PRIMARY_GEN_ABOUT
-    policy = StepPolicy(retryable_errors=(LLMError,), max_retries=1)
+    policy = StepPolicy(retryable_errors=(LLMError,), max_retries=2)
 
     def run(self, ctx) -> StepResult:
         setup_template_vars(ctx)
@@ -166,7 +166,7 @@ class InterlinkStep:
 
 class ImproverStep:
     name = STEP_IMPROVER
-    policy = StepPolicy(retryable_errors=(LLMError,), max_retries=1)
+    policy = StepPolicy(retryable_errors=(LLMError,), max_retries=2)
 
     def run(self, ctx) -> StepResult:
         setup_template_vars(ctx)

@@ -1,11 +1,11 @@
 from app.config import settings
 from app.services.html_inserter import programmatic_html_insert
-from app.services.pipeline.errors import LLMError
+from app.services.pipeline.errors import LLMError, ParseError
 from app.services.pipeline.llm_client import call_agent
 from app.services.pipeline.persistence import add_log, completed_step_body
 from app.services.pipeline.registry import register_step
 from app.services.pipeline.steps.base import StepPolicy, StepResult
-from app.services.pipeline.vars import setup_template_vars
+from app.services.pipeline.template_vars import setup_template_vars
 from app.services.pipeline_constants import (
     STEP_CONTENT_FACT_CHECK,
     STEP_FINAL_EDIT,
@@ -158,7 +158,7 @@ class HtmlStructureStep:
 
 class ContentFactCheckStep:
     name = STEP_CONTENT_FACT_CHECK
-    policy = StepPolicy(retryable_errors=(LLMError,), max_retries=1)
+    policy = StepPolicy(skip_on=(LLMError, ParseError))
 
     def run(self, ctx) -> StepResult:
         if not settings.FACT_CHECK_ENABLED:
@@ -181,36 +181,23 @@ class ContentFactCheckStep:
         )
 
         add_log(ctx.db, ctx.task, "Starting Fact-Checking...", step=STEP_CONTENT_FACT_CHECK)
-        try:
-            fact_check_json_str, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
-                ctx,
-                "content_fact_checking",
-                fact_check_context,
-                response_format={"type": "json_object"},
-                variables=ctx.template_vars,
-            )
-            ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + step_cost
-            add_log(ctx.db, ctx.task, "Fact-Checking completed", step=STEP_CONTENT_FACT_CHECK)
-            return StepResult(
-                status="completed",
-                result=fact_check_json_str,
-                model=actual_model,
-                cost=step_cost,
-                variables_snapshot=variables_snapshot,
-                resolved_prompts=resolved_prompts,
-            )
-        except Exception as e:
-            add_log(
-                ctx.db,
-                ctx.task,
-                f"Fact-checking agent failed or not found: {e!s}",
-                level="warn",
-                step=STEP_CONTENT_FACT_CHECK,
-            )
-            return StepResult(
-                status="completed",
-                result='{"verification_status": "warn", "issues": [], "summary": "Failed to run content_fact_checking agent."}',
-            )
+        fact_check_json_str, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
+            ctx,
+            "content_fact_checking",
+            fact_check_context,
+            response_format={"type": "json_object"},
+            variables=ctx.template_vars,
+        )
+        ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + step_cost
+        add_log(ctx.db, ctx.task, "Fact-Checking completed", step=STEP_CONTENT_FACT_CHECK)
+        return StepResult(
+            status="completed",
+            result=fact_check_json_str,
+            model=actual_model,
+            cost=step_cost,
+            variables_snapshot=variables_snapshot,
+            resolved_prompts=resolved_prompts,
+        )
 
 
 register_step(HtmlStructureStep())

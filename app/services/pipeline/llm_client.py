@@ -7,6 +7,7 @@ from app.config import settings
 from app.models.prompt import Prompt
 from app.services.exclude_words_validator import ExcludeWordsValidator
 from app.services.llm import generate_text
+from app.services.pipeline.errors import LLMError
 from app.services.pipeline.persistence import add_log
 from app.services.pipeline.vars import apply_template_vars
 from app.services.pipeline_constants import CRITICAL_VARS, CRITICAL_VARS_ALLOW_EMPTY
@@ -23,7 +24,7 @@ def get_prompt_obj(db: Session, agent_name: str) -> Prompt:
             db.query(Prompt).filter(Prompt.agent_name == "fact_checking", Prompt.is_active.is_(True)).first()
         )
     if not prompt_obj:
-        raise Exception(f"No active prompt found for agent: {agent_name}")
+        raise LLMError(f"No active prompt found for agent: {agent_name}")
     return prompt_obj
 
 
@@ -213,7 +214,10 @@ def call_agent(
     kwargs["timeout"] = int(getattr(settings, "LLM_REQUEST_TIMEOUT", 300))
     kwargs["progress_callback"] = _on_llm_progress
 
-    res, cost, model, _ = generate_text(**kwargs)
+    try:
+        res, cost, model, _ = generate_text(**kwargs)
+    except Exception as e:
+        raise LLMError(f"{agent_name}: LLM call failed: {e}") from e
     return res, cost, model, resolved_prompts, variables_snapshot
 
 

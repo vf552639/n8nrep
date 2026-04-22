@@ -1,10 +1,11 @@
 from app.services.json_parser import clean_and_parse_json
-from app.services.pipeline.errors import LLMError
+from app.services.pipeline.errors import LLMError, ParseError
 from app.services.pipeline.llm_client import call_agent
 from app.services.pipeline.persistence import add_log
 from app.services.pipeline.registry import register_step
 from app.services.pipeline.steps.base import StepPolicy, StepResult
-from app.services.pipeline.vars import setup_template_vars, setup_vars
+from app.services.pipeline.template_vars import setup_template_vars
+from app.services.pipeline.vars import setup_vars
 from app.services.pipeline_constants import (
     STEP_AI_ANALYSIS,
     STEP_CHUNK_ANALYSIS,
@@ -181,7 +182,10 @@ class FinalStructureStep:
             variables=ctx.analysis_vars,
         )
         ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + step_cost
-        ctx.outline_data["final_outline"] = clean_and_parse_json(outline_json_str)
+        parsed_outline = clean_and_parse_json(outline_json_str)
+        if not parsed_outline:
+            raise ParseError("final_structure_analysis returned unparseable JSON")
+        ctx.outline_data["final_outline"] = parsed_outline
         ctx.outline_data["final_structure"] = outline_json_str
         ctx.task.outline = ctx.outline_data
         ctx.db.commit()
@@ -198,7 +202,7 @@ class FinalStructureStep:
 
 class StructureFactCheckStep:
     name = STEP_STRUCTURE_FACT_CHECK
-    policy = StepPolicy(retryable_errors=(LLMError,), max_retries=2)
+    policy = StepPolicy(skip_on=(LLMError, ParseError))
 
     def run(self, ctx) -> StepResult:
         setup_template_vars(ctx)

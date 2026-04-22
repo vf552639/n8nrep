@@ -21,7 +21,8 @@ from app.services.pipeline.llm_client import (
 )
 from app.services.pipeline.persistence import add_log, mark_step_running, save_step_result
 from app.services.pipeline.runner import run_pipeline
-from app.services.pipeline.vars import apply_template_vars, setup_template_vars, setup_vars
+from app.services.pipeline.template_vars import setup_template_vars
+from app.services.pipeline.vars import apply_template_vars, setup_vars
 
 __all__ = [
     "settings",
