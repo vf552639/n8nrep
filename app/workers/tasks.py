@@ -67,6 +67,15 @@ def _merge_additional_keywords(existing: str | None, new_list: list[str]) -> str
     return ", ".join(parts)
 
 
+def _revoke_generation_celery_task_id(celery_task_id: str | None) -> None:
+    if not celery_task_id or not str(celery_task_id).strip():
+        return
+    try:
+        celery_app.control.revoke(str(celery_task_id), terminate=True, signal="SIGTERM")
+    except Exception as exc:
+        print(f"revoke failed for celery id {celery_task_id}: {exc}")
+
+
 def _fmt_duration(seconds: float) -> str:
     s = round(seconds)
     m, s = divmod(s, 60)
@@ -85,7 +94,14 @@ def process_generation_task(self, task_id: str):
     Handles high-level Celery exceptions and db session management.
     """
     db = SessionLocal()
+    from app.models.task import Task
+
     try:
+        task_row = db.query(Task).filter(Task.id == task_id).first()
+        if task_row:
+            task_row.celery_task_id = self.request.id
+            db.commit()
+
         structlog.contextvars.bind_contextvars(task_id=str(task_id))
         try:
             run_pipeline(db, task_id)
@@ -93,8 +109,6 @@ def process_generation_task(self, task_id: str):
             structlog.contextvars.clear_contextvars()
 
     except SoftTimeLimitExceeded:
-        from app.models.task import Task
-
         task = db.query(Task).filter(Task.id == task_id).first()
         if task:
             task.status = "failed"
@@ -103,8 +117,6 @@ def process_generation_task(self, task_id: str):
 
     except Exception as exc:
         import traceback
-
-        from app.models.task import Task
 
         task = db.query(Task).filter(Task.id == task_id).first()
         if task and task.status != "failed":
@@ -255,6 +267,9 @@ def process_project_page(self, project_id: str, page_index: int):
 
         t0 = time_module.monotonic()
         try:
+            project_task.celery_task_id = self.request.id
+            db.commit()
+
             structlog.contextvars.bind_contextvars(
                 task_id=str(project_task.id),
                 project_id=str(project.id),
@@ -481,6 +496,7 @@ def cleanup_stale_tasks():
         for t in stale_tasks:
             t.status = "stale"
             t.error_log = "Task timed out and was cleaned up by Celery Beat (Stale state)."
+            _revoke_generation_celery_task_id(getattr(t, "celery_task_id", None))
 
         if stale_tasks:
             db.commit()
@@ -519,6 +535,7 @@ def cleanup_stale_tasks():
                         level="error",
                         step=step_name,
                     )
+                    _revoke_generation_celery_task_id(getattr(task, "celery_task_id", None))
                     step_timed_out += 1
                     break
         if step_timed_out:

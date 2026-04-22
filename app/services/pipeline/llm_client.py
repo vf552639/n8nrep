@@ -1,4 +1,5 @@
 import datetime
+import time
 from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session
@@ -6,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models.prompt import Prompt
 from app.services.exclude_words_validator import ExcludeWordsValidator
-from app.services.llm import generate_text
+from app.services.llm import generate_text, timeout_for_model
 from app.services.pipeline.errors import LLMError
 from app.services.pipeline.persistence import add_log
 from app.services.pipeline.vars import apply_template_vars
@@ -165,6 +166,8 @@ def call_agent(
         ctx.task.last_heartbeat = datetime.datetime.utcnow()
         ctx.db.commit()
 
+    requested_model = prompt.model
+
     def _on_llm_progress(event: str, payload: dict):
         if event == "retry_wait":
             add_log(
@@ -191,12 +194,17 @@ def call_agent(
             if reasoning > 0:
                 tokens_msg += f" | 🧠 {reasoning} reasoning"
 
+            actual_m = payload.get("model")
+            fallback_note = ""
+            if actual_m and requested_model and str(actual_m) != str(requested_model):
+                fallback_note = f" | ⚠ fallback to {actual_m}"
+
             add_log(
                 ctx.db,
                 ctx.task,
                 (
                     f"[{agent_name}] LLM response received "
-                    f"({tokens_msg}, ${float(payload.get('cost') or 0.0):.5f})"
+                    f"({tokens_msg}, ${float(payload.get('cost') or 0.0):.5f}){fallback_note}"
                 ),
                 level="info",
                 step=agent_name,
@@ -211,7 +219,7 @@ def call_agent(
         step=agent_name,
     )
     _touch_heartbeat()
-    kwargs["timeout"] = int(getattr(settings, "LLM_REQUEST_TIMEOUT", 300))
+    kwargs["timeout"] = int(timeout_for_model(prompt.model))
     kwargs["progress_callback"] = _on_llm_progress
 
     try:
@@ -257,6 +265,15 @@ def call_agent_with_exclude_validation(
 
     retry_count = 0
     while retry_count < max_retries and not report["passed"]:
+        if ctx.step_deadline is not None and time.monotonic() > ctx.step_deadline:
+            add_log(
+                ctx.db,
+                ctx.task,
+                "Step wall-clock budget exhausted; skipping further exclude-word retries.",
+                level="warn",
+                step=step_constant,
+            )
+            break
         if retry_budget > 0 and retry_spent >= retry_budget:
             add_log(
                 ctx.db,

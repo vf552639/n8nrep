@@ -59,6 +59,7 @@ class PipelineContext:
         self.analysis_vars = {}
         self.template_vars = {}
         self.outline_data = self.task.outline or {}
+        self.step_deadline: float | None = None
 
     def step_output(self, key: str) -> str:
         return completed_step_body(self.task, key)

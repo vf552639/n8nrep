@@ -1,6 +1,8 @@
 import json
-import signal
+import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 
 from sqlalchemy.orm import Session
 
@@ -88,28 +90,12 @@ def _auto_approve_images(ctx: PipelineContext) -> None:
 
 
 def _call_with_timeout(step: PipelineStep, ctx: PipelineContext, timeout_sec: int) -> StepResult:
-    old_handler = None
-    alarm_enabled = False
-    try:
-        if hasattr(signal, "SIGALRM"):
-            # SIGALRM works only in main thread.
-            # In non-main threads timeout is silently skipped.
-            def _handler(signum, frame):
-                raise StepTimeoutError(f"Step {step.name} timed out after {timeout_sec}s")
-
-            try:
-                old_handler = signal.getsignal(signal.SIGALRM)
-                signal.signal(signal.SIGALRM, _handler)
-                signal.alarm(timeout_sec)
-                alarm_enabled = True
-            except ValueError:
-                alarm_enabled = False
-        return step.run(ctx)
-    finally:
-        if alarm_enabled and hasattr(signal, "SIGALRM"):
-            signal.alarm(0)
-            if old_handler is not None:
-                signal.signal(signal.SIGALRM, old_handler)
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"step-{step.name}") as ex:
+        future = ex.submit(step.run, ctx)
+        try:
+            return future.result(timeout=timeout_sec)
+        except FuturesTimeoutError:
+            raise StepTimeoutError(f"Step {step.name} timed out after {timeout_sec}s") from None
 
 
 def _run_phase(ctx: PipelineContext, step: PipelineStep) -> None:
@@ -120,6 +106,8 @@ def _run_phase(ctx: PipelineContext, step: PipelineStep) -> None:
 
     mark_step_running(ctx.db, ctx.task, step.name)
     timeout_sec = int((step.policy.timeout_minutes or getattr(settings, "STEP_TIMEOUT_MINUTES", 15)) * 60)
+
+    ctx.step_deadline = time.monotonic() + timeout_sec
 
     attempts = 0
     while True:

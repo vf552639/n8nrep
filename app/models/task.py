@@ -42,6 +42,7 @@ class Task(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_heartbeat = Column(DateTime, nullable=True)
+    celery_task_id = Column(String(64), nullable=True, index=True)
 
     project_id = Column(UUID(as_uuid=True), ForeignKey("site_projects.id"), nullable=True, index=True)
     blueprint_page_id = Column(UUID(as_uuid=True), ForeignKey("blueprint_pages.id"), nullable=True)

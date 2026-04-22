@@ -11,6 +11,35 @@ from app.config import settings
 _openai_client = None
 
 
+def timeout_for_model(model: str) -> int:
+    raw = (settings.LLM_MODEL_TIMEOUTS or "").strip()
+    if raw:
+        for pair in raw.split(","):
+            k, _, v = pair.partition("=")
+            if k.strip() == model and v.strip().isdigit():
+                return int(v)
+    return settings.LLM_REQUEST_TIMEOUT
+
+
+def fallbacks_for_model(model: str) -> list[str]:
+    raw = (settings.LLM_MODEL_FALLBACKS or "").strip()
+    if not raw:
+        return []
+    for pair in raw.split(","):
+        k, _, v = pair.partition("=")
+        if k.strip() != model:
+            continue
+        out: list[str] = []
+        for fb in v.split("|"):
+            t = fb.strip()
+            if not t or t == model:
+                continue
+            if t not in out:
+                out.append(t)
+        return out
+    return []
+
+
 def get_openai_client() -> OpenAI:
     """Returns an OpenAI client configured for OpenRouter (Singleton)"""
     global _openai_client
@@ -32,14 +61,15 @@ def generate_text(
     presence_penalty: float | None = None,
     top_p: float | None = None,
     max_tokens: int | None = None,
-    max_retries: int = 3,
+    max_retries: int = 2,
     response_format: dict[str, str] | None = None,
-    timeout: int = settings.LLM_REQUEST_TIMEOUT,
+    timeout: int | None = None,
     progress_callback: Callable[[str, dict[str, Any]], None] | None = None,
 ) -> tuple[str, float, str, dict[str, Any] | None]:
     """
     Generic LLM call with retry policy. Returns (generated_text, estimated_cost, actual_model, usage_or_none).
     """
+    effective_timeout = timeout if timeout is not None else timeout_for_model(model)
     client = get_openai_client()
 
     messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
@@ -48,7 +78,7 @@ def generate_text(
     retries = 0
     while retries < max_retries:
         attempt_start = time.monotonic()
-        print(f"[LLM] Attempt {retries + 1}/{max_retries}, model={model}, timeout={timeout}s")
+        print(f"[LLM] Attempt {retries + 1}/{max_retries}, model={model}, timeout={effective_timeout}s")
         try:
             if progress_callback:
                 progress_callback(
@@ -58,7 +88,7 @@ def generate_text(
                         "max_retries": max_retries,
                         "model": model,
                         "max_tokens": max_tokens,
-                        "timeout": timeout,
+                        "timeout": effective_timeout,
                     },
                 )
             kwargs = {
@@ -69,7 +99,7 @@ def generate_text(
                     "HTTP-Referer": "https://example.com",  # Update logically later
                     "X-Title": "SEO-Generator",
                 },
-                "timeout": timeout,
+                "timeout": effective_timeout,
             }
             if frequency_penalty is not None:
                 kwargs["frequency_penalty"] = frequency_penalty
@@ -81,6 +111,11 @@ def generate_text(
                 kwargs["max_tokens"] = max_tokens
             if response_format:
                 kwargs["response_format"] = response_format
+
+            fallbacks = fallbacks_for_model(model)
+            if fallbacks:
+                models_list = [model, *fallbacks]
+                kwargs["extra_body"] = {"models": models_list}
 
             raw_response = client.chat.completions.with_raw_response.create(**kwargs)
             response = raw_response.parse()
@@ -164,7 +199,7 @@ def generate_text(
                 sleep_seconds = 60 * (retries + 1)  # Exponential backoff: 60s, 120s, 180s
             elif "502" in error_msg or "504" in error_msg or is_timeout:
                 reason = "upstream_timeout_or_gateway"
-                sleep_seconds = (retries + 1) * 15  # 15s, 30s, 45s
+                sleep_seconds = 5 * (retries + 1)  # 5s, 10s
             if progress_callback:
                 progress_callback(
                     "retry_wait",

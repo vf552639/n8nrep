@@ -32,6 +32,7 @@ from app.schemas.task import (
     UpdateStepResultRequest,
 )
 from app.services.pipeline_constants import ALL_STEPS
+from app.services.queueing import enqueue_task_generation, revoke_generation_celery_task
 from app.services.scraper import fetch_url_meta
 from app.services.serp_cache import invalidate_serp_cache
 from app.workers.tasks import process_generation_task
@@ -293,7 +294,7 @@ def create_task(task_in: TaskCreate, db: Session = Depends(get_db)):
 
     # Dispatch Celery task (conditional on mode)
     if not settings.SEQUENTIAL_MODE:
-        process_generation_task.delay(str(new_task.id))
+        enqueue_task_generation(db, new_task)
         return {"id": str(new_task.id), "status": "Task created and queued"}
     else:
         return {"id": str(new_task.id), "status": "Task created (waiting for manual start)"}
@@ -330,7 +331,7 @@ async def create_tasks_bulk(file: UploadFile = File(...), db: Session = Depends(
             db.refresh(new_task)
 
             if not settings.SEQUENTIAL_MODE:
-                process_generation_task.delay(str(new_task.id))
+                enqueue_task_generation(db, new_task)
             tasks_created += 1
         except Exception as e:
             errors.append(f"Error processing row {row}: {e}")
@@ -364,7 +365,7 @@ def start_next_task(db: Session = Depends(get_db)):
     if not next_task:
         return {"status": "empty", "msg": "Нет задач в очереди"}
 
-    process_generation_task.delay(str(next_task.id))
+    enqueue_task_generation(db, next_task)
 
     return {
         "status": "started",
@@ -662,7 +663,7 @@ def retry_task(task_id: str, db: Session = Depends(get_db)):
     task.retry_count += 1
     db.commit()
 
-    process_generation_task.delay(str(task.id))
+    enqueue_task_generation(db, task)
     return {"msg": "Task queued for retry"}
 
 
@@ -703,7 +704,7 @@ def approve_task(task_id: str, db: Session = Depends(get_db)):
     db.commit()
 
     # Resume pipeline
-    process_generation_task.delay(str(task.id))
+    enqueue_task_generation(db, task)
     return {"msg": "Task approved and queued for continuation"}
 
 
@@ -731,6 +732,7 @@ def force_task_status(task_id: str, payload: ForceStatusRequest, db: Session = D
         )
 
     if payload.action == "fail":
+        revoke_generation_celery_task(getattr(task, "celery_task_id", None))
         task.status = "failed"
         task.error_log = "Force-failed by user"
         db.commit()
@@ -855,7 +857,7 @@ def rerun_task_step(task_id: str, payload: RerunStepRequest, db: Session = Depen
 
     db.commit()
 
-    process_generation_task.delay(str(task.id))
+    enqueue_task_generation(db, task)
 
     return {"msg": f"Step '{payload.step_name}' queued for re-run", "invalidated_steps": invalidated_steps}
 
@@ -979,7 +981,7 @@ def approve_serp_urls(
     task.status = "pending"
     db.commit()
 
-    process_generation_task.delay(str(task.id))
+    enqueue_task_generation(db, task)
 
     return {
         "msg": f"SERP URLs approved: {len(payload.urls)} URLs. Pipeline resumed.",
@@ -1069,7 +1071,7 @@ def approve_images(task_id: str, payload: ApproveImagesRequest, db: Session = De
     db.commit()
 
     # Resume pipeline
-    process_generation_task.delay(str(task.id))
+    enqueue_task_generation(db, task)
 
     return {
         "msg": f"Images reviewed: {len(approved_set)} approved, {len(skipped_set)} skipped. Pipeline resumed.",
