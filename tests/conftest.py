@@ -34,8 +34,9 @@ def db_engine():
     """Real Postgres + Alembic head (set TEST_DATABASE_URL to enable)."""
     if not _postgres_available(TEST_DATABASE_URL):
         pytest.skip("Set TEST_DATABASE_URL to a reachable Postgres URL for integration tests.")
-    from alembic import command
     from alembic.config import Config
+
+    from alembic import command
 
     engine = create_engine(TEST_DATABASE_URL, future=True)
     cfg = Config("alembic.ini")
@@ -68,8 +69,9 @@ def api_db_engine():
             "Postgres not reachable for API tests — set TEST_DATABASE_URL or SUPABASE_DB_URL "
             "(e.g. CI postgres or docker-compose profile test)."
         )
-    from alembic import command
     from alembic.config import Config
+
+    from alembic import command
 
     cfg = Config("alembic.ini")
     cfg.set_main_option("sqlalchemy.url", url)
