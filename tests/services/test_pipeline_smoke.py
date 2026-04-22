@@ -5,14 +5,14 @@ import json
 import pytest
 
 from app.schemas.jsonb_adapter import read_step_results
-from app.services.pipeline import PipelineContext, add_log, phase_serp, run_pipeline
+from app.services.pipeline import PipelineContext, add_log, run_pipeline
+from app.services.pipeline.registry import STEP_REGISTRY
 from app.services.pipeline_constants import STEP_SERP
 
 
 @pytest.mark.integration
 def test_add_log_appends_and_truncates(db_session, monkeypatch):
     monkeypatch.setattr(db_session, "commit", db_session.flush)
-    monkeypatch.setattr("app.services.pipeline.settings", type("S", (), {"TEST_MODE": False})())
     from tests.factories import SiteFactory, TaskFactory
 
     SiteFactory._meta.sqlalchemy_session = db_session
@@ -75,10 +75,10 @@ def test_phase_serp_merges_project_competitor_urls(db_session, monkeypatch):
             "organic_results": [],
         }
 
-    monkeypatch.setattr("app.services.pipeline.fetch_serp_data", _fake_fetch)
+    monkeypatch.setattr("app.services.pipeline.steps.serp_step.fetch_serp_data", _fake_fetch)
 
     ctx = PipelineContext(db_session, str(task.id), auto_mode=True)
-    phase_serp(ctx)
+    result = STEP_REGISTRY[STEP_SERP].run(ctx)
     db_session.refresh(task)
 
     sd = task.serp_data
@@ -93,8 +93,7 @@ def test_phase_serp_merges_project_competitor_urls(db_session, monkeypatch):
     dups = sd.get("user_competitor_duplicates") or []
     assert "https://example.com/" in dups
 
-    serp_step = (task.step_results or {}).get(STEP_SERP, {})
-    summary = json.loads(serp_step.get("result") or "{}")
+    summary = json.loads(result.result or "{}")
     assert summary.get("user_competitor_urls_count") == 2
     assert "https://example.com/" in (summary.get("user_competitor_duplicates") or [])
 
@@ -102,10 +101,9 @@ def test_phase_serp_merges_project_competitor_urls(db_session, monkeypatch):
 @pytest.mark.integration
 def test_run_pipeline_minimal_happy_path(db_session, monkeypatch):
     monkeypatch.setattr(db_session, "commit", db_session.flush)
-    monkeypatch.setattr("app.services.pipeline.notify_task_success", lambda *a, **k: None)
-    monkeypatch.setattr("app.services.pipeline.notify_task_failed", lambda *a, **k: None)
-    monkeypatch.setattr("app.services.pipeline.settings.TEST_MODE", False, raising=False)
-    monkeypatch.setattr("app.services.pipeline.settings.FACT_CHECK_ENABLED", False, raising=False)
+    monkeypatch.setattr("app.services.pipeline.runner.notify_task_success", lambda *a, **k: None)
+    monkeypatch.setattr("app.services.pipeline.runner.notify_task_failed", lambda *a, **k: None)
+    monkeypatch.setattr("app.services.pipeline.runner.settings.TEST_MODE", False, raising=False)
     from tests.factories import (
         BlueprintFactory,
         BlueprintPageFactory,
@@ -150,7 +148,7 @@ def test_run_pipeline_minimal_happy_path(db_session, monkeypatch):
     def _fake_generate_text(system_prompt, user_prompt, **kwargs):
         return ("<h1>Title</h1><p>Body</p>", 0.0, kwargs.get("model", "fake-model"), {"usage": {}})
 
-    monkeypatch.setattr("app.services.pipeline.generate_text", _fake_generate_text)
+    monkeypatch.setattr("app.services.pipeline.llm_client.generate_text", _fake_generate_text)
 
     run_pipeline(db_session, str(task.id))
     db_session.refresh(task)
