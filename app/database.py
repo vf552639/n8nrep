@@ -14,7 +14,9 @@ engine = create_engine(
     pool_size=10,
     max_overflow=20,
     pool_timeout=30,
-    connect_args={"options": "-c statement_timeout=60000"},
+    # Worker pipeline commits large JSONB (step_results); 60s server-side timeout caused
+    # OperationalError on heavy updates — align with task53 E.2 (10 minutes).
+    connect_args={"options": "-c statement_timeout=600000"},
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

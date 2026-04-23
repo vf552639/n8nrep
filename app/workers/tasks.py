@@ -5,12 +5,16 @@ from datetime import datetime, timedelta
 
 import structlog
 from celery.exceptions import SoftTimeLimitExceeded
+from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.config import settings
 from app.database import SessionLocal
 from app.services.pipeline import run_pipeline
 from app.workers.celery_app import celery_app
+
+# DB / driver errors where we should retry the page instead of skipping (task53 E.4)
+_RETRYABLE_PROJECT_PAGE_INFRA = (OperationalError, DBAPIError)
 
 
 def _append_project_log(db, project, msg: str, level: str = "info") -> None:
@@ -278,11 +282,34 @@ def process_project_page(self, project_id: str, page_index: int):
                 run_pipeline(db, str(project_task.id), auto_mode=True)
             finally:
                 structlog.contextvars.clear_contextvars()
+        except _RETRYABLE_PROJECT_PAGE_INFRA as infra_err:
+            db.rollback()
+            task_pk = project_task.id
+            project = db.query(SiteProject).filter(SiteProject.id == project_id).first()
+            project_task = db.query(Task).filter(Task.id == task_pk).first()
+            tb = traceback.format_exc()
+            if project and project_task:
+                if project_task.status not in ("failed", "completed"):
+                    project_task.status = "pending"
+                    project_task.error_log = tb[-8000:] if len(tb) > 8000 else tb
+                project.status = "pending"
+                _append_project_log(
+                    db,
+                    project,
+                    f"Infra error on page {page_index + 1}/{n_pages} ({type(infra_err).__name__}): {infra_err!s}. "
+                    f"Scheduling retry in 60s (task_id={project_task.id}).",
+                    level="error",
+                )
+                _append_project_log(db, project, tb[-4000:], level="error")
+                db.commit()
+            advance_project.apply_async(args=[str(project_id), False], countdown=60)
+            return
         except Exception as pipeline_err:
+            tb = traceback.format_exc()
             db.refresh(project_task)
             if project_task.status not in ("failed", "completed"):
                 project_task.status = "failed"
-                project_task.error_log = f"Pipeline exception: {pipeline_err}"
+                project_task.error_log = tb[-8000:] if len(tb) > 8000 else tb
                 db.commit()
 
         db.refresh(project_task)
@@ -307,10 +334,14 @@ def process_project_page(self, project_id: str, page_index: int):
             else:
                 error_detail = f"Unexpected task status: {project_task.status}"
 
+            err_head = (error_detail or "").strip().split("\n", 1)[0].strip() or "Unknown error"
+            if len(err_head) > 500:
+                err_head = err_head[:500] + "…"
+
             _append_project_log(
                 db,
                 project,
-                f"Page {page_index + 1}/{n_pages} FAILED: {(error_detail or '')[:200]}. Skipping.",
+                f"Page {page_index + 1}/{n_pages} FAILED: {err_head} (task_id={project_task.id}). Skipping.",
                 level="error",
             )
             _save_failed_page(
