@@ -1,7 +1,7 @@
 import json
 
 from app.services.pipeline.errors import LLMError
-from app.services.pipeline.llm_client import call_agent, call_agent_with_exclude_validation
+from app.services.pipeline.llm_client import call_agent
 from app.services.pipeline.persistence import add_log
 from app.services.pipeline.registry import register_step
 from app.services.pipeline.steps.base import StepPolicy, StepResult
@@ -31,10 +31,8 @@ class PrimaryGenStep:
             f"Outline: {json.dumps(outline_json, ensure_ascii=False)}"
         )
         add_log(ctx.db, ctx.task, "Starting Primary Generation...", step=STEP_PRIMARY_GEN)
-        draft_html, step_cost, actual_model, resolved_prompts, variables_snapshot, violations = (
-            call_agent_with_exclude_validation(
-                ctx, "primary_generation", gen_context, step_constant=STEP_PRIMARY_GEN
-            )
+        draft_html, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
+            ctx, "primary_generation", gen_context, variables=ctx.template_vars
         )
         ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + step_cost
         add_log(
@@ -48,7 +46,7 @@ class PrimaryGenStep:
             cost=step_cost,
             variables_snapshot=variables_snapshot,
             resolved_prompts=resolved_prompts,
-            extra={"exclude_words_violations": violations, "output_word_count": out_wc},
+            extra={"output_word_count": out_wc},
         )
 
 
@@ -60,13 +58,8 @@ class PrimaryGenAboutStep:
         setup_template_vars(ctx)
         gen_context = ""
         add_log(ctx.db, ctx.task, "Starting Primary Generation (About Page)...", step=STEP_PRIMARY_GEN_ABOUT)
-        draft_html, step_cost, actual_model, resolved_prompts, variables_snapshot, violations = (
-            call_agent_with_exclude_validation(
-                ctx,
-                "primary_generation_about",
-                gen_context,
-                step_constant=STEP_PRIMARY_GEN_ABOUT,
-            )
+        draft_html, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
+            ctx, "primary_generation_about", gen_context, variables=ctx.template_vars
         )
         ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + step_cost
         add_log(
@@ -83,7 +76,7 @@ class PrimaryGenAboutStep:
             cost=step_cost,
             variables_snapshot=variables_snapshot,
             resolved_prompts=resolved_prompts,
-            extra={"exclude_words_violations": violations, "output_word_count": out_wc},
+            extra={"output_word_count": out_wc},
         )
 
 
@@ -181,8 +174,8 @@ class ImproverStep:
             f"Interlinking & Citations Suggestions:\n{interlink_suggestions}"
         )
         add_log(ctx.db, ctx.task, "Starting Improver (draft enhancement)...", step=STEP_IMPROVER)
-        improved_html, step_cost, actual_model, resolved_prompts, variables_snapshot, violations = (
-            call_agent_with_exclude_validation(ctx, "improver", improver_context, step_constant=STEP_IMPROVER)
+        improved_html, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
+            ctx, "improver", improver_context, variables=ctx.template_vars
         )
         ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + step_cost
         add_log(ctx.db, ctx.task, f"Improver completed ({len(improved_html)} chars)", step=STEP_IMPROVER)
@@ -196,7 +189,6 @@ class ImproverStep:
             variables_snapshot=variables_snapshot,
             resolved_prompts=resolved_prompts,
             extra={
-                "exclude_words_violations": violations,
                 "input_word_count": in_wc,
                 "output_word_count": out_wc,
             },

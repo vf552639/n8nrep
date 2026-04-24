@@ -1,6 +1,6 @@
 from app.services.legal_reference import inject_legal_template_vars
 from app.services.pipeline.errors import LLMError
-from app.services.pipeline.llm_client import call_agent_with_exclude_validation
+from app.services.pipeline.llm_client import call_agent
 from app.services.pipeline.persistence import add_log
 from app.services.pipeline.registry import register_step
 from app.services.pipeline.steps.base import StepPolicy, StepResult
@@ -18,13 +18,8 @@ class PrimaryGenLegalStep:
         inject_legal_template_vars(ctx)
         gen_context = ""
         add_log(ctx.db, ctx.task, "Starting Primary Generation (Legal Page)...", step=STEP_PRIMARY_GEN_LEGAL)
-        draft_html, step_cost, actual_model, resolved_prompts, variables_snapshot, violations = (
-            call_agent_with_exclude_validation(
-                ctx,
-                "primary_generation_legal",
-                gen_context,
-                step_constant=STEP_PRIMARY_GEN_LEGAL,
-            )
+        draft_html, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
+            ctx, "primary_generation_legal", gen_context, variables=ctx.template_vars
         )
         ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + step_cost
         add_log(
@@ -41,7 +36,7 @@ class PrimaryGenLegalStep:
             cost=step_cost,
             variables_snapshot=variables_snapshot,
             resolved_prompts=resolved_prompts,
-            extra={"exclude_words_violations": violations, "output_word_count": out_wc},
+            extra={"output_word_count": out_wc},
         )
 
 
