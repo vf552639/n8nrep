@@ -39,6 +39,9 @@ jobs:
       - name: Apply database migrations
         env:
           SUPABASE_DB_URL: postgresql://postgres:postgres@localhost:5432/seo_test
+          SUPABASE_URL: http://localhost
+          SUPABASE_KEY: test
+          OPENROUTER_API_KEY: test
         run: alembic upgrade head
       - name: Pytest
         env:
