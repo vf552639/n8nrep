@@ -23,6 +23,7 @@ from app.models.task import Task
 from app.services.html_export import is_html_content, resolve_export_body
 from app.services.json_parser import clean_and_parse_json
 from app.services.meta_parser import extract_meta_from_parsed, meta_variant_list
+from app.services.site_utils import brand_from_seed, is_markup_only_site
 from app.services.word_counter import count_content_words
 
 logger = logging.getLogger(__name__)
@@ -412,7 +413,10 @@ def build_project_docx(db: Session, project_id: str) -> bytes:
     site = db.query(Site).filter(Site.id == project.site_id).first()
     site_label = ""
     if site:
-        site_label = f"{site.name} / {site.domain}"
+        if is_markup_only_site(site):
+            site_label = brand_from_seed(project.seed_keyword)
+        else:
+            site_label = f"{site.name} / {site.domain}"
 
     pages: list[BlueprintPage] = (
         db.query(BlueprintPage)
@@ -443,7 +447,8 @@ def build_project_docx(db: Session, project_id: str) -> bytes:
     t.runs[0].font.size = Pt(22)
     t.alignment = WD_ALIGN_PARAGRAPH.CENTER
     doc.add_paragraph(f"Seed Keyword: {project.seed_keyword}")
-    doc.add_paragraph(f"Site: {site_label}")
+    if site_label:
+        doc.add_paragraph(f"Site: {site_label}")
     doc.add_paragraph(f"Дата генерации: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
     doc.add_paragraph(f"Всего страниц (blueprint): {len(pages)}")
     doc.add_paragraph(f"Язык: {project.language} | Страна: {project.country}")

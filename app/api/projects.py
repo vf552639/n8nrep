@@ -33,6 +33,7 @@ from app.schemas.project import (
     SiteProjectCreate,
 )
 from app.services.pipeline_presets import pipeline_steps_use_serp, resolve_pipeline_steps
+from app.services.site_utils import MARKUP_ONLY_SITE_KEY
 from app.workers.celery_app import celery_app
 
 # Imported to defer circular dep issues, will verify app.workers.tasks is available
@@ -197,9 +198,6 @@ def _resolve_site(db: Session, target_site: str, country: str, language: str) ->
         db.commit()
         db.refresh(site)
     return site
-
-
-MARKUP_ONLY_SITE_KEY = "__markup_only__"
 
 
 def _resolve_site_or_markup_only(

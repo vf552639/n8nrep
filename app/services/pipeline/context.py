@@ -1,9 +1,11 @@
 from sqlalchemy.orm import Session
 
 from app.models.blueprint import BlueprintPage
+from app.models.project import SiteProject
 from app.models.site import Site
 from app.models.task import Task
 from app.services.pipeline.persistence import completed_step_body
+from app.services.site_utils import brand_from_seed, is_markup_only_site
 from app.services.pipeline_constants import (
     STEP_FINAL_ANALYSIS,
     STEP_HTML_STRUCT,
@@ -25,7 +27,17 @@ class PipelineContext:
             raise ValueError(f"Task {task_id} not found")
 
         self.site = db.query(Site).filter(Site.id == self.task.target_site_id).first()
-        self.site_name = self.site.name if self.site else "Unknown Site"
+        self.is_markup_only = is_markup_only_site(self.site)
+        if self.is_markup_only:
+            project = (
+                db.query(SiteProject).filter(SiteProject.id == self.task.project_id).first()
+                if self.task.project_id
+                else None
+            )
+            seed = (project.seed_keyword if project else "") or self.task.main_keyword
+            self.site_name = brand_from_seed(seed) or "Unknown Site"
+        else:
+            self.site_name = self.site.name if self.site else "Unknown Site"
 
         self.blueprint_page = None
         self.all_site_pages = []
