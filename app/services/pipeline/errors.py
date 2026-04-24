@@ -6,6 +6,10 @@ class LLMError(PipelineError):
     """LLM provider call failed."""
 
 
+class InsufficientCreditsError(LLMError):
+    """OpenRouter credits / payment ceiling — not recoverable by normal retries."""
+
+
 class SerpError(PipelineError):
     """SERP provider call failed."""
 

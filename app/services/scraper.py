@@ -5,6 +5,8 @@ from urllib.parse import urlparse
 import requests
 from bs4 import BeautifulSoup
 
+from app.utils.text_sanitize import strip_nul
+
 
 def parse_html(html: str) -> dict[str, Any]:
     soup = BeautifulSoup(html, "html.parser")
@@ -34,13 +36,15 @@ def parse_html(html: str) -> dict[str, Any]:
     text = soup.get_text(separator=" ", strip=True)
     word_count = len(text.split())
 
-    return {
-        "headers": headers,
-        "text": text,
-        "word_count": word_count,
-        "meta_title": meta_title,
-        "meta_description": meta_description,
-    }
+    return strip_nul(
+        {
+            "headers": headers,
+            "text": text,
+            "word_count": word_count,
+            "meta_title": meta_title,
+            "meta_description": meta_description,
+        }
+    )
 
 
 from app.config import settings
@@ -205,6 +209,7 @@ def scrape_urls(urls: list[str], max_urls: int = 10, timeout: int = 15) -> dict[
         cached = get_cached_scrape_item(url)
         if cached and isinstance(cached, dict):
             cache_hits += 1
+            cached = strip_nul(cached)
             parsed_headers = cached.get("headers", {})
             parsed_text = cached.get("text", "")
             parsed_word_count = cached.get("word_count", 0)
@@ -274,26 +279,28 @@ def scrape_urls(urls: list[str], max_urls: int = 10, timeout: int = 15) -> dict[
 
     avg_words = total_words // len(results) if len(results) > 0 else 0
 
-    return {
-        "successful_scrapes": len(results),
-        "total_attempted": len(urls_to_scrape),
-        "average_word_count": avg_words,
-        "merged_text": merged_text,
-        "headers_structure": all_h1_h6,
-        "raw_results": results,
-        "scraped_titles": [
-            r.get("meta_title", "").strip()
-            for r in results
-            if isinstance(r.get("meta_title"), str) and r.get("meta_title", "").strip()
-        ],
-        "scraped_descriptions": [
-            r.get("meta_description", "").strip()
-            for r in results
-            if isinstance(r.get("meta_description"), str) and r.get("meta_description", "").strip()
-        ],
-        "failed_results": failed_results,
-        "serper_count": len([r for r in results if r.get("method") == "serper"]),
-        "direct_count": len([r for r in results if r.get("method") == "direct"]),
-        "cache_hits": cache_hits,
-        "cache_misses": cache_misses,
-    }
+    return strip_nul(
+        {
+            "successful_scrapes": len(results),
+            "total_attempted": len(urls_to_scrape),
+            "average_word_count": avg_words,
+            "merged_text": merged_text,
+            "headers_structure": all_h1_h6,
+            "raw_results": results,
+            "scraped_titles": [
+                r.get("meta_title", "").strip()
+                for r in results
+                if isinstance(r.get("meta_title"), str) and r.get("meta_title", "").strip()
+            ],
+            "scraped_descriptions": [
+                r.get("meta_description", "").strip()
+                for r in results
+                if isinstance(r.get("meta_description"), str) and r.get("meta_description", "").strip()
+            ],
+            "failed_results": failed_results,
+            "serper_count": len([r for r in results if r.get("method") == "serper"]),
+            "direct_count": len([r for r in results if r.get("method") == "direct"]),
+            "cache_hits": cache_hits,
+            "cache_misses": cache_misses,
+        }
+    )

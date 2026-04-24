@@ -9,6 +9,7 @@ from app.services.pipeline_constants import STEP_SCRAPING, STEP_SERP
 from app.services.scraper import scrape_urls
 from app.services.serp import fetch_serp_data
 from app.services.url_utils import merge_urls_dedup_by_domain, normalize_url
+from app.utils.text_sanitize import strip_nul
 
 
 def _safe_list(val) -> list:
@@ -65,6 +66,7 @@ class SerpStep:
                 step=STEP_SERP,
             )
 
+        serp_data = strip_nul(serp_data)
         ctx.task.serp_data = serp_data
         ctx.db.commit()
         add_log(ctx.db, ctx.task, "SERP Research completed.", step=STEP_SERP)

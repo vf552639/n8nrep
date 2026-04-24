@@ -8,7 +8,7 @@ from app.config import settings
 from app.models.prompt import Prompt
 from app.services.exclude_words_validator import ExcludeWordsValidator
 from app.services.llm import generate_text, timeout_for_model
-from app.services.pipeline.errors import LLMError
+from app.services.pipeline.errors import InsufficientCreditsError, LLMError
 from app.services.pipeline.persistence import add_log
 from app.services.pipeline.vars import apply_template_vars
 from app.services.pipeline_constants import CRITICAL_VARS, CRITICAL_VARS_ALLOW_EMPTY
@@ -181,6 +181,19 @@ def call_agent(
                 step=agent_name,
             )
             _touch_heartbeat()
+        elif event == "max_tokens_downscale":
+            add_log(
+                ctx.db,
+                ctx.task,
+                (
+                    f"[{agent_name}] OpenRouter 402: reducing max_tokens "
+                    f"{payload.get('old_max_tokens')} -> {payload.get('new_max_tokens')} "
+                    f"(affordable={payload.get('affordable')}); retrying without delay."
+                ),
+                level="warn",
+                step=agent_name,
+            )
+            _touch_heartbeat()
         elif event == "response_received":
             usage = payload.get("usage") or {}
             p = usage.get("prompt_tokens", 0)
@@ -224,6 +237,8 @@ def call_agent(
 
     try:
         res, cost, model, _ = generate_text(**kwargs)
+    except InsufficientCreditsError:
+        raise
     except Exception as e:
         raise LLMError(f"{agent_name}: LLM call failed: {e}") from e
     return res, cost, model, resolved_prompts, variables_snapshot

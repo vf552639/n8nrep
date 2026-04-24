@@ -6,6 +6,7 @@ from app.services.serp import fetch_serp_data
 from app.services.pipeline.context import PipelineContext
 from app.services.pipeline.errors import (
     BudgetExceededError,
+    InsufficientCreditsError,
     LLMError,
     ParseError,
     PipelineError,
@@ -44,6 +45,7 @@ __all__ = [
     "mark_step_running",
     "PipelineError",
     "LLMError",
+    "InsufficientCreditsError",
     "SerpError",
     "ScrapingError",
     "ParseError",
