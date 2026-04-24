@@ -48,7 +48,10 @@ class FinalEditingStep:
         ctx.task.total_cost = getattr(ctx.task, "total_cost", 0.0) + step_cost
         final_html = re.sub(r"\[.*?SCHEMA.*?\]", "", final_html, flags=re.IGNORECASE | re.DOTALL)
         final_html = re.sub(
-            r"<script[^>]*application/ld\+json[^>]*>.*?</script>", "", final_html, flags=re.IGNORECASE | re.DOTALL
+            r"<script[^>]*application/ld\+json[^>]*>.*?</script>",
+            "",
+            final_html,
+            flags=re.IGNORECASE | re.DOTALL,
         )
         final_html = re.sub(r"\n{3,}", "\n\n", final_html)
 

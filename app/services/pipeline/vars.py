@@ -8,20 +8,10 @@ import json
 import re
 
 from app.config import settings
+from app.services.pipeline.persistence import add_log
 from app.services.pipeline_constants import (
-    STEP_AI_ANALYSIS,
-    STEP_CHUNK_ANALYSIS,
-    STEP_COMP_STRUCTURE,
-    STEP_FINAL_ANALYSIS,
-    STEP_FINAL_EDIT,
-    STEP_HTML_STRUCT,
-    STEP_IMPROVER,
-    STEP_META_GEN,
-    STEP_PRIMARY_GEN,
-    STEP_READER_OPINION,
     STEP_SCRAPING,
 )
-from app.services.pipeline.persistence import add_log
 
 MAX_COMPETITOR_TITLES = 10
 MAX_COMPETITOR_DESCRIPTIONS = 10
@@ -76,7 +66,9 @@ def setup_vars(ctx):
 
         raw_serp = ctx.task.serp_data
         if not isinstance(raw_serp, dict):
-            print(f"WARNING: serp_data is {type(raw_serp).__name__}, forcing empty dict. task_id={ctx.task_id}")
+            print(
+                f"WARNING: serp_data is {type(raw_serp).__name__}, forcing empty dict. task_id={ctx.task_id}"
+            )
             serp = {}
         else:
             serp = raw_serp
@@ -217,7 +209,9 @@ def setup_vars(ctx):
             else ""
         )
 
-        add_kw_text = f"\nAdditional Keywords: {ctx.task.additional_keywords}" if ctx.task.additional_keywords else ""
+        add_kw_text = (
+            f"\nAdditional Keywords: {ctx.task.additional_keywords}" if ctx.task.additional_keywords else ""
+        )
 
         ctx.base_context = (
             f"Keyword: {ctx.task.main_keyword}{add_kw_text}\n"
@@ -283,7 +277,9 @@ def setup_vars(ctx):
             "serp_features": json.dumps(serp_features),
             "search_intent_signals": json.dumps(intent_signals),
             "related_searches": json.dumps(related, ensure_ascii=False),
-            "people_also_search": json.dumps(_safe_list_inner(serp.get("people_also_search")), ensure_ascii=False),
+            "people_also_search": json.dumps(
+                _safe_list_inner(serp.get("people_also_search")), ensure_ascii=False
+            ),
         }
 
         if not ctx.analysis_vars.get("additional_keywords"):
@@ -291,15 +287,21 @@ def setup_vars(ctx):
 
         if isinstance(ctx.outline_data, dict):
             if ctx.outline_data.get("ai_structure"):
-                ctx.analysis_vars["result_ai_structure_analysis"] = str(ctx.outline_data["ai_structure"])[:300]
+                ctx.analysis_vars["result_ai_structure_analysis"] = str(ctx.outline_data["ai_structure"])[
+                    :300
+                ]
             if ctx.outline_data.get("chunk_analysis"):
-                ctx.analysis_vars["result_chunk_cluster_analysis"] = str(ctx.outline_data["chunk_analysis"])[:300]
+                ctx.analysis_vars["result_chunk_cluster_analysis"] = str(ctx.outline_data["chunk_analysis"])[
+                    :300
+                ]
             if ctx.outline_data.get("competitor_structure"):
                 ctx.analysis_vars["result_competitor_structure_analysis"] = str(
                     ctx.outline_data["competitor_structure"]
                 )[:300]
             if ctx.outline_data.get("final_structure"):
-                ctx.analysis_vars["result_final_structure_analysis"] = str(ctx.outline_data["final_structure"])[:300]
+                ctx.analysis_vars["result_final_structure_analysis"] = str(
+                    ctx.outline_data["final_structure"]
+                )[:300]
             parsed = ctx.outline_data.get("ai_structure_parsed", {})
             if isinstance(parsed, dict):
                 for key in ("intent", "Taxonomy", "Attention", "structura"):
@@ -336,14 +338,18 @@ def setup_vars(ctx):
         }
         if isinstance(ctx.outline_data, dict):
             if ctx.outline_data.get("ai_structure"):
-                ctx.analysis_vars["result_ai_structure_analysis"] = str(ctx.outline_data["ai_structure"])[:300]
+                ctx.analysis_vars["result_ai_structure_analysis"] = str(ctx.outline_data["ai_structure"])[
+                    :300
+                ]
             if ctx.outline_data.get("chunk_analysis"):
-                ctx.analysis_vars["result_chunk_cluster_analysis"] = str(ctx.outline_data["chunk_analysis"])[:300]
+                ctx.analysis_vars["result_chunk_cluster_analysis"] = str(ctx.outline_data["chunk_analysis"])[
+                    :300
+                ]
             if ctx.outline_data.get("competitor_structure"):
                 ctx.analysis_vars["result_competitor_structure_analysis"] = str(
                     ctx.outline_data["competitor_structure"]
                 )[:300]
             if ctx.outline_data.get("final_structure"):
-                ctx.analysis_vars["result_final_structure_analysis"] = str(ctx.outline_data["final_structure"])[:300]
-
-
+                ctx.analysis_vars["result_final_structure_analysis"] = str(
+                    ctx.outline_data["final_structure"]
+                )[:300]

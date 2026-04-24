@@ -231,7 +231,9 @@ def test_finalize_article_does_not_touch_error_state(db_session, monkeypatch):
     db_session.refresh(task)
     assert task.error_log is None
 
-    task2, ctx2 = _build_ctx(db_session, step_results={STEP_META_GEN: {"status": "completed", "result": "{}"}})
+    task2, ctx2 = _build_ctx(
+        db_session, step_results={STEP_META_GEN: {"status": "completed", "result": "{}"}}
+    )
     with pytest.raises(ValueError):
         finalize_article(ctx2)
     db_session.refresh(task2)

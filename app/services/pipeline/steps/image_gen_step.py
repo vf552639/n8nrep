@@ -33,7 +33,9 @@ class ImageGenStep:
                 level="error",
                 step=STEP_IMAGE_GEN,
             )
-            return StepResult(status="failed", result=json.dumps({"images": [], "error": "OPENROUTER_API_KEY missing"}))
+            return StepResult(
+                status="failed", result=json.dumps({"images": [], "error": "OPENROUTER_API_KEY missing"})
+            )
         if not settings.IMGBB_API_KEY:
             add_log(
                 ctx.db,
@@ -42,7 +44,9 @@ class ImageGenStep:
                 level="error",
                 step=STEP_IMAGE_GEN,
             )
-            return StepResult(status="failed", result=json.dumps({"images": [], "error": "IMGBB_API_KEY missing"}))
+            return StepResult(
+                status="failed", result=json.dumps({"images": [], "error": "IMGBB_API_KEY missing"})
+            )
 
         prompt_data_raw = ctx.task.step_results.get(STEP_IMAGE_PROMPT_GEN, {}).get("result", "")
         prompt_data = clean_and_parse_json(prompt_data_raw) if prompt_data_raw else {}
@@ -135,7 +139,11 @@ class ImageGenStep:
                         row["status"] = "failed"
                         row["error"] = str(e)
                         add_log(
-                            ctx.db, ctx.task, f"❌ {img.get('id')} ImgBB: {e}", level="warn", step=STEP_IMAGE_GEN
+                            ctx.db,
+                            ctx.task,
+                            f"❌ {img.get('id')} ImgBB: {e}",
+                            level="warn",
+                            step=STEP_IMAGE_GEN,
                         )
                 else:
                     row["status"] = "failed"
@@ -177,5 +185,6 @@ class ImageGenStep:
             add_log(ctx.db, ctx.task, "No images generated — continuing pipeline", step=STEP_IMAGE_GEN)
 
         return StepResult(status="completed", result=json.dumps(result_payload, ensure_ascii=False))
+
 
 register_step(ImageGenStep())

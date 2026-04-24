@@ -39,9 +39,7 @@ def _reset_openai_singleton():
 
 def test_402_downscales_max_tokens_on_retry():
     client = MagicMock()
-    err = Exception(
-        "Error code: 402 - You requested up to 65536 tokens, but can only afford 53233"
-    )
+    err = Exception("Error code: 402 - You requested up to 65536 tokens, but can only afford 53233")
     raw_ok = _ok_raw_response()
     client.chat.completions.with_raw_response.create.side_effect = [err, raw_ok]
 
@@ -72,9 +70,7 @@ def test_402_downscales_max_tokens_on_retry():
 
 def test_402_fail_fast_when_affordance_too_low_for_floor():
     client = MagicMock()
-    err = Exception(
-        "Error code: 402 - You requested up to 8000 tokens, but can only afford 500"
-    )
+    err = Exception("Error code: 402 - You requested up to 8000 tokens, but can only afford 500")
     client.chat.completions.with_raw_response.create.side_effect = [err]
 
     with patch("app.services.llm.get_openai_client", return_value=client):

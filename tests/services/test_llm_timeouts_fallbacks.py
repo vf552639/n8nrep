@@ -26,5 +26,7 @@ def test_fallbacks_for_model_empty():
 
 def test_fallbacks_for_model_pipe_list_dedupes_primary():
     with patch("app.services.llm.settings") as s:
-        s.LLM_MODEL_FALLBACKS = "openai/gpt-5-mini=openai/gpt-5-mini|anthropic/claude-sonnet-4|anthropic/claude-sonnet-4"
+        s.LLM_MODEL_FALLBACKS = (
+            "openai/gpt-5-mini=openai/gpt-5-mini|anthropic/claude-sonnet-4|anthropic/claude-sonnet-4"
+        )
         assert fallbacks_for_model("openai/gpt-5-mini") == ["anthropic/claude-sonnet-4"]

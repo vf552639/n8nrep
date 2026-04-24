@@ -304,7 +304,7 @@ def process_project_page(self, project_id: str, page_index: int):
                 db.commit()
             advance_project.apply_async(args=[str(project_id), False], countdown=60)
             return
-        except Exception as pipeline_err:
+        except Exception:
             tb = traceback.format_exc()
             db.refresh(project_task)
             if project_task.status not in ("failed", "completed"):

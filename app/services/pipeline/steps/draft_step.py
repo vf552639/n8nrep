@@ -87,7 +87,9 @@ class CompetitorComparisonStep:
     def run(self, ctx) -> StepResult:
         setup_template_vars(ctx)
         draft_html = ctx.task.step_results.get(STEP_PRIMARY_GEN, {}).get("result", "")
-        comparison_context = f"Our article:\n{draft_html}\n\nCompetitors:\n{ctx.task.competitors_text[:15000]}"
+        comparison_context = (
+            f"Our article:\n{draft_html}\n\nCompetitors:\n{ctx.task.competitors_text[:15000]}"
+        )
         add_log(ctx.db, ctx.task, "Starting Competitor Comparison...", step=STEP_COMP_COMPARISON)
         comparison_review, step_cost, actual_model, resolved_prompts, variables_snapshot = call_agent(
             ctx, "competitor_comparison", comparison_context, variables=ctx.template_vars

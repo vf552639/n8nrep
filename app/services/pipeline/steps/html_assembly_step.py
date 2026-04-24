@@ -143,7 +143,10 @@ class HtmlStructureStep:
             extra["word_loss_percentage"] = round(loss_pct, 1)
 
         add_log(
-            ctx.db, ctx.task, f"HTML Structure completed ({len(structured_html)} chars)", step=STEP_HTML_STRUCT
+            ctx.db,
+            ctx.task,
+            f"HTML Structure completed ({len(structured_html)} chars)",
+            step=STEP_HTML_STRUCT,
         )
         return StepResult(
             status="completed",

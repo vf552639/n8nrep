@@ -1,7 +1,10 @@
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from app.services.pipeline.errors import PipelineError
+
+if TYPE_CHECKING:
+    from app.services.pipeline.context import PipelineContext
 
 
 @dataclass

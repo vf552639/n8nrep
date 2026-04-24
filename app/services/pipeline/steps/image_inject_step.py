@@ -17,7 +17,9 @@ class ImageInjectStep:
     def run(self, ctx) -> StepResult:
         html_result = ctx.task.step_results.get(STEP_HTML_STRUCT, {}).get("result", "")
         if not html_result:
-            add_log(ctx.db, ctx.task, "No HTML structure found — skipping image inject", step=STEP_IMAGE_INJECT)
+            add_log(
+                ctx.db, ctx.task, "No HTML structure found — skipping image inject", step=STEP_IMAGE_INJECT
+            )
             return StepResult(
                 status="completed",
                 result="",
@@ -26,7 +28,9 @@ class ImageInjectStep:
 
         image_data_raw = ctx.task.step_results.get(STEP_IMAGE_GEN, {}).get("result", "")
         if not image_data_raw:
-            add_log(ctx.db, ctx.task, "No image data — passing HTML through unchanged", step=STEP_IMAGE_INJECT)
+            add_log(
+                ctx.db, ctx.task, "No image data — passing HTML through unchanged", step=STEP_IMAGE_INJECT
+            )
             wc = count_content_words(html_result)
             return StepResult(
                 status="completed",
@@ -34,7 +38,9 @@ class ImageInjectStep:
                 extra={"input_word_count": wc, "output_word_count": wc},
             )
 
-        image_data = clean_and_parse_json(image_data_raw) if isinstance(image_data_raw, str) else image_data_raw
+        image_data = (
+            clean_and_parse_json(image_data_raw) if isinstance(image_data_raw, str) else image_data_raw
+        )
         if not isinstance(image_data, dict):
             wc = count_content_words(html_result)
             return StepResult(
@@ -44,11 +50,16 @@ class ImageInjectStep:
             )
 
         approved_images = [
-            img for img in image_data.get("images", []) if img.get("approved") is True and img.get("hosted_url")
+            img
+            for img in image_data.get("images", [])
+            if img.get("approved") is True and img.get("hosted_url")
         ]
         if not approved_images:
             add_log(
-                ctx.db, ctx.task, "No approved images — cleaning MEDIA comment markers", step=STEP_IMAGE_INJECT
+                ctx.db,
+                ctx.task,
+                "No approved images — cleaning MEDIA comment markers",
+                step=STEP_IMAGE_INJECT,
             )
             cleaned = re.sub(r"<!--\s*MEDIA:.*?-->", "", html_result, flags=re.IGNORECASE | re.DOTALL)
             in_w = count_content_words(html_result)
@@ -67,7 +78,8 @@ class ImageInjectStep:
         )
         soup = BeautifulSoup(html_result, "html.parser")
         media_comments = [
-            node for node in soup.find_all(string=lambda text: isinstance(text, Comment) and "MEDIA:" in str(text))
+            node
+            for node in soup.find_all(string=lambda text: isinstance(text, Comment) and "MEDIA:" in str(text))
         ]
         injected_count = 0
         for i, img in enumerate(approved_images):

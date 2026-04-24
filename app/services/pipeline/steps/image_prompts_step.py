@@ -17,7 +17,9 @@ class ImagePromptsStep:
 
     def run(self, ctx) -> StepResult:
         if not settings.IMAGE_GEN_ENABLED:
-            add_log(ctx.db, ctx.task, "Image generation disabled globally — skipping", step=STEP_IMAGE_PROMPT_GEN)
+            add_log(
+                ctx.db, ctx.task, "Image generation disabled globally — skipping", step=STEP_IMAGE_PROMPT_GEN
+            )
             return StepResult(status="completed", result=json.dumps({"images": [], "skipped": True}))
 
         outline_raw = ctx.task.step_results.get(STEP_FINAL_ANALYSIS, {}).get("result", "")
@@ -67,7 +69,10 @@ class ImagePromptsStep:
                 step=STEP_IMAGE_PROMPT_GEN,
             )
             add_log(
-                ctx.db, ctx.task, "No MULTIMEDIA blocks found in outline — skipping", step=STEP_IMAGE_PROMPT_GEN
+                ctx.db,
+                ctx.task,
+                "No MULTIMEDIA blocks found in outline — skipping",
+                step=STEP_IMAGE_PROMPT_GEN,
             )
             return StepResult(status="completed", result=json.dumps({"images": []}))
 
@@ -182,14 +187,18 @@ class ImagePromptsStep:
             )
             block_context = f"MULTIMEDIA block payload:\n{json.dumps(block, ensure_ascii=False, indent=2)}"
             try:
-                block_result_json, block_cost, block_model, block_resolved_prompts, block_variables_snapshot = (
-                    call_agent(
-                        ctx,
-                        "image_prompt_generation",
-                        block_context,
-                        response_format={"type": "json_object"},
-                        variables=block_vars,
-                    )
+                (
+                    block_result_json,
+                    block_cost,
+                    block_model,
+                    block_resolved_prompts,
+                    block_variables_snapshot,
+                ) = call_agent(
+                    ctx,
+                    "image_prompt_generation",
+                    block_context,
+                    response_format={"type": "json_object"},
+                    variables=block_vars,
                 )
                 total_cost += block_cost
                 actual_model = block_model
@@ -299,7 +308,9 @@ class ImagePromptsStep:
                             "purpose": purpose,
                             "image_prompt": fb,
                             "midjourney_prompt": fb,
-                            "alt_text": str(parsed_fb.get("alt_text") or f"{mm_type} for {parent_title}").strip(),
+                            "alt_text": str(
+                                parsed_fb.get("alt_text") or f"{mm_type} for {parent_title}"
+                            ).strip(),
                             "aspect_ratio": str(parsed_fb.get("aspect_ratio") or "16:9").strip(),
                         }
                     )

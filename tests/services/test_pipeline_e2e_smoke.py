@@ -88,9 +88,16 @@ def test_run_pipeline_full_preset_smoke(db_session, monkeypatch):
     monkeypatch.setattr("app.services.pipeline.steps.html_assembly_step.call_agent", _fake_call_agent)
     monkeypatch.setattr("app.services.pipeline.steps.image_prompts_step.call_agent", _fake_call_agent)
     monkeypatch.setattr("app.services.pipeline.steps.draft_step.call_agent", _fake_call_agent)
-    monkeypatch.setattr("app.services.pipeline.steps.legal_step.call_agent_with_exclude_validation", _fake_call_agent_excl)
-    monkeypatch.setattr("app.services.pipeline.steps.final_editing_step.call_agent_with_exclude_validation", _fake_call_agent_excl)
-    monkeypatch.setattr("app.services.pipeline.steps.draft_step.call_agent_with_exclude_validation", _fake_call_agent_excl)
+    monkeypatch.setattr(
+        "app.services.pipeline.steps.legal_step.call_agent_with_exclude_validation", _fake_call_agent_excl
+    )
+    monkeypatch.setattr(
+        "app.services.pipeline.steps.final_editing_step.call_agent_with_exclude_validation",
+        _fake_call_agent_excl,
+    )
+    monkeypatch.setattr(
+        "app.services.pipeline.steps.draft_step.call_agent_with_exclude_validation", _fake_call_agent_excl
+    )
     monkeypatch.setattr(
         "app.services.pipeline.steps.serp_step.fetch_serp_data",
         lambda keyword, country, language, serp_config=None, force_refresh=False: {
@@ -109,9 +116,7 @@ def test_run_pipeline_full_preset_smoke(db_session, monkeypatch):
             "headers_structure": [],
             "total_attempted": len(urls or []),
             "successful_scrapes": len(urls or []),
-            "raw_results": [
-                {"domain": "example.com", "url": u, "title": "Mock"} for u in (urls or [])
-            ],
+            "raw_results": [{"domain": "example.com", "url": u, "title": "Mock"} for u in (urls or [])],
             "scraped_titles": ["Mock"],
             "scraped_descriptions": ["Mock"],
             "failed_results": [],
@@ -130,7 +135,9 @@ def test_run_pipeline_full_preset_smoke(db_session, monkeypatch):
     monkeypatch.setattr("app.services.pipeline.runner.notify_task_success", lambda *a, **k: None)
     monkeypatch.setattr("app.services.pipeline.runner.notify_task_failed", lambda *a, **k: None)
     monkeypatch.setattr("app.services.pipeline.runner.settings.TEST_MODE", False, raising=False)
-    monkeypatch.setattr("app.services.pipeline.steps.html_assembly_step.settings.FACT_CHECK_ENABLED", False, raising=False)
+    monkeypatch.setattr(
+        "app.services.pipeline.steps.html_assembly_step.settings.FACT_CHECK_ENABLED", False, raising=False
+    )
 
     run_pipeline(db_session, str(task.id), auto_mode=True)
     db_session.refresh(task)

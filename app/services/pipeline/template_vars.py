@@ -128,7 +128,9 @@ def setup_template_vars(ctx):
             use_template = False
 
     if use_template:
-        site_template_html, site_template_name = get_template_for_reference(ctx.db, str(ctx.task.target_site_id))
+        site_template_html, site_template_name = get_template_for_reference(
+            ctx.db, str(ctx.task.target_site_id)
+        )
         ctx.template_vars["site_template_html"] = site_template_html or ""
         ctx.template_vars["site_template_name"] = site_template_name or ""
     else:
@@ -136,5 +138,6 @@ def setup_template_vars(ctx):
         ctx.template_vars["site_template_name"] = ""
 
     inject_legal_template_vars(ctx)
+
 
 __all__ = ["setup_template_vars"]

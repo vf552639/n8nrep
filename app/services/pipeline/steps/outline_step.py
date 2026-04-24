@@ -71,7 +71,11 @@ class AiStructureStep:
 
         ctx.task.outline = ctx.outline_data
         ctx.db.commit()
-        final_status = "completed_with_warnings" if not ai_struct_data or not ai_struct_data.get("intent") else "completed"
+        final_status = (
+            "completed_with_warnings"
+            if not ai_struct_data or not ai_struct_data.get("intent")
+            else "completed"
+        )
         add_log(
             ctx.db,
             ctx.task,
