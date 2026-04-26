@@ -10,16 +10,24 @@ engine = create_engine(
     settings.SUPABASE_DB_URL,
     echo=False,
     pool_pre_ping=True,
-    pool_recycle=300,
+    pool_recycle=settings.DB_POOL_RECYCLE_SECONDS,
     pool_size=10,
     max_overflow=20,
     pool_timeout=30,
-    # Worker pipeline commits large JSONB (step_results); 60s server-side timeout caused
-    # OperationalError on heavy updates — align with task53 E.2 (10 minutes).
-    connect_args={"options": "-c statement_timeout=600000"},
+    # statement_timeout: worker pipeline commits large JSONB (task53 E).
+    # TCP keepalives: reduce silent drops during long LLM calls without DB traffic (task59).
+    connect_args={
+        "options": "-c statement_timeout=600000",
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 5,
+    },
 )
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# expire_on_commit=False: avoid expired ORM attributes triggering lazy SELECTs on a stale
+# connection after add_log commits mid-LLM (task59 / Supavisor drops).
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, expire_on_commit=False, bind=engine)
 
 Base = declarative_base()
 

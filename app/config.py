@@ -6,6 +6,8 @@ class Settings(BaseSettings):
     SUPABASE_DB_URL: str
     SUPABASE_URL: str
     SUPABASE_KEY: str
+    # Recycle connections before Supavisor/NAT idle kills them (see task59).
+    DB_POOL_RECYCLE_SECONDS: int = 60
 
     # Logging
     LOG_JSON: bool = False

@@ -122,6 +122,10 @@ def process_generation_task(self, task_id: str):
     except Exception as exc:
         import traceback
 
+        try:
+            db.rollback()
+        except Exception:
+            pass
         task = db.query(Task).filter(Task.id == task_id).first()
         if task and task.status != "failed":
             task.status = "failed"
@@ -306,6 +310,10 @@ def process_project_page(self, project_id: str, page_index: int):
             return
         except Exception:
             tb = traceback.format_exc()
+            try:
+                db.rollback()
+            except Exception:
+                pass
             db.refresh(project_task)
             if project_task.status not in ("failed", "completed"):
                 project_task.status = "failed"

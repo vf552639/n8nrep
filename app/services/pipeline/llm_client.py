@@ -1,7 +1,9 @@
 import datetime
 import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+import structlog
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -16,6 +18,8 @@ from app.services.prompt_llm_kwargs import format_llm_params_log_line, llm_sampl
 
 if TYPE_CHECKING:
     from app.services.pipeline.context import PipelineContext
+
+_logger = structlog.stdlib.get_logger(__name__)
 
 
 def get_prompt_obj(db: Session, agent_name: str) -> Prompt:
@@ -162,37 +166,66 @@ def call_agent(
     if response_format:
         kwargs["response_format"] = response_format
 
+    def _safe_db(fn: Callable[[], None], *, event_name: str) -> None:
+        """Run DB work from LLM progress callbacks; never break generate_text on DB errors (task59)."""
+        try:
+            fn()
+        except Exception as cb_err:
+            try:
+                ctx.db.rollback()
+            except Exception:
+                pass
+            _logger.warning(
+                "call_agent_suppressed_callback_db_error",
+                agent_name=agent_name,
+                task_id=str(ctx.task.id),
+                progress_event=event_name,
+                error_class=type(cb_err).__name__,
+                error_msg=str(cb_err),
+            )
+
     def _touch_heartbeat():
-        ctx.task.last_heartbeat = datetime.datetime.utcnow()
-        ctx.db.commit()
+        def _hb():
+            ctx.task.last_heartbeat = datetime.datetime.utcnow()
+            ctx.db.commit()
+
+        _safe_db(_hb, event_name="heartbeat")
 
     requested_model = prompt.model
 
     def _on_llm_progress(event: str, payload: dict):
         if event == "retry_wait":
-            add_log(
-                ctx.db,
-                ctx.task,
-                (
-                    f"[{agent_name}] Retry {payload.get('attempt')}/{payload.get('max_retries')}: "
-                    f"{payload.get('reason')}. Sleeping {payload.get('sleep_seconds')}s"
-                ),
-                level="warn",
-                step=agent_name,
-            )
+
+            def _log_retry():
+                add_log(
+                    ctx.db,
+                    ctx.task,
+                    (
+                        f"[{agent_name}] Retry {payload.get('attempt')}/{payload.get('max_retries')}: "
+                        f"{payload.get('reason')}. Sleeping {payload.get('sleep_seconds')}s"
+                    ),
+                    level="warn",
+                    step=agent_name,
+                )
+
+            _safe_db(_log_retry, event_name="retry_wait")
             _touch_heartbeat()
         elif event == "max_tokens_downscale":
-            add_log(
-                ctx.db,
-                ctx.task,
-                (
-                    f"[{agent_name}] OpenRouter 402: reducing max_tokens "
-                    f"{payload.get('old_max_tokens')} -> {payload.get('new_max_tokens')} "
-                    f"(affordable={payload.get('affordable')}); retrying without delay."
-                ),
-                level="warn",
-                step=agent_name,
-            )
+
+            def _log_downscale():
+                add_log(
+                    ctx.db,
+                    ctx.task,
+                    (
+                        f"[{agent_name}] OpenRouter 402: reducing max_tokens "
+                        f"{payload.get('old_max_tokens')} -> {payload.get('new_max_tokens')} "
+                        f"(affordable={payload.get('affordable')}); retrying without delay."
+                    ),
+                    level="warn",
+                    step=agent_name,
+                )
+
+            _safe_db(_log_downscale, event_name="max_tokens_downscale")
             _touch_heartbeat()
         elif event == "response_received":
             usage = payload.get("usage") or {}
@@ -212,16 +245,19 @@ def call_agent(
             if actual_m and requested_model and str(actual_m) != str(requested_model):
                 fallback_note = f" | ⚠ fallback to {actual_m}"
 
-            add_log(
-                ctx.db,
-                ctx.task,
-                (
-                    f"[{agent_name}] LLM response received "
-                    f"({tokens_msg}, ${float(payload.get('cost') or 0.0):.5f}){fallback_note}"
-                ),
-                level="info",
-                step=agent_name,
-            )
+            def _log_response():
+                add_log(
+                    ctx.db,
+                    ctx.task,
+                    (
+                        f"[{agent_name}] LLM response received "
+                        f"({tokens_msg}, ${float(payload.get('cost') or 0.0):.5f}){fallback_note}"
+                    ),
+                    level="info",
+                    step=agent_name,
+                )
+
+            _safe_db(_log_response, event_name="response_received")
             _touch_heartbeat()
 
     add_log(
@@ -238,8 +274,16 @@ def call_agent(
     try:
         res, cost, model, _ = generate_text(**kwargs)
     except InsufficientCreditsError:
+        try:
+            ctx.db.rollback()
+        except Exception:
+            pass
         raise
     except Exception as e:
+        try:
+            ctx.db.rollback()
+        except Exception:
+            pass
         raise LLMError(f"{agent_name}: LLM call failed: {e}") from e
     return res, cost, model, resolved_prompts, variables_snapshot
 

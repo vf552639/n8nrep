@@ -141,6 +141,10 @@ def _run_phase(ctx: PipelineContext, step: PipelineStep) -> None:
             attempts += 1
             if attempts > step.policy.max_retries:
                 raise
+            try:
+                ctx.db.rollback()
+            except Exception:
+                pass
             add_log(
                 ctx.db,
                 ctx.task,
