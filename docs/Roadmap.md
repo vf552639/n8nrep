@@ -1,6 +1,6 @@
 # ROADMAP
 
-**Последнее обновление:** апрель 2026 (**task55**: exclude-words retry оставлен только в `final_editing`; в `draft_step.py`/`legal_step.py` upstream-шаги переведены на `call_agent` без `call_agent_with_exclude_validation`, что снижает повторные дорогие LLM-вызовы; ранее **task54**, коммит **`08fa216`**: NUL-санитизация scraped/SERP payloads + OpenRouter 402 adaptive `max_tokens` downscale и fail-fast `InsufficientCreditsError`; до этого **task53 E**, **task52**, **task50**)
+**Последнее обновление:** апрель 2026 (**task58**: в `frontend/src/pages/AuthorsPage.tsx` поле страны в Authors переведено на канонический `<select>` (`COUNTRIES`) с сохранением ISO-кода и авто-заполнением `country_full`, чтобы устранить рассинхрон `CA` vs `CANADA` в фильтрах Projects; ранее **task55**, **task54**, **task53 E**, **task52**, **task50**)
 
 ---
 
@@ -64,6 +64,7 @@
 - [x] **Апрель 2026 (23.04, task53 E):** страницы генеративного проекта — **`statement_timeout`** в **`app/database.py`** поднят до **10 мин**; **`app/workers/tasks.py`** — полный traceback в **`Task.error_log`**, строка **FAILED** в логе проекта с **`task_id`**; при **`OperationalError`/`DBAPIError`** — **`rollback`**, **`pending`**, **`advance_project.apply_async(..., countdown=60)`** без пропуска страницы — см. **`CURRENT_STATUS.md`**, **`task53.md`**, коммит **`e441738`**
 - [x] **Апрель 2026 (24.04, task54):** защита от NUL-байтов и 402 по кредитам — `app/utils/text_sanitize.py` (`strip_nul`), санитизация в `scraper.py` и `serp_step.py`; в `llm.py` обработка `402 can only afford N` с downscale `max_tokens` + fail-fast `InsufficientCreditsError`; тесты `tests/unit/test_text_sanitize.py`, `tests/services/test_llm_402_downscale.py`
 - [x] **Апрель 2026 (24.04, task55):** exclude-words validation ограничена финальным шагом — в `PrimaryGen*`/`Improver`/`PrimaryGenLegal` убран `call_agent_with_exclude_validation`, оставлен `call_agent`; `final_editing` без изменений (retry + regex-strip), цель — уменьшить стоимость повторных LLM-вызовов
+- [x] **Апрель 2026 (26.04, task58):** Authors UI нормализует страну до ISO-кода: `country` в форме стал `<select>` из `COUNTRIES`, `country_full` синхронизируется автоматически через `countryLabel`, submit create/edit отклоняет неканонические значения; исправляет кейс `CANADA` и восстанавливает корректную фильтрацию/автоподбор авторов в Projects
 
 ---
 

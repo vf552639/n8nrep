@@ -1,6 +1,23 @@
 # ТЕКУЩИЙ СТАТУС ПРОЕКТА
 
-**Дата последнего обновления:** апрель 2026 (**task55**, коммит **`HEAD`**: exclude-words retry оставлен только в `final_editing` — в upstream-шагах `primary_generation`, `primary_generation_about`, `improver`, `primary_generation_legal` переход на `call_agent` без `call_agent_with_exclude_validation`; обновлены `app/services/pipeline/steps/draft_step.py`, `app/services/pipeline/steps/legal_step.py`; цель — убрать дублирующие LLM-ретраи и снизить стоимость. Ранее **task54**, коммит **`08fa216`**: NUL-санитизация (`app/utils/text_sanitize.py`, `scraper.py`, `serp_step.py`) и обработка OpenRouter 402 с adaptive downscale `max_tokens` + `InsufficientCreditsError` в `llm.py`/`pipeline.errors`; тесты `tests/unit/test_text_sanitize.py`, `tests/services/test_llm_402_downscale.py`. До этого: **task53 E**, **task52**, **task50**, **task48**, **task47**, **task46**, **task45**, **task43**, **taskco**, **task37**, **task41**, **task40**)
+**Дата последнего обновления:** апрель 2026 (**task58**, коммит **`HEAD`**: нормализация страны автора в UI — `frontend/src/pages/AuthorsPage.tsx`: поле `country` переведено с free-text на `<select>` из `COUNTRIES`, добавлен `canonicalCountryCode`, авто-заполнение `country_full` через `countryLabel`, в create/edit submit добавлена защита `Please select a country` и принудительная запись ISO-кода; цель — устранить рассинхрон `CA` vs `CANADA` в Authors/Projects. Ранее **task55**, **task54**, **task53 E**, **task52**, **task50**, **task48**, **task47**, **task46**, **task45**, **task43**, **taskco**, **task37**, **task41**, **task40**)
+
+---
+
+### Апрель 2026 — task58: нормализация `authors.country` в форме Authors
+
+**Контекст:** в `AuthorsPage` поле страны было свободным текстом; в БД появились записи вида `CANADA`, тогда как Projects-фильтрация ожидает ISO-коды (`CA`, `PL`, `FR`) и сравнивает строки строго. Это ломало подбор авторов по Country/Language в форме проектов.
+
+**Сделано**
+- `frontend/src/pages/AuthorsPage.tsx`: добавлен импорт `COUNTRIES`, `COUNTRY_CODES`, `countryLabel`.
+- В `AuthorFormFields` поле **«Страна»** заменено на `<select required>` по каноническому списку стран (`COUNTRIES`) с отображением `Label (CODE)`.
+- Добавлен helper `canonicalCountryCode(raw)` для нормализации и валидации выбранного кода.
+- При выборе страны форма синхронно обновляет `country` (ISO-код) и `country_full` (человеко-читаемое название через `countryLabel`).
+- Поле `country_full` переведено в `readOnly/disabled`, чтобы не создавать новый рассинхрон.
+- В create/edit submit добавлена проверка валидного ISO-кода; в API отправляется канонический payload (`country=CODE`, `country_full=countryLabel(CODE)`).
+- Для существующих неканонических значений (`Canada`/`CANADA`) добавлена подсказка в форме о необходимости выбрать страну из списка и пересохранить автора.
+
+**Ожидаемый эффект:** новые и отредактированные авторы сохраняются только с ISO-кодом, а фильтры и автоподбор автора в Projects снова работают предсказуемо для `CA`.
 
 ---
 

@@ -3,6 +3,7 @@ import { useState, useMemo } from "react";
 import toast from "react-hot-toast";
 import { authorsApi } from "@/api/authors";
 import { Author, AuthorFormPayload } from "@/types/author";
+import { COUNTRIES, COUNTRY_CODES, countryLabel } from "@/constants/countries";
 import { ReactTable } from "@/components/common/ReactTable";
 import { Plus, User, X } from "lucide-react";
 
@@ -52,6 +53,11 @@ function formatYearCell(v: unknown): string {
   return s;
 }
 
+function canonicalCountryCode(raw: string): string {
+  const u = raw.trim().toUpperCase();
+  return COUNTRY_CODES.includes(u) ? u : "";
+}
+
 function AuthorFormFields({
   formData,
   setFormData,
@@ -64,6 +70,10 @@ function AuthorFormFields({
     onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
       setFormData((prev) => ({ ...prev, [key]: e.target.value })),
   });
+
+  const countrySelectValue = canonicalCountryCode(formData.country);
+  const countryStoredInvalid =
+    Boolean(formData.country.trim()) && !countrySelectValue;
 
   return (
     <div className="space-y-6 max-h-[70vh] overflow-y-auto pr-1">
@@ -82,13 +92,31 @@ function AuthorFormFields({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Страна *</label>
-              <input
+              <select
                 required
-                type="text"
-                placeholder="e.g. Australia"
-                className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500"
-                {...field("country")}
-              />
+                value={countrySelectValue}
+                onChange={(e) => {
+                  const code = e.target.value;
+                  setFormData((prev) => ({
+                    ...prev,
+                    country: code,
+                    country_full: code ? countryLabel(code) : "",
+                  }));
+                }}
+                className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
+              >
+                <option value="">Select country…</option>
+                {COUNTRIES.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.label} ({c.code})
+                  </option>
+                ))}
+              </select>
+              {countryStoredInvalid && (
+                <p className="text-xs text-amber-600 mt-1">
+                  Stored country is not a valid ISO code. Choose a country from the list to fix.
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Язык *</label>
@@ -107,9 +135,15 @@ function AuthorFormFields({
             </label>
             <input
               type="text"
-              placeholder="e.g. Germany, United Kingdom"
-              className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500"
-              {...field("country_full")}
+              disabled
+              readOnly
+              title="Filled automatically from the country selection"
+              value={
+                countrySelectValue
+                  ? countryLabel(countrySelectValue)
+                  : formData.country_full || formData.country || ""
+              }
+              className="w-full border rounded-lg px-3 py-2 text-sm outline-none bg-slate-50 text-slate-600 cursor-not-allowed"
             />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -348,7 +382,16 @@ function CreateAuthorModal({ onClose }: { onClose: () => void }) {
       toast.error("Author name is required");
       return;
     }
-    mutation.mutate(formData);
+    const cc = canonicalCountryCode(formData.country);
+    if (!cc) {
+      toast.error("Please select a country");
+      return;
+    }
+    mutation.mutate({
+      ...formData,
+      country: cc,
+      country_full: countryLabel(cc),
+    });
   };
 
   return (
@@ -402,7 +445,16 @@ function EditAuthorModal({ author, onClose }: { author: Author; onClose: () => v
       toast.error("Author name is required");
       return;
     }
-    mutation.mutate(formData);
+    const cc = canonicalCountryCode(formData.country);
+    if (!cc) {
+      toast.error("Please select a country");
+      return;
+    }
+    mutation.mutate({
+      ...formData,
+      country: cc,
+      country_full: countryLabel(cc),
+    });
   };
 
   return (

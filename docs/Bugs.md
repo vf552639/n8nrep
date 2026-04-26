@@ -1,6 +1,14 @@
 # ИЗВЕСТНЫЕ БАГИ
 
-**Дата последнего обновления:** апрель 2026 (**task55**: exclude-words retry оставлен только в `final_editing`, upstream-шаги без повторных exclude-ретраев; **task54**: NUL-санитизация scraped/SERP данных и обработка OpenRouter 402 с adaptive `max_tokens`/`InsufficientCreditsError`; ранее **task53 E**, **task52**, **task50**, **task48**, **task47**, **taskco**, **task41**, **task40** — см. **`CURRENT_STATUS.md`**)
+**Дата последнего обновления:** апрель 2026 (**task58**: Authors UI переведён на ISO-select для `country` с автосинхронизацией `country_full`; устранён UX-корень проблемы `CA` vs `CANADA` в Projects; ранее **task55**, **task54**, **task53 E**, **task52**, **task50**, **task48**, **task47**, **taskco**, **task41**, **task40** — см. **`CURRENT_STATUS.md`**)
+
+---
+
+## ✅ Исправлено в task58 (26.04.2026)
+
+### Поле Country в Authors допускало неканонические значения (`CANADA`), ломая фильтр Projects
+**Было:** в `frontend/src/pages/AuthorsPage.tsx` поле страны было free-text; пользователи сохраняли `Canada/canada/CANADA`, а Projects сравнивает страны как ISO-коды (`CA`, `PL`, `FR`) и не подбирал таких авторов.  
+**Сделано:** поле `country` переведено на `<select>` из `COUNTRIES`; добавлен `canonicalCountryCode`, авто-заполнение `country_full` через `countryLabel`, submit create/edit принимает только валидный ISO-код (`Please select a country` при невалидном значении). Существующие записи с `CANADA` исправляются через UI (выбрать `Canada (CA)` и сохранить).
 
 ---
 
