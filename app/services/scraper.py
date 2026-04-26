@@ -6,6 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from app.utils.text_sanitize import strip_nul
+from app.utils.url_safety import raise_if_url_unsafe_for_ssrf
 
 
 def parse_html(html: str) -> dict[str, Any]:
@@ -89,11 +90,12 @@ def scrape_via_serper(url: str, timeout: int = 30) -> str:
         return None
 
 
-def fetch_url_meta(url: str, timeout: int = 12) -> dict[str, str]:
+def fetch_url_meta(url: str, timeout: int | tuple[int, int] = (3, 8)) -> dict[str, str]:
     """
     Lightweight fetch for URL title/description with serper->direct fallback.
-    Never raises; returns empty fields on failure.
+    Never raises; returns empty fields on failure (except SSRF: caller should validate first for 400).
     """
+    raise_if_url_unsafe_for_ssrf(url)
     domain = urlparse(url).netloc
     empty = {
         "url": url,
@@ -101,11 +103,12 @@ def fetch_url_meta(url: str, timeout: int = 12) -> dict[str, str]:
         "description": "",
         "domain": domain,
     }
+    serper_timeout = timeout[1] if isinstance(timeout, tuple) else int(timeout)
 
     try:
         html = None
         if getattr(settings, "SERPER_API_KEY", None) and not _serper_key_failed:
-            html = scrape_via_serper(url, timeout=timeout)
+            html = scrape_via_serper(url, timeout=serper_timeout)
 
         if not html:
             headers = {

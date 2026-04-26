@@ -75,6 +75,10 @@ def verify_migrations() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    if settings.AUTH_DISABLED:
+        logger.warning(
+            "AUTH_DISABLED is true: X-API-Key checks are disabled. Never enable this in production."
+        )
     verify_migrations()
     yield
 
@@ -87,16 +91,35 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-origins = [origin.strip() for origin in settings.CORS_ORIGINS.split(",")] if settings.CORS_ORIGINS else ["*"]
+_raw_cors = (settings.CORS_ORIGINS or "").strip()
+origins = [o.strip() for o in _raw_cors.split(",") if o.strip()] if _raw_cors else ["*"]
+# Browsers reject Access-Control-Allow-Origin: * with credentials; Starlette echoes request Origin
+# when origins is ["*"], which effectively allows any origin with credentials — disable credentials
+# whenever wildcard is used (task60).
+_allow_credentials = True
+if not origins or "*" in origins:
+    _allow_credentials = False
+    if not origins:
+        origins = ["*"]
 
 # Allow CORS for frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=True,
+    allow_credentials=_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    return response
+
 
 # API Routers
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])

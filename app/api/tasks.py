@@ -35,9 +35,14 @@ from app.services.pipeline_constants import ALL_STEPS
 from app.services.queueing import enqueue_task_generation, revoke_generation_celery_task
 from app.services.scraper import fetch_url_meta
 from app.services.serp_cache import invalidate_serp_cache
+from app.utils.url_safety import UnsafeUrlError, raise_if_url_unsafe_for_ssrf
 from app.workers.tasks import process_generation_task
 
 router = APIRouter()
+
+MAX_BULK_CSV_BYTES = 1 * 1024 * 1024  # 1 MiB
+MAX_BULK_CSV_ROWS = 500
+BULK_CSV_REQUIRED_COLUMNS = frozenset({"keyword", "country", "language", "site_name"})
 
 
 @router.post("/fetch-url-meta")
@@ -47,7 +52,11 @@ def fetch_url_meta_endpoint(payload: FetchUrlMetaRequest):
         raise HTTPException(status_code=400, detail="URL is required")
     if not (url.startswith("http://") or url.startswith("https://")):
         raise HTTPException(status_code=400, detail="URL must start with http:// or https://")
-    return fetch_url_meta(url, timeout=12)
+    try:
+        raise_if_url_unsafe_for_ssrf(url)
+    except UnsafeUrlError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return fetch_url_meta(url, timeout=(3, 8))
 
 
 @router.get("/")
@@ -305,24 +314,71 @@ async def create_tasks_bulk(file: UploadFile = File(...), db: Session = Depends(
     """
     CSV must have columns: keyword, country, language, site_name
     """
-    contents = await file.read()
-    reader = csv.DictReader(io.StringIO(contents.decode("utf-8")))
+    contents = await file.read(MAX_BULK_CSV_BYTES + 1)
+    if len(contents) > MAX_BULK_CSV_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"CSV file too large (max {MAX_BULK_CSV_BYTES // (1024 * 1024)} MiB)",
+        )
+    if file.content_type not in (
+        "text/csv",
+        "application/csv",
+        "text/plain",
+        "application/vnd.ms-excel",
+        "application/octet-stream",
+        None,
+        "",
+    ):
+        raise HTTPException(
+            status_code=415,
+            detail="Unsupported media type; upload a CSV file (text/csv or application/octet-stream)",
+        )
+
+    try:
+        text = contents.decode("utf-8")
+    except UnicodeDecodeError as e:
+        raise HTTPException(status_code=400, detail="CSV must be UTF-8 encoded") from e
+
+    reader = csv.DictReader(io.StringIO(text))
+    if reader.fieldnames is None:
+        raise HTTPException(status_code=400, detail="CSV has no header row")
+    headers = {h.strip().lower() for h in reader.fieldnames if h and h.strip()}
+    missing = BULK_CSV_REQUIRED_COLUMNS - headers
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"CSV missing required columns: {', '.join(sorted(missing))}",
+        )
+
+    rows = list(reader)
+    if len(rows) > MAX_BULK_CSV_ROWS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many rows (max {MAX_BULK_CSV_ROWS})",
+        )
 
     tasks_created = 0
     errors = []
 
-    for row in reader:
+    for row in rows:
         try:
-            site_name = row.get("site_name")
+            site_name = (row.get("site_name") or "").strip()
+            keyword = (row.get("keyword") or "").strip()
+            country = (row.get("country") or "").strip()
+            language = (row.get("language") or "").strip()
+            if not keyword or not country or not language or not site_name:
+                errors.append(f"Missing required field in row: {row!r}")
+                continue
+
             site = db.query(Site).filter(func.lower(Site.name) == func.lower(site_name)).first()
             if not site:
-                errors.append(f"Site {site_name} not found for keyword {row['keyword']}")
+                errors.append(f"Site {site_name} not found for keyword {keyword}")
                 continue
 
             new_task = Task(
-                main_keyword=row["keyword"],
-                country=row["country"],
-                language=row["language"],
+                main_keyword=keyword,
+                country=country,
+                language=language,
                 page_type=row.get("page_type", "article"),
                 target_site_id=site.id,
             )

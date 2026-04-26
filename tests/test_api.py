@@ -6,9 +6,9 @@ from app.main import app
 client = TestClient(app)
 
 
-def test_api_settings_auth():
-    # Force settings so the dependency triggers
-    settings.API_KEY = "test_secret_key"
+def test_api_settings_auth(monkeypatch):
+    monkeypatch.setattr(settings, "AUTH_DISABLED", False, raising=False)
+    monkeypatch.setattr(settings, "API_KEY", "test_secret_key", raising=False)
 
     # Without X-API-Key, should fail because we added deps
     response = client.get("/api/settings/")
@@ -21,7 +21,8 @@ def test_api_settings_auth():
     assert response.status_code == 403
 
 
-def test_dashboard_stats_auth_enforced():
-    settings.API_KEY = "test_secret_key"
+def test_dashboard_stats_auth_enforced(monkeypatch):
+    monkeypatch.setattr(settings, "AUTH_DISABLED", False, raising=False)
+    monkeypatch.setattr(settings, "API_KEY", "test_secret_key", raising=False)
     response = client.get("/api/dashboard/stats")
     assert response.status_code == 403

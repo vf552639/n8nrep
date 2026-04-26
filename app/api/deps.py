@@ -4,8 +4,7 @@ from app.config import settings
 
 
 async def verify_api_key(x_api_key: str = Header(None)):
-    if not settings.API_KEY:
-        # If API_KEY is not configured in .env, disable authentication
+    if settings.AUTH_DISABLED:
         return
 
     if x_api_key != settings.API_KEY:

@@ -13,7 +13,7 @@ engine = create_engine(
     pool_recycle=settings.DB_POOL_RECYCLE_SECONDS,
     pool_size=10,
     max_overflow=20,
-    pool_timeout=30,
+    pool_timeout=10,
     # statement_timeout: worker pipeline commits large JSONB (task53 E).
     # TCP keepalives: reduce silent drops during long LLM calls without DB traffic (task59).
     connect_args={

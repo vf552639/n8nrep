@@ -7,7 +7,8 @@ from app.main import app
 
 @pytest.mark.asyncio
 async def test_root_ok(monkeypatch):
-    monkeypatch.setattr(settings, "API_KEY", "")
+    monkeypatch.setattr(settings, "AUTH_DISABLED", True, raising=False)
+    monkeypatch.setattr(settings, "API_KEY", "", raising=False)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         r = await ac.get("/")

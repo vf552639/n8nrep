@@ -23,8 +23,10 @@ WORKDIR /app
 # Install 'serve'
 RUN npm install -g serve
 
-# Copy built assets from builder
-COPY --from=builder /app/dist ./dist
+# Copy built assets from builder (node uid 1000 in official image)
+COPY --from=builder --chown=1000:1000 /app/dist ./dist
+
+USER node
 
 # Expose production port
 EXPOSE 3000

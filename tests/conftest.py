@@ -104,6 +104,7 @@ async def async_api_client(api_db_session, monkeypatch):
     from app.database import get_db
     from app.main import app
 
+    monkeypatch.setattr(settings, "AUTH_DISABLED", True, raising=False)
     monkeypatch.setattr(settings, "API_KEY", "", raising=False)
 
     def _override_get_db():

@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import time
 from collections.abc import Callable
@@ -10,6 +11,7 @@ from openai import OpenAI
 from app.config import settings
 
 _openai_client = None
+_logger = logging.getLogger(__name__)
 
 
 def timeout_for_model(model: str) -> int:
@@ -83,7 +85,13 @@ def generate_text(
     credit_downscales = 0
     while retries < max_retries:
         attempt_start = time.monotonic()
-        print(f"[LLM] Attempt {retries + 1}/{max_retries}, model={model}, timeout={effective_timeout}s")
+        _logger.debug(
+            "LLM attempt %s/%s model=%s timeout=%ss",
+            retries + 1,
+            max_retries,
+            model,
+            effective_timeout,
+        )
         try:
             if progress_callback:
                 progress_callback(
@@ -101,7 +109,7 @@ def generate_text(
                 "messages": messages,
                 "temperature": temperature,
                 "extra_headers": {
-                    "HTTP-Referer": "https://example.com",  # Update logically later
+                    "HTTP-Referer": settings.OPENROUTER_HTTP_REFERER,
                     "X-Title": "SEO-Generator",
                 },
                 "timeout": effective_timeout,
@@ -184,7 +192,12 @@ def generate_text(
                     },
                 )
             elapsed = time.monotonic() - attempt_start
-            print(f"[LLM] Response OK in {elapsed:.1f}s, model={actual_model}, tokens={usage_info}")
+            _logger.debug(
+                "LLM response OK in %.1fs model=%s usage=%s",
+                elapsed,
+                actual_model,
+                usage_info,
+            )
             return response.choices[0].message.content, cost, actual_model, usage_info
 
         except InsufficientCreditsError:
@@ -219,9 +232,11 @@ def generate_text(
                             ) from e
                         old_mt = max_tokens
                         max_tokens = new_mt
-                        print(
-                            f"[LLM] OpenRouter 402: downscaling max_tokens {old_mt} -> {max_tokens} "
-                            f"(affordable={affordable}, margin=256); retrying immediately."
+                        _logger.info(
+                            "OpenRouter 402: downscaling max_tokens %s -> %s (affordable=%s); retrying",
+                            old_mt,
+                            max_tokens,
+                            affordable,
                         )
                         if progress_callback:
                             progress_callback(
@@ -242,7 +257,13 @@ def generate_text(
                     f"Insufficient OpenRouter credits or max_tokens cannot be adjusted: {error_msg}"
                 ) from e
 
-            print(f"[LLM] Error after {elapsed:.1f}s (Attempt {retries + 1}/{max_retries}): {error_msg}")
+            _logger.warning(
+                "LLM error after %.1fs (attempt %s/%s): %s",
+                elapsed,
+                retries + 1,
+                max_retries,
+                error_msg,
+            )
             sleep_seconds = 5
             reason = "unknown"
             is_timeout = (

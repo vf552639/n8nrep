@@ -6,6 +6,8 @@ import base64
 
 import requests
 
+from app.utils.url_safety import safe_requests_get_bytes
+
 
 class ImgBBUploader:
     """
@@ -63,6 +65,10 @@ class ImgBBUploader:
         Downloads image from URL, uploads to ImgBB.
         Returns: {"url": "...", "display_url": "...", "delete_url": "..."}
         """
-        resp = requests.get(image_url, timeout=60)
-        resp.raise_for_status()
-        return self.upload_from_bytes(resp.content, filename)
+        raw = safe_requests_get_bytes(
+            image_url,
+            timeout=(3.0, 10.0),
+            max_bytes=8 * 1024 * 1024,
+            allowed_content_prefixes=("image/",),
+        )
+        return self.upload_from_bytes(raw, filename)

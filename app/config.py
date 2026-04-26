@@ -1,3 +1,4 @@
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,8 +14,9 @@ class Settings(BaseSettings):
     LOG_JSON: bool = False
     LOG_LEVEL: str = "INFO"
 
-    # Security
+    # Security — set AUTH_DISABLED=true only for CI/local; never in production.
     API_KEY: str = ""
+    AUTH_DISABLED: bool = False
     CORS_ORIGINS: str = "*"
     TEST_MODE: bool = False
     STRICT_VARIABLE_CHECK: bool = False
@@ -25,6 +27,8 @@ class Settings(BaseSettings):
 
     # LLM
     OPENROUTER_API_KEY: str
+    # Sent as HTTP-Referer to OpenRouter (public site URL for their stats).
+    OPENROUTER_HTTP_REFERER: str = "https://example.com"
     DEFAULT_MODEL: str = "openai/gpt-5"
     ANALYST_MODEL: str = "google/gemini-2.5-pro"
     LLM_REQUEST_TIMEOUT: int = 600
@@ -78,6 +82,15 @@ class Settings(BaseSettings):
     IMAGE_MODEL_DEFAULT: str = "google/gemini-2.5-flash-image-preview"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    @model_validator(mode="after")
+    def require_api_key_unless_auth_disabled(self) -> "Settings":
+        if not self.AUTH_DISABLED and not (self.API_KEY or "").strip():
+            raise ValueError(
+                "API_KEY is required when AUTH_DISABLED is false. "
+                "For CI/local tests set AUTH_DISABLED=true, or set a non-empty API_KEY in .env."
+            )
+        return self
 
 
 settings = Settings()

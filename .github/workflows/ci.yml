@@ -36,6 +36,9 @@ jobs:
         run: ruff check app tests
       - name: Ruff format
         run: ruff format --check app tests
+      - name: pip-audit
+        continue-on-error: true
+        run: pip install pip-audit && pip-audit -r requirements.txt
       - name: Pytest
         env:
           TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/seo_test
@@ -44,6 +47,7 @@ jobs:
           SUPABASE_URL: http://localhost
           SUPABASE_KEY: test
           API_KEY: ""
+          AUTH_DISABLED: "true"
           OPENROUTER_API_KEY: test
         run: pytest -m "not integration" --cov=app --cov-fail-under=55 --cov-report=term-missing -q
 
@@ -58,5 +62,12 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
         working-directory: frontend
+      - run: npm run lint
+        working-directory: frontend
+      - run: npm run typecheck
+        working-directory: frontend
+      - run: npm audit --omit=dev
+        working-directory: frontend
+        continue-on-error: true
       - run: npm run build
         working-directory: frontend
