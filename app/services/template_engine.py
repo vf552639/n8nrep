@@ -82,21 +82,23 @@ def ensure_head_meta(html_in: str, title: str, description: str) -> str:
     return out
 
 
-def render_author_footer(author: Author | None) -> str:
+def render_author_footer(author: Author | None, *, hide_geo: bool = False) -> str:
     """
     HTML block with author data for the end of <body>.
     Returns "" if no author or all display fields empty. Values are HTML-escaped.
     """
     if not author:
         return ""
-    rows = [
-        ("Автор", author.author),
-        ("Страна", author.country_full),
-        ("Код страны", author.co_short),
-        ("Город", author.city),
-        ("Язык", author.language),
-        ("Биография", author.bio),
-    ]
+    rows = [("Автор", author.author)]
+    if not hide_geo:
+        rows.extend(
+            [
+                ("Страна", author.country_full),
+                ("Код страны", author.co_short),
+                ("Город", author.city),
+            ]
+        )
+    rows.extend([("Язык", author.language), ("Биография", author.bio)])
     rows = [(k, v) for k, v in rows if v and str(v).strip()]
     if not rows:
         return ""

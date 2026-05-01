@@ -96,3 +96,30 @@ def test_render_author_footer_escapes_bio():
 
 def test_render_author_footer_none_author():
     assert render_author_footer(None) == ""
+
+
+def test_render_author_footer_hide_geo_omits_country_city():
+    a = Author()
+    a.author = "Jane"
+    a.country_full = "Canada"
+    a.co_short = "CA"
+    a.city = "Toronto"
+    a.language = "Pt"
+    a.bio = "Writer"
+
+    html = render_author_footer(a, hide_geo=True)
+    assert "Автор" in html
+    assert "Язык" in html
+    assert "Биография" in html
+    assert "Страна" not in html
+    assert "Код страны" not in html
+    assert "Город" not in html
+
+
+def test_render_author_footer_hide_geo_returns_empty_when_only_geo_fields():
+    a = Author()
+    a.country_full = "Canada"
+    a.co_short = "CA"
+    a.city = "Toronto"
+
+    assert render_author_footer(a, hide_geo=True) == ""

@@ -39,6 +39,7 @@ class BlueprintPage(Base):
     nav_label = Column(String(100), nullable=True)
     show_in_nav = Column(Boolean, default=True)
     show_in_footer = Column(Boolean, default=True)
+    hide_author_geo = Column(Boolean, default=False, nullable=False)
     use_serp = Column(Boolean, default=True)
     pipeline_preset = Column(String(20), nullable=False, default="full")
     pipeline_steps_custom = Column(JSONB, nullable=True)

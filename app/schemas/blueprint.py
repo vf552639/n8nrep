@@ -10,7 +10,7 @@ class SiteBlueprintCreate(BaseModel):
     is_active: bool = True
 
 
-class BlueprintPageCreate(BaseModel):
+class BlueprintPageBase(BaseModel):
     page_slug: str
     page_title: str
     page_type: str = "article"
@@ -21,6 +21,7 @@ class BlueprintPageCreate(BaseModel):
     nav_label: str | None = None
     show_in_nav: bool = True
     show_in_footer: bool = True
+    hide_author_geo: bool = False
     use_serp: bool = True
     pipeline_preset: str = "full"
     pipeline_steps_custom: list[str] | None = None
@@ -33,3 +34,16 @@ class BlueprintPageCreate(BaseModel):
         if s not in VALID_PRESETS:
             raise ValueError(f"pipeline_preset must be one of {sorted(VALID_PRESETS)}, got {v!r}")
         return s
+
+
+class BlueprintPageCreate(BlueprintPageBase):
+    pass
+
+
+class BlueprintPageUpdate(BlueprintPageBase):
+    pass
+
+
+class BlueprintPageRead(BlueprintPageBase):
+    id: str
+    blueprint_id: str

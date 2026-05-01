@@ -13,12 +13,22 @@ export const blueprintsApi = {
     
   getPages: (id: string) => 
     api.get<BlueprintPage[]>(`/blueprints/${id}/pages`).then(res => res.data),
-    
-  createPage: (id: string, data: Partial<BlueprintPage>) => 
-    api.post<BlueprintPage>(`/blueprints/${id}/pages`, data).then(res => res.data),
+
+  createPage: (id: string, data: Partial<BlueprintPage>) =>
+    api
+      .post<BlueprintPage>(`/blueprints/${id}/pages`, {
+        ...data,
+        hide_author_geo: data.hide_author_geo ?? false,
+      })
+      .then((res) => res.data),
 
   updatePage: (id: string, pageId: string, data: Partial<BlueprintPage>) =>
-    api.put<BlueprintPage>(`/blueprints/${id}/pages/${pageId}`, data).then(res => res.data),
+    api
+      .put<BlueprintPage>(`/blueprints/${id}/pages/${pageId}`, {
+        ...data,
+        hide_author_geo: data.hide_author_geo ?? false,
+      })
+      .then((res) => res.data),
 
   deletePage: (id: string, pageId: string) =>
     api.delete<{ status: string }>(`/blueprints/${id}/pages/${pageId}`).then(res => res.data),

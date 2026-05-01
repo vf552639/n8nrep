@@ -118,9 +118,12 @@ def _build_full_page(ctx: PipelineContext, structured_html: str, title: str, des
     )
 
 
-def _apply_author_footer(db, task, full_page: str) -> str:
-    author_obj = db.query(Author).filter(Author.id == task.author_id).first() if task.author_id else None
-    author_html = render_author_footer(author_obj)
+def _apply_author_footer(ctx: PipelineContext, full_page: str) -> str:
+    author_obj = (
+        ctx.db.query(Author).filter(Author.id == ctx.task.author_id).first() if ctx.task.author_id else None
+    )
+    hide_geo = bool(getattr(ctx.blueprint_page, "hide_author_geo", False)) if ctx.blueprint_page else False
+    author_html = render_author_footer(author_obj, hide_geo=hide_geo)
     if not author_html:
         return full_page
     if "</body>" in full_page:
@@ -225,7 +228,7 @@ def finalize_article(ctx: PipelineContext) -> GeneratedArticle:
     meta_data, title, description = _extract_meta_with_fallback(ctx)
     word_count = count_content_words(structured_html)
     full_page = _build_full_page(ctx, structured_html, title, description)
-    full_page = _apply_author_footer(db, ctx.task, full_page)
+    full_page = _apply_author_footer(ctx, full_page)
     fact_check_status, fact_check_issues, needs_review = _process_fact_check(ctx)
     article = _upsert_article(
         ctx,

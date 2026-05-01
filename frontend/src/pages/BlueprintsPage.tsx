@@ -485,6 +485,7 @@ function AddBlueprintPageModal({ blueprintId, onClose }: { blueprintId: string; 
     nav_label: "",
     show_in_nav: true,
     show_in_footer: true,
+    hide_author_geo: false,
     pipeline_preset: "full" as PipelinePreset,
     pipeline_steps_custom: [] as string[],
     default_legal_template_id: "",
@@ -681,6 +682,15 @@ function AddBlueprintPageModal({ blueprintId, onClose }: { blueprintId: string; 
               />
               Show in Footer
             </label>
+            <label className="inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={formData.hide_author_geo}
+                onChange={(e) => setFormData((p) => ({ ...p, hide_author_geo: e.target.checked }))}
+                className="rounded border-slate-300"
+              />
+              Скрыть страну/город автора в футере
+            </label>
           </div>
 
           <div className="mt-6 flex justify-end gap-3 border-t pt-4">
@@ -726,6 +736,7 @@ function EditBlueprintPageModal({
     nav_label: page.nav_label || "",
     show_in_nav: page.show_in_nav,
     show_in_footer: page.show_in_footer,
+    hide_author_geo: page.hide_author_geo ?? false,
     pipeline_preset: (page.pipeline_preset || "full") as PipelinePreset,
     pipeline_steps_custom: [...(page.pipeline_steps_custom || [])] as string[],
     default_legal_template_id: page.default_legal_template_id || "",
@@ -915,6 +926,15 @@ function EditBlueprintPageModal({
                 className="rounded border-slate-300"
               />
               Show in Footer
+            </label>
+            <label className="inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={formData.hide_author_geo}
+                onChange={(e) => setFormData((p) => ({ ...p, hide_author_geo: e.target.checked }))}
+                className="rounded border-slate-300"
+              />
+              Скрыть страну/город автора в футере
             </label>
           </div>
 

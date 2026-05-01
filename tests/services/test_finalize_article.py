@@ -4,11 +4,20 @@ from app.models.article import GeneratedArticle
 from app.services.pipeline.assembly import finalize_article
 from app.services.pipeline.context import PipelineContext
 from app.services.pipeline_constants import STEP_CONTENT_FACT_CHECK, STEP_HTML_STRUCT, STEP_META_GEN
-from tests.factories import ArticleFactory, ProjectFactory, SiteFactory, TaskFactory
+from tests.factories import (
+    ArticleFactory,
+    BlueprintFactory,
+    BlueprintPageFactory,
+    ProjectFactory,
+    SiteFactory,
+    TaskFactory,
+)
 
 
 def _bind_factories(db_session):
     SiteFactory._meta.sqlalchemy_session = db_session
+    BlueprintFactory._meta.sqlalchemy_session = db_session
+    BlueprintPageFactory._meta.sqlalchemy_session = db_session
     ProjectFactory._meta.sqlalchemy_session = db_session
     TaskFactory._meta.sqlalchemy_session = db_session
     ArticleFactory._meta.sqlalchemy_session = db_session
@@ -238,3 +247,34 @@ def test_finalize_article_does_not_touch_error_state(db_session, monkeypatch):
         finalize_article(ctx2)
     db_session.refresh(task2)
     assert task2.status != "failed"
+
+
+@pytest.mark.integration
+def test_finalize_article_passes_hide_geo_from_blueprint_page(db_session, monkeypatch):
+    monkeypatch.setattr(db_session, "commit", db_session.flush)
+    monkeypatch.setattr(
+        "app.services.pipeline.assembly.generate_full_page",
+        lambda db, site_id, html_content, title, description, project_id=None: (
+            f"<html><body>{html_content}</body></html>"
+        ),
+    )
+    captured = {"hide_geo": None}
+
+    def _fake_render(author, *, hide_geo=False):
+        captured["hide_geo"] = hide_geo
+        return ""
+
+    monkeypatch.setattr("app.services.pipeline.assembly.render_author_footer", _fake_render)
+    step_results = {
+        STEP_HTML_STRUCT: {"status": "completed", "result": "<h1>T</h1><p>x</p>"},
+        STEP_META_GEN: {"status": "completed", "result": '{"title":"T","description":"D"}'},
+    }
+    task, ctx = _build_ctx(db_session, step_results=step_results, with_project=True)
+    bp = BlueprintPageFactory(blueprint_id=task.project.blueprint_id, hide_author_geo=True)
+    task.blueprint_page_id = bp.id
+    db_session.flush()
+    ctx = PipelineContext(db_session, str(task.id), auto_mode=True)
+
+    finalize_article(ctx)
+
+    assert captured["hide_geo"] is True

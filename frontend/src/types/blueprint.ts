@@ -20,8 +20,15 @@ export interface BlueprintPage {
   nav_label?: string;
   show_in_nav: boolean;
   show_in_footer: boolean;
+  hide_author_geo?: boolean;
   use_serp: boolean;
   pipeline_preset: PipelinePreset;
   pipeline_steps_custom?: string[] | null;
   default_legal_template_id?: string | null;
 }
+
+export interface BlueprintPageInput extends Omit<BlueprintPage, "id" | "blueprint_id" | "use_serp"> {
+  use_serp?: boolean;
+}
+
+export type BlueprintPageUpdate = Partial<BlueprintPageInput>;

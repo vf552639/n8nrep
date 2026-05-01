@@ -1,6 +1,47 @@
 # ТЕКУЩИЙ СТАТУС ПРОЕКТА
 
-**Дата последнего обновления:** апрель 2026 (**task58**, коммит **`HEAD`**: нормализация страны автора в UI — `frontend/src/pages/AuthorsPage.tsx`: поле `country` переведено с free-text на `<select>` из `COUNTRIES`, добавлен `canonicalCountryCode`, авто-заполнение `country_full` через `countryLabel`, в create/edit submit добавлена защита `Please select a country` и принудительная запись ISO-кода; цель — устранить рассинхрон `CA` vs `CANADA` в Authors/Projects. Ранее **task55**, **task54**, **task53 E**, **task52**, **task50**, **task48**, **task47**, **task46**, **task45**, **task43**, **taskco**, **task37**, **task41**, **task40**)
+**Дата последнего обновления:** апрель 2026 (**task60**, коммит **`fccd2c6`**: security hardening — `AUTH_DISABLED` + обязательный `API_KEY` при прод-режиме, безопасный CORS (`allow_credentials=false` при `*`), SSRF-защита для `fetch-url-meta` и загрузки изображения по URL, лимиты/валидация bulk CSV, non-root Docker, базовые security headers, `pool_timeout=10`, structured logging в `llm.py`, CI шаги `npm run lint` / `npm run typecheck` / audit. Ранее **task59**, **task58**, **task55**, **task54**, **task53 E**, **task52**, **task50**, **task48**, **task47**, **task46**, **task45**, **task43**, **taskco**, **task37**, **task41**, **task40**)
+
+---
+
+### Май 2026 — task50: per-page флаг скрытия гео автора в футере
+
+**Сделано**
+- `blueprint_pages`: добавлен булев флаг `hide_author_geo` (default `false`) + миграция `y1z2a3b4c5d6`.
+- `app/services/template_engine.py`: `render_author_footer(author, hide_geo=False)` — при `hide_geo=True` не рендерит «Страна», «Код страны», «Город».
+- `app/services/pipeline/assembly.py`: флаг читается из `ctx.blueprint_page.hide_author_geo` и пробрасывается в рендер футера; fallback при отсутствии `blueprint_page` — `hide_geo=False`.
+- `app/api/blueprints.py` и схемы/типы: поле добавлено в create/update/read для страниц blueprint.
+- UI `BlueprintsPage`: чекбокс «Скрыть страну/город автора в футере» в Add/Edit модалках страницы blueprint.
+
+**Ожидаемый эффект:** для мультиязычных slot-страниц можно сохранить стиль автора, но убрать визуально конфликтующие GEO-поля автора в HTML-футере на уровне конкретной страницы blueprint.
+
+---
+
+### Апрель 2026 — task60: security hardening API/infra
+
+**Сделано**
+- **Auth/CORS:** `app/config.py` — `AUTH_DISABLED` + валидация `API_KEY`; `app/api/deps.py` — auth bypass только при `AUTH_DISABLED=true`; `app/main.py` — при wildcard CORS отключаются credentials.
+- **SSRF:** новый `app/utils/url_safety.py` (`raise_if_url_unsafe_for_ssrf`, `safe_requests_get_bytes`); проверки в `POST /api/tasks/fetch-url-meta`, `app/services/scraper.fetch_url_meta`, `app/services/image_hosting.ImgBBUploader.upload_from_url`.
+- **Bulk CSV:** `app/api/tasks.py` — лимит размера (1 MiB), лимит строк (500), обязательные колонки, UTF-8 и content-type валидация, понятные 4xx-ответы.
+- **Infra:** `Dockerfile` и `frontend/Dockerfile` переведены на non-root пользователя; `app/database.py` `pool_timeout` уменьшен до 10 с.
+- **Observability/security headers:** `app/services/llm.py` — `print` заменён на logger, `OPENROUTER_HTTP_REFERER` вынесен в config; `app/main.py` — `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`.
+- **CI/tests/docs:** workflow дополнен `npm run lint`, `npm run typecheck`, `pip-audit`/`npm audit` (soft-fail); добавлен `tests/unit/test_url_safety.py`; обновлены `.env.example`, `README.md`, тестовые фикстуры auth.
+
+---
+
+### Апрель 2026 — task59: `PendingRollbackError` после обрыва соединения к БД во время LLM
+
+**Контекст:** на длинных вызовах OpenRouter (`reader_opinion` и др.) прогресс-колбэки пишут логи через **`add_log`** → **`commit()`**. После commit ORM-атрибуты **`task`** по умолчанию истекают; следующий доступ к **`task.log_events`** делает lazy **`SELECT`**. Если за время простоя Supavisor/NAT оборвал TCP, **`OperationalError`** оставлял сессию в состоянии pending rollback; общий **`except`** в **`generate_text`** / отсутствие **`rollback`** в **`call_agent`** и **`runner`** приводило к **`PendingRollbackError: Can't reconnect until invalid transaction is rolled back`** в логе пайплайна.
+
+**Сделано**
+- **`app/database.py`**: **`SessionLocal(..., expire_on_commit=False)`** — после commit не триггерить лишние lazy-load по мёртвому соединению; **`pool_recycle=settings.DB_POOL_RECYCLE_SECONDS`** (по умолчанию **60**); в **`connect_args`** — **`keepalives`**, **`keepalives_idle`**, **`keepalives_interval`**, **`keepalives_count`** наряду с **`statement_timeout=600000`**.
+- **`app/config.py`**: **`DB_POOL_RECYCLE_SECONDS: int = 60`** (переопределение через env).
+- **`app/services/pipeline/llm_client.py`**: **`_safe_db`** — любая ошибка в колбэках прогресса / heartbeat → **`rollback()`** + structlog **`call_agent_suppressed_callback_db_error`** (не пробрасывает ошибку в **`generate_text`**); **`rollback`** перед **`raise`** из **`InsufficientCreditsError`** и перед обёрткой в **`LLMError`**.
+- **`app/services/pipeline/runner.py`**: в ветке retry по **`step.policy.retryable_errors`** — **`rollback()`** до **`add_log`** с текстом «↩️ retry».
+- **`app/workers/tasks.py`**: **`rollback()`** в общем **`except`** после **`run_pipeline`** в **`process_project_page`** и в **`process_generation_task`** перед повторными запросами к БД.
+- **`tests/services/test_llm_client_callback_db.py`**: регрессия — **`OperationalError`** при первом **`add_log`** на **`response_received`**, затем успешное завершение **`generate_text`**.
+
+**Ожидаемый эффект:** страницы проекта и одиночные задачи не падают цепочкой с **`PendingRollbackError`** после сетевого обрыва во время LLM; в логах воркера при реальных обрывах возможны предупреждения **`call_agent_suppressed_callback_db_error`**.
 
 ---
 

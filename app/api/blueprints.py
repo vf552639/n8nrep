@@ -139,6 +139,7 @@ def get_blueprint_pages(id: str, db: Session = Depends(get_db)):
             "nav_label": p.nav_label,
             "show_in_nav": p.show_in_nav,
             "show_in_footer": p.show_in_footer,
+            "hide_author_geo": getattr(p, "hide_author_geo", False),
             "use_serp": p.use_serp,
             "pipeline_preset": getattr(p, "pipeline_preset", "full") or "full",
             "pipeline_steps_custom": getattr(p, "pipeline_steps_custom", None),
@@ -163,6 +164,7 @@ def create_blueprint_page(id: str, page_in: BlueprintPageCreate, db: Session = D
         "page_slug": db_page.page_slug,
         "page_title": db_page.page_title,
         "sort_order": db_page.sort_order,
+        "hide_author_geo": db_page.hide_author_geo,
     }
 
 
@@ -183,6 +185,7 @@ def update_blueprint_page(id: str, page_id: str, page_in: BlueprintPageCreate, d
     return {
         "id": str(db_page.id),
         "page_slug": db_page.page_slug,
+        "hide_author_geo": db_page.hide_author_geo,
         "msg": "Updated",
     }
 
