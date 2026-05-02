@@ -1,10 +1,22 @@
 # ТЕКУЩИЙ СТАТУС ПРОЕКТА
 
-**Дата последнего обновления:** апрель 2026 (**task60**, коммит **`fccd2c6`**: security hardening — `AUTH_DISABLED` + обязательный `API_KEY` при прод-режиме, безопасный CORS (`allow_credentials=false` при `*`), SSRF-защита для `fetch-url-meta` и загрузки изображения по URL, лимиты/валидация bulk CSV, non-root Docker, базовые security headers, `pool_timeout=10`, structured logging в `llm.py`, CI шаги `npm run lint` / `npm run typecheck` / audit. Ранее **task59**, **task58**, **task55**, **task54**, **task53 E**, **task52**, **task50**, **task48**, **task47**, **task46**, **task45**, **task43**, **taskco**, **task37**, **task41**, **task40**)
+**Дата последнего обновления:** май 2026 (**task51**: снижение egress Supabase — лёгкий пагинируемый **`GET /api/authors`**, кэш списка 60 с, React Query **`staleTime` 5 мин** и ключи **`["authors","light"]` / `["authors","full"]`**, один **`SELECT`** автора на прогон пайплайна через **`PipelineContext.author`**; план **`task51.md`**). Ранее **Blueprint `hide_author_geo`**, коммит **`f4ff8d8`**: per-page скрытие страны/кода/города автора в HTML-футере; миграция **`y1z2a3b4c5d6`**, API blueprints, `render_author_footer(..., hide_geo=)`, `assembly`, UI **BlueprintsPage** — см. раздел ниже. Далее **task60** (`fccd2c6`), **task59**, **task58**, **task55**, **task54**, **task53 E**, **task52**, **task50 (pipeline follow-up, апрель)**, **task48**, **task47**, **task46**, **task45**, **task43**, **taskco**, **task37**, **task41**, **task40**
 
 ---
 
-### Май 2026 — task50: per-page флаг скрытия гео автора в футере
+### Май 2026 — task51: снижение egress Supabase (`task51.md`)
+
+**Контекст:** повторяющиеся полные выборки таблицы **`authors`** (все Text-поля на каждом монтировании страниц и при **`refetch`**) и второй **`SELECT`** автора в одном прогоне пайплайна (**`setup_template_vars`** + **`_apply_author_footer`**) раздували исходящий трафик к managed Postgres (Supabase).
+
+**Сделано**
+- **`GET /api/authors/`**: параметры **`limit`** (1–500, по умолчанию 100), **`offset`**, **`full`** (по умолчанию выключен). В лёгком режиме из БД читаются только **`id`, author, country, country_full, language, year`**; тяжёлые Text-колонки — при **`full=1`**; **`usage_count`** считается только для авторов на текущей «странице» выборки; ответ списка кэшируется in-process **60 с**, сброс при создании/обновлении/удалении автора (**`app/api/authors.py`**).
+- **Фронт:** **`authorsLightListQueryOptions`** / **`authorsFullListQueryOptions`** в **`frontend/src/api/authors.ts`** (**`staleTime` 5 мин**, ключи **`["authors","light"]`** и **`["authors","full"]`**); лёгкий список для селектов (**ProjectsPage**, **ProjectDetailPage** clone, **SitesPage**, **TasksPage**); полный список на **AuthorsPage** (**`full=true`**).
+- **Пайплайн:** при создании **`PipelineContext`** один раз загружается **`ctx.author`**; **`template_vars.setup_template_vars`** и **`assembly._apply_author_footer`** используют его вместо повторных **`query(Author)`** (**`app/services/pipeline/context.py`**, **`template_vars.py`**, **`assembly.py`**).
+- **Тесты:** расширен **`tests/api/test_authors_api.py`** (лёгкий ответ без **`bio`**, полный с **`bio`**, параметры **`limit`/`offset`**).
+
+---
+
+### Май 2026 — Blueprint: per-page `hide_author_geo` (футер автора, `task50.md`, commit `f4ff8d8`)
 
 **Сделано**
 - `blueprint_pages`: добавлен булев флаг `hide_author_geo` (default `false`) + миграция `y1z2a3b4c5d6`.
@@ -475,11 +487,11 @@
 
 **Backend — `app/services/template_engine.py`**
 - Добавлена **`ensure_head_meta(html, title, description)`**: для полноценной страницы обновляет/вставляет `<title>` и `<meta name="description">` в `<head>`; для HTML-фрагмента оборачивает в минимальный `<!doctype html><html><head>...`.
-- Добавлена **`render_author_footer(author)`**: формирует HTML-секцию `<section class="author-info">` со строками **Автор / Страна / Код страны / Город / Язык / Биография** (только непустые поля, с HTML-экранированием).
+- Добавлена **`render_author_footer(author, *, hide_geo=False)`**: формирует HTML-секцию `<section class="author-info">` со строками **Автор / Страна / Код страны / Город / Язык / Биография** (только непустые поля, с HTML-экранированием). С **мая 2026** при **`hide_geo=True`** строки **Страна / Код страны / Город** не выводятся (флаг **`blueprint_pages.hide_author_geo`**, см. раздел **«Май 2026 — Blueprint: per-page `hide_author_geo`»** выше).
 
-**Backend — `app/services/pipeline.py` (сборка `GeneratedArticle.full_page_html`)**
+**Backend — `app/services/pipeline` (сборка `GeneratedArticle.full_page_html`)**
 - После `generate_full_page(...)` всегда вызывается **`ensure_head_meta(...)`**: и при `None` (шаблон не применён), и при успешной обёртке (подстраховка шаблонов без плейсхолдеров мета).
-- В финальный документ инжектится author-footer: если есть `ctx.task.author_id`, блок вставляется перед первым `</body>`, иначе добавляется в конец строки.
+- В финальный документ инжектится author-footer (**`assembly._apply_author_footer`**): если есть `ctx.task.author_id`, блок вставляется перед первым `</body>`, иначе добавляется в конец строки; **`hide_geo`** берётся из **`ctx.blueprint_page.hide_author_geo`** при наличии страницы блупринта.
 
 **Backend — `app/services/site_builder.py`**
 - Добавлен warning-лог при fallback на `article.html_content`, если `full_page_html` пустой: помогает оперативно ловить регрессы сборки full-page HTML.

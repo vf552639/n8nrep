@@ -7,7 +7,6 @@ This module enriches step context with author/site/legal data and
 import json
 
 from app.config import settings
-from app.models.author import Author
 from app.models.project import SiteProject
 from app.services.deduplication import ContentDeduplicator
 from app.services.legal_reference import inject_legal_template_vars
@@ -24,17 +23,16 @@ def setup_template_vars(ctx):
     author_name = ""
     author_exclude_words = ""
 
-    if ctx.task.author_id:
-        author = ctx.db.query(Author).filter(Author.id == ctx.task.author_id).first()
-        if author:
-            author_style = author.bio or ""
-            imitation = author.imitation or ""
-            year = author.year or ""
-            face = author.face or ""
-            target_audience = author.target_audience or ""
-            rhythms_style = author.rhythms_style or ""
-            author_name = author.author or ""
-            author_exclude_words = author.exclude_words or ""
+    if ctx.task.author_id and ctx.author:
+        author = ctx.author
+        author_style = author.bio or ""
+        imitation = author.imitation or ""
+        year = author.year or ""
+        face = author.face or ""
+        target_audience = author.target_audience or ""
+        rhythms_style = author.rhythms_style or ""
+        author_name = author.author or ""
+        author_exclude_words = author.exclude_words or ""
 
     combined_exclude = []
     if settings.EXCLUDE_WORDS:

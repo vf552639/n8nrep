@@ -1,6 +1,6 @@
 # ROADMAP
 
-**Последнее обновление:** апрель 2026 (**task58**: в `frontend/src/pages/AuthorsPage.tsx` поле страны в Authors переведено на канонический `<select>` (`COUNTRIES`) с сохранением ISO-кода и авто-заполнением `country_full`, чтобы устранить рассинхрон `CA` vs `CANADA` в фильтрах Projects; ранее **task55**, **task54**, **task53 E**, **task52**, **task50**)
+**Последнее обновление:** май 2026 (**task51**: egress Supabase — лёгкий **`GET /api/authors`**, React Query, **`PipelineContext.author`**; план **`task51.md`**; ранее **Blueprint `hide_author_geo`**, commit **`f4ff8d8`**; **task60**: security hardening auth/CORS/SSRF/bulk CSV + non-root Docker + CI lint/typecheck/audit; **task59**, **task58**, **task55**, **task54**, **task53 E**, **task52**, **task50** pipeline follow-up)
 
 ---
 
@@ -65,6 +65,9 @@
 - [x] **Апрель 2026 (24.04, task54):** защита от NUL-байтов и 402 по кредитам — `app/utils/text_sanitize.py` (`strip_nul`), санитизация в `scraper.py` и `serp_step.py`; в `llm.py` обработка `402 can only afford N` с downscale `max_tokens` + fail-fast `InsufficientCreditsError`; тесты `tests/unit/test_text_sanitize.py`, `tests/services/test_llm_402_downscale.py`
 - [x] **Апрель 2026 (24.04, task55):** exclude-words validation ограничена финальным шагом — в `PrimaryGen*`/`Improver`/`PrimaryGenLegal` убран `call_agent_with_exclude_validation`, оставлен `call_agent`; `final_editing` без изменений (retry + regex-strip), цель — уменьшить стоимость повторных LLM-вызовов
 - [x] **Апрель 2026 (26.04, task58):** Authors UI нормализует страну до ISO-кода: `country` в форме стал `<select>` из `COUNTRIES`, `country_full` синхронизируется автоматически через `countryLabel`, submit create/edit отклоняет неканонические значения; исправляет кейс `CANADA` и восстанавливает корректную фильтрацию/автоподбор авторов в Projects
+- [x] **Апрель 2026 (26.04, task59):** после обрыва TCP к Postgres во время длинного LLM-вызова — нет цепочки **`PendingRollbackError`**: **`database.py`** (**`expire_on_commit=False`**, **`DB_POOL_RECYCLE_SECONDS`**, keepalives), **`llm_client._safe_db`**, **`rollback`** в **`call_agent`** / **`runner`** retry / **`process_project_page`** и **`process_generation_task`**; **`tests/services/test_llm_client_callback_db.py`** — см. **`CURRENT_STATUS.md`**, **«task59»**, коммит **`0b46eb5`**
+- [x] **Май 2026 (01.05, `task50.md` / commit `f4ff8d8`):** per-page **`hide_author_geo`** на **`blueprint_pages`** (миграция **`y1z2a3b4c5d6`**): опционально скрыть в HTML-футере строки «Страна» / «Код страны» / «Город» автора; **`render_author_footer(..., hide_geo=)`**, **`assembly.finalize_article`**, API **`/api/blueprints/.../pages`**, UI **BlueprintsPage**, тесты **`test_template_engine`** + интеграция **`test_finalize_article`** — см. **`CURRENT_STATUS.md`**, **«Май 2026 — Blueprint: per-page `hide_author_geo`»**
+- [x] **Май 2026 (`task51.md`):** снижение egress к БД — **`GET /api/authors/`** с пагинацией и лёгким режимом по умолчанию (**`full=1`** для полных карточек), серверный TTL-кэш списка **60 с**, фронт разделяет запросы **`["authors","light"]`** / **`["authors","full"]`** с **`staleTime` 5 мин**; **`PipelineContext.author`** убирает лишний **`SELECT`** в пайплайне — см. **`CURRENT_STATUS.md`**, **«Май 2026 — task51»**
 
 ---
 
@@ -73,8 +76,10 @@
 ### Операционная гигиена (апрель 2026) — частично закрыто
 - [x] Необработанные исключения API → **`application/json`** с **`detail`** (не **`text/plain`**) — `app/main.py`
 - [x] Лог при старте **`web`**, если **`alembic current` ≠ head** — `verify_migrations()` в **`lifespan`**
-- [x] Пул SQLAlchemy: **`pool_pre_ping`**, **`pool_recycle`**, лимиты пула, серверный **`statement_timeout`** в **`connect_args`** (**600000** мс после **task53 E**, ранее **60000**); **`get_db`**: **`rollback`** при ошибке — `app/database.py`
+- [x] Пул SQLAlchemy: **`pool_pre_ping`**, **`pool_recycle`** (**`DB_POOL_RECYCLE_SECONDS`**, default **60**, **task59**), лимиты пула, серверный **`statement_timeout`** и TCP **keepalives** в **`connect_args`** (**600000** мс после **task53 E**); **`SessionLocal`**: **`expire_on_commit=False`** (**task59**); **`get_db`**: **`rollback`** при ошибке — `app/database.py`
 - [x] DDL-миграции: **`statement_timeout` / `lock_timeout`** на соединении Alembic — `alembic/env.py`; troubleshooting — **`.agent/workflows/alembic-migration.md`**
+- [x] **task60:** `AUTH_DISABLED` + обязательный `API_KEY` в прод-режиме, safe CORS (`allow_credentials` off при `*`), SSRF guard (`url_safety.py`) для URL-фетчей, лимиты bulk CSV, non-root Docker, security headers (`nosniff` / `DENY` / `Referrer-Policy`), CI-шаги `npm run lint` + `npm run typecheck` (+ soft-fail audits)
+- [x] **task51 (май 2026):** лёгкий и кэшируемый **`GET /api/authors`**, меньше повторных загрузок авторов в SPA, один загрузчик **`Author`** в **`PipelineContext`** — см. **`CURRENT_STATUS.md`**, **`task51.md`**
 
 ### Этап 1 — фундамент качества (апрель 2026, 19.04, task36) — частично закрыто
 - [x] **`pyproject.toml`**, **`requirements-dev.txt`**, **`.pre-commit-config.yaml`**

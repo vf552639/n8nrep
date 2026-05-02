@@ -2,7 +2,6 @@ import json
 
 from app.config import settings
 from app.models.article import GeneratedArticle
-from app.models.author import Author
 from app.services.deduplication import ContentDeduplicator
 from app.services.json_parser import clean_and_parse_json
 from app.services.meta_parser import extract_meta_from_parsed
@@ -119,9 +118,7 @@ def _build_full_page(ctx: PipelineContext, structured_html: str, title: str, des
 
 
 def _apply_author_footer(ctx: PipelineContext, full_page: str) -> str:
-    author_obj = (
-        ctx.db.query(Author).filter(Author.id == ctx.task.author_id).first() if ctx.task.author_id else None
-    )
+    author_obj = ctx.author if ctx.task.author_id else None
     hide_geo = bool(getattr(ctx.blueprint_page, "hide_author_geo", False)) if ctx.blueprint_page else False
     author_html = render_author_footer(author_obj, hide_geo=hide_geo)
     if not author_html:

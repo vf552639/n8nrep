@@ -7,7 +7,22 @@ import pytest
 async def test_authors_list(async_api_client):
     r = await async_api_client.get("/api/authors/")
     assert r.status_code == 200
-    assert isinstance(r.json(), list)
+    body = r.json()
+    assert isinstance(body, list)
+    if body:
+        row = body[0]
+        assert "usage_count" in row
+        assert "bio" not in row
+
+    rf = await async_api_client.get("/api/authors/", params={"full": True})
+    assert rf.status_code == 200
+    full_rows = rf.json()
+    if full_rows:
+        assert "bio" in full_rows[0]
+
+    rp = await async_api_client.get("/api/authors/", params={"limit": 10, "offset": 0})
+    assert rp.status_code == 200
+    assert isinstance(rp.json(), list)
 
 
 @pytest.mark.asyncio

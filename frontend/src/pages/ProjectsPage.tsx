@@ -12,6 +12,7 @@ import { formatApiErrorDetail } from "@/lib/apiErrorMessage";
 import { languageEquals, normalizeLanguageDisplay } from "@/lib/languageDisplay";
 import { sitesApi } from "@/api/sites";
 import { blueprintsApi } from "@/api/blueprints";
+import { authorsLightListQueryOptions } from "@/api/authors";
 import { Author } from "@/types/author";
 import { Site } from "@/types/site";
 import { ReactTable } from "@/components/common/ReactTable";
@@ -581,10 +582,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
     setClusterResult(null);
   }, [formData.additional_keywords_raw, formData.blueprint_id]);
 
-  const { data: authors } = useQuery({
-    queryKey: ["authors"],
-    queryFn: () => import("@/api/authors").then((m) => m.authorsApi.getAll()),
-  });
+  const { data: authors } = useQuery(authorsLightListQueryOptions());
 
   const { data: sites } = useQuery({
     queryKey: ["sites"],

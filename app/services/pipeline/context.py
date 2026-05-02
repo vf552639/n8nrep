@@ -1,11 +1,11 @@
 from sqlalchemy.orm import Session
 
+from app.models.author import Author
 from app.models.blueprint import BlueprintPage
 from app.models.project import SiteProject
 from app.models.site import Site
 from app.models.task import Task
 from app.services.pipeline.persistence import completed_step_body
-from app.services.site_utils import brand_from_seed, is_markup_only_site
 from app.services.pipeline_constants import (
     STEP_FINAL_ANALYSIS,
     STEP_HTML_STRUCT,
@@ -14,6 +14,7 @@ from app.services.pipeline_constants import (
     STEP_SERP,
 )
 from app.services.pipeline_presets import pipeline_steps_use_serp, resolve_pipeline_steps
+from app.services.site_utils import brand_from_seed, is_markup_only_site
 
 
 class PipelineContext:
@@ -25,6 +26,10 @@ class PipelineContext:
         self.task = db.query(Task).filter(Task.id == task_id).first()
         if not self.task:
             raise ValueError(f"Task {task_id} not found")
+
+        self.author: Author | None = None
+        if self.task.author_id:
+            self.author = db.query(Author).filter(Author.id == self.task.author_id).first()
 
         self.site = db.query(Site).filter(Site.id == self.task.target_site_id).first()
         self.is_markup_only = is_markup_only_site(self.site)

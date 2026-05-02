@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useMemo } from "react";
 import toast from "react-hot-toast";
-import { authorsApi } from "@/api/authors";
+import { authorsApi, authorsFullListQueryOptions } from "@/api/authors";
 import { Author, AuthorFormPayload } from "@/types/author";
 import { COUNTRIES, COUNTRY_CODES, countryLabel } from "@/constants/countries";
 import { ReactTable } from "@/components/common/ReactTable";
@@ -241,10 +241,7 @@ export default function AuthorsPage() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editAuthor, setEditAuthor] = useState<Author | null>(null);
 
-  const { data, isLoading } = useQuery({
-    queryKey: ["authors"],
-    queryFn: async () => authorsApi.getAll({ limit: 1000 }),
-  });
+  const { data, isLoading } = useQuery(authorsFullListQueryOptions());
 
   const columns = useMemo(
     () => [

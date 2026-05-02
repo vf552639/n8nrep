@@ -12,7 +12,7 @@ import { Project } from "@/types/project";
 import StatusBadge from "@/components/common/StatusBadge";
 import StepMonitor from "@/components/tasks/StepMonitor";
 import { sitesApi } from "@/api/sites";
-import { authorsApi } from "@/api/authors";
+import { authorsLightListQueryOptions } from "@/api/authors";
 import type { Site } from "@/types/site";
 import type { Author } from "@/types/author";
 import {
@@ -817,10 +817,7 @@ function CloneProjectModal({
     queryKey: ["sites"],
     queryFn: () => sitesApi.getAll(),
   });
-  const { data: authors } = useQuery({
-    queryKey: ["authors"],
-    queryFn: () => authorsApi.getAll(),
-  });
+  const { data: authors } = useQuery(authorsLightListQueryOptions());
 
   const filteredAuthors = (authors || []).filter(
     (a: Author) => a.country === form.country && a.language === form.language

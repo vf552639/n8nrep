@@ -12,6 +12,7 @@ import { sitesApi } from "@/api/sites";
 import type { Task, TaskCreate, SerpConfig } from "@/types/task";
 import { COUNTRY_CODES, countryLabel } from "@/constants/countries";
 import { languageEquals, normalizeLanguageDisplay } from "@/lib/languageDisplay";
+import { authorsLightListQueryOptions } from "@/api/authors";
 
 const PAGE_SIZE = 50;
 
@@ -382,10 +383,7 @@ export default function TasksPage() {
 
 function CreateTaskModal({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
-  const { data: authors } = useQuery({
-    queryKey: ["authors"],
-    queryFn: () => import("@/api/authors").then((m) => m.authorsApi.getAll()),
-  });
+  const { data: authors } = useQuery(authorsLightListQueryOptions());
 
   const [formData, setFormData] = useState({
     main_keyword: "",

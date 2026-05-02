@@ -1,6 +1,30 @@
 # ИЗВЕСТНЫЕ БАГИ
 
-**Дата последнего обновления:** апрель 2026 (**task58**: Authors UI переведён на ISO-select для `country` с автосинхронизацией `country_full`; устранён UX-корень проблемы `CA` vs `CANADA` в Projects; ранее **task55**, **task54**, **task53 E**, **task52**, **task50**, **task48**, **task47**, **taskco**, **task41**, **task40** — см. **`CURRENT_STATUS.md`**)
+**Дата последнего обновления:** май 2026 (**task51**: оптимизация egress к БД — **`GET /api/authors`**, React Query, **`PipelineContext.author`**; **Blueprint `hide_author_geo`**, commit **`f4ff8d8`**; ранее **task60**: security hardening auth/CORS/SSRF/bulk CSV + non-root Docker и CI lint/typecheck/audit; **task59**, **task58**, **task55**, **task54**, **task53 E**, **task52**, **task50** (pipeline follow-up), **task48**, **task47**, **taskco**, **task41**, **task40** — см. **`CURRENT_STATUS.md`**)
+
+---
+
+## ✅ Исправлено в task60 (26.04.2026)
+
+### API мог стартовать без реальной auth-защиты при пустом `API_KEY`
+**Было:** при `API_KEY=""` зависимость в `app/api/deps.py` фактически отключала проверку `X-API-Key`.  
+**Сделано:** добавлен `AUTH_DISABLED` (только CI/local), валидатор `API_KEY` в `app/config.py`, warning в `lifespan` при bypass-режиме.
+
+### Риск SSRF в `POST /api/tasks/fetch-url-meta` и `upload_from_url`
+**Было:** backend делал `requests.get` на пользовательский URL без блокировки private/loopback диапазонов.  
+**Сделано:** `app/utils/url_safety.py` + проверки в `tasks.py`, `scraper.py`, `image_hosting.py`; запрещены небезопасные схемы/хосты/адреса.
+
+### Bulk CSV можно было загрузить без лимитов
+**Было:** `await file.read()` без ограничения размера и числа строк.  
+**Сделано:** лимит 1 MiB, max 500 строк, проверка обязательных колонок и UTF-8/content-type в `app/api/tasks.py`.
+
+---
+
+## ✅ Исправлено в task59 (26.04.2026)
+
+### `PendingRollbackError: Can't reconnect until invalid transaction is rolled back` после длинного LLM-шага
+**Было:** прогресс-колбэки **`generate_text`** вызывали **`add_log`** → **`commit()`**; при **`expire_on_commit=True`** (дефолт) атрибуты **`Task`** истекали; следующий доступ к JSONB через lazy-load мог выполнить **`SELECT`** по уже оборванному TCP (**`OperationalError: SSL SYSCALL error: EOF detected`**). Сессия оставалась без **`rollback()`**, следующие **`add_log`** (в т.ч. в retry-handler **`runner`**) давали **`PendingRollbackError`** и сообщение «Page … FAILED» в логе проекта.  
+**Сделано:** **`expire_on_commit=False`** на **`SessionLocal`**, укороченный **`pool_recycle`** (**`DB_POOL_RECYCLE_SECONDS`**, default 60), TCP keepalives в **`connect_args`**; **`_safe_db`** в **`app/services/pipeline/llm_client.py`** для колбэков; **`rollback`** перед **`LLMError`** / **`InsufficientCreditsError`**; **`rollback`** перед retry-**`add_log`** в **`app/services/pipeline/runner.py`**; **`rollback`** в **`except`** в **`process_project_page`** и **`process_generation_task`** (**`app/workers/tasks.py`**). Регрессия: **`tests/services/test_llm_client_callback_db.py`**. Подробности — **`docs/CURRENT_STATUS.md`**, раздел **«task59»**, коммит **`0b46eb5`**.
 
 ---
 
@@ -73,6 +97,10 @@
 ### В финальном HTML отсутствовал блок «Об авторе»
 **Было:** данные автора использовались в контексте LLM, но не попадали в итоговый документ для публикации/экспорта.  
 **Сделано (20.04.2026, task40):** добавлен `render_author_footer()` и инъекция блока `<section class="author-info">` в конец `<body>` на этапе сборки `GeneratedArticle.full_page_html` (single task + project pages). Также добавлено поле `authors.country_full` (миграция `u8v9w0x1y2zc`, API, UI AuthorsPage).
+
+### Гео автора в футере на мультиязычных страницах (визуальный диссонанс)
+**Было:** в футере всегда выводились «Страна» / «Код страны» / «Город» из профиля автора; на странице на другом языке это выглядело нелогично (например, канадский автор и португальский текст), хотя в LLM-промпты страна автора не подмешивается.  
+**Сделано (01.05.2026, `task50.md`, commit `f4ff8d8`):** на **`blueprint_pages`** флаг **`hide_author_geo`** (default `false`, миграция **`y1z2a3b4c5d6`**); **`render_author_footer(author, hide_geo=True)`** скрывает только эти три поля; **`assembly`** читает флаг из **`ctx.blueprint_page`**; в UI **BlueprintsPage** — чекбокс при добавлении/редактировании страницы blueprint. Подробности — **`CURRENT_STATUS.md`**, раздел **«Май 2026 — Blueprint: per-page `hide_author_geo`»**.
 
 ### Обязательный Target Site при создании проекта (нужна только разметка)
 **Было:** поле **Target Site** было обязательным на фронте и в схеме API; **`site_id` NOT NULL** в БД не позволял создать проект без сайта, хотя **`use_site_template=false`** уже отключал обёртку.  

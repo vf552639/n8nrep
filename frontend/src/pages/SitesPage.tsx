@@ -9,6 +9,7 @@ import { ReactTable } from "@/components/common/ReactTable";
 import { Plus, Globe, X, Trash2 } from "lucide-react";
 import { normalizeLanguageDisplay } from "@/lib/languageDisplay";
 import { formatApiErrorDetail } from "@/lib/apiErrorMessage";
+import { authorsLightListQueryOptions } from "@/api/authors";
 
 type SiteDeleteConflictDetail = {
   message?: string;
@@ -219,10 +220,7 @@ export default function SitesPage() {
 
 function CreateSiteModal({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
-  const { data: authors } = useQuery({
-    queryKey: ["authors"],
-    queryFn: () => import("@/api/authors").then((m) => m.authorsApi.getAll()),
-  });
+  const { data: authors } = useQuery(authorsLightListQueryOptions());
 
   const { data: tplList } = useQuery({
     queryKey: ["html-templates"],

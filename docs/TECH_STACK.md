@@ -6,7 +6,8 @@
 - Асинхронный REST API фреймворк
 - Авто-документация Swagger на /docs
 - Dependency Injection для DB sessions и auth
-- **`app/main.py`**: глобальный обработчик необработанных исключений → ответ **500** всегда **`application/json`** с полем **`detail`** (и **`path`/`method`**), чтобы фронт не получал **`text/plain` «Internal Server Error»** и не показывал ложный «Network Error»; при старте через **`lifespan`** — **`verify_migrations()`** (сравнение ревизии БД с head Alembic, см. **`docs/CURRENT_STATUS.md`**, **16.04.2026**); инициализация логирования через **`app/logging_config.configure_logging`** (**`LOG_JSON`**, **`LOG_LEVEL`** из **`app/config.py`**, см. **`docs/CURRENT_STATUS.md`**, **19.04.2026 — Этап 1**)
+- **`app/main.py`**: глобальный обработчик необработанных исключений → ответ **500** всегда **`application/json`** с полем **`detail`** (и **`path`/`method`**), чтобы фронт не получал **`text/plain` «Internal Server Error»** и не показывал ложный «Network Error»; при старте через **`lifespan`** — **`verify_migrations()`** (сравнение ревизии БД с head Alembic, см. **`docs/CURRENT_STATUS.md`**, **16.04.2026**); инициализация логирования через **`app/logging_config.configure_logging`** (**`LOG_JSON`**, **`LOG_LEVEL`** из **`app/config.py`**, см. **`docs/CURRENT_STATUS.md`**, **19.04.2026 — Этап 1**); **task60**: warning при `AUTH_DISABLED=true`, safe CORS (`allow_credentials=false` при wildcard origins), базовые security headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`)
+- **`GET /api/authors/`** (**task51**, май 2026): по умолчанию лёгкий список без тяжёлых Text-полей, параметры **`limit`** (≤500), **`offset`**, **`full`**; кэш ответа **60 с** с инвалидацией при мутациях; см. **`docs/CURRENT_STATUS.md`**, **«Май 2026 — task51»**
 
 **Python** (3.12)
 - Основной язык backend и pipeline
@@ -15,7 +16,7 @@
 **SQLAlchemy** (v2.0.25+)
 - ORM для работы с PostgreSQL
 - Модели с UUID PK, JSONB полями, ENUM types
-- **`app/database.py` — `engine`**: **`pool_pre_ping`**, **`pool_recycle=300`**, **`pool_size` / `max_overflow` / `pool_timeout`**, **`connect_args`** с **`statement_timeout=600000`** (мс, 10 мин) на сессию — тяжёлые **`UPDATE`** с **`step_results`** не обрываются преждевременно (ранее **60000** мс давали **`OperationalError`** на длинных страницах проекта; см. **`docs/CURRENT_STATUS.md`**, **task53 E**, коммит **`e441738`**); меньше «зависших» соединений и **`idle in transaction`** на стороне Supavisor; зависимость **`get_db()`** делает **`rollback()`** при исключении после **`yield`** перед **`close()`**; опционально **`db_session()`** для commit/rollback вне FastAPI
+- **`app/database.py` — `engine`**: **`pool_pre_ping`**, **`pool_recycle=settings.DB_POOL_RECYCLE_SECONDS`** (по умолчанию **60**, env **`DB_POOL_RECYCLE_SECONDS`** — **task59**), **`pool_size` / `max_overflow` / `pool_timeout`** (**10 с после task60**), **`connect_args`**: **`statement_timeout=600000`** (мс, 10 мин, **task53 E**) и TCP **keepalives** (**`keepalives_idle=30`** и др., **task59**) — снижение обрывов при долгом LLM без трафика к БД; **`SessionLocal`**: **`expire_on_commit=False`** (**task59**) — после **`commit()`** в колбэках пайплайна атрибуты **`Task`** не истекают, меньше случайных lazy-**`SELECT`** по уже закрытому соединению; зависимость **`get_db()`** делает **`rollback()`** при исключении после **`yield`** перед **`close()`**; опционально **`db_session()`** для commit/rollback вне FastAPI
 
 **Alembic** (v1.13.1+)
 - Миграции БД
@@ -26,6 +27,7 @@
 **Pydantic** (v2.6.1+) + **Pydantic Settings** (v2.2.1+)
 - Валидация данных в API endpoints
 - Загрузка конфигурации из .env
+- **task60:** `AUTH_DISABLED` (только CI/local), `OPENROUTER_HTTP_REFERER`; валидация `API_KEY` при `AUTH_DISABLED=false`
 - **Request/response-схемы** вынесены в **`app/schemas/`** (апрель 2026, **19.04**, task36); роутеры **`app/api/`** импортируют модели (**`app/api/tasks.py`** — только **`from app.schemas.task import ...`**, без inline **`BaseModel`**, **22.04.2026** — см. **`docs/CURRENT_STATUS.md`**, **«22 апреля 2026 — Этап 1: доводка»**)
 
 **Инструментарий разработки** (**`requirements-dev.txt`**, **апрель 2026**): pytest, pytest-asyncio, pytest-cov, httpx, factory-boy, freezegun, ruff, pre-commit; корневая конфигурация — **`pyproject.toml`**. В CI (**taskco, 22.04.2026**) включены **`ruff check app tests`**, **`ruff format --check app tests`** и порог покрытия **`pytest --cov-fail-under=55`** (см. **`.github/workflows/ci.yml`**); перед **`pytest`** на workflow накатывается **`alembic upgrade head`** на тестовую БД. **`pyproject.toml`**: глобальные игнорирования `B008` (FastAPI Depends), `RUF001`/`RUF002` (русский unicode), `SIM`-стиль; per-file-ignore `F403`/`F405` для `pipeline.py`; секция `[tool.coverage.report]` (`skip_empty`, `exclude_lines`). Taskco §5 (22.04): исправлено **1060** legacy ruff-нарушений в `app/` и `tests/` (347 авто-fix + 39 ручных).
@@ -34,7 +36,8 @@
 - **`app/logging_config.py`** — structlog + stdlib logging; файл **`logs/app.log`** остаётся текстовым для **`/api/logs`**
 - **`app/workers/celery_app.py`** — сигнал **`worker_process_init`** → **`logs/worker.log`**
 - **`app/services/pipeline/persistence.py`** — `add_log()` формирует события через **`LogEvent`** + **`append_log_event`** (taskco, 22.04.2026; после удаления `app/services/_pipeline_legacy.py`)
-- **`app/services/pipeline/runner.py`** — per-step wall-clock: **`ThreadPoolExecutor`** + **`future.result(timeout)`** → **`StepTimeoutError`** (вместо SIGALRM, **task52**); **`ctx.step_deadline`** для лимита exclude-retry в **`llm_client.call_agent_with_exclude_validation`**
+- **`app/services/pipeline/runner.py`** — per-step wall-clock: **`ThreadPoolExecutor`** + **`future.result(timeout)`** → **`StepTimeoutError`** (вместо SIGALRM, **task52**); **`ctx.step_deadline`** для лимита exclude-retry в **`llm_client.call_agent_with_exclude_validation`**; перед **`add_log`** при step-retry по **`retryable_errors`** — **`db.rollback()`** (**task59**)
+- **`app/services/pipeline/llm_client.py`** — колбэки прогресса LLM и heartbeat обёрнуты в **`_safe_db`** (ошибка БД → **`rollback()`** + structlog **`call_agent_suppressed_callback_db_error`**, без прерывания **`generate_text`**); перед **`raise LLMError` / `InsufficientCreditsError`** — **`rollback()`** (**task59**)
 - **`app/api/tasks.py`** / **`app/api/projects.py`** — чтение JSONB полей через **`read_log_events`** / **`read_step_results`**
 
 **python-docx** (v1.1+)
@@ -51,7 +54,9 @@
 
 **Мета из `meta_generation`** — `app/services/meta_parser.py`: **`extract_meta_from_parsed`**, **`meta_variant_list`** (ключи **`results`** / **`variants`** без учёта регистра, case-insensitive поля); тесты **`tests/test_meta_parser.py`**.
 
-**Full-page HTML, meta в `<head>` и блок автора (task40, 20.04)** — `app/services/template_engine.py`: **`ensure_head_meta`**, **`render_author_footer`**; при финальной сборке статьи **`pipeline`** всегда вызывает **`ensure_head_meta`** после **`generate_full_page`** и при необходимости вставляет author-footer перед **`</body>`**; **`site_builder`** логирует предупреждение при пустом **`full_page_html`** и fallback на **`html_content`**; см. **`docs/CURRENT_STATUS.md`**, **«20 апреля 2026 — task40»**; unit-тесты — **`tests/services/test_template_engine.py`**.
+**Full-page HTML, meta в `<head>` и блок автора (task40, 20.04; доп. май 2026 `hide_author_geo`)** — `app/services/template_engine.py`: **`ensure_head_meta`**, **`render_author_footer(author, *, hide_geo=False)`**; при финальной сборке статьи **`assembly.finalize_article`** всегда вызывает **`ensure_head_meta`** после **`generate_full_page`** и при необходимости вставляет author-footer перед **`</body>`**; если у задачи есть **`blueprint_page`** и **`hide_author_geo=true`**, в футере не рендерятся «Страна» / «Код страны» / «Город» (поле на **`blueprint_pages`**, миграция **`y1z2a3b4c5d6`**, commit **`f4ff8d8`**); **`site_builder`** логирует предупреждение при пустом **`full_page_html`** и fallback на **`html_content`**; см. **`docs/CURRENT_STATUS.md`**, **«20 апреля 2026 — task40»** и **«Май 2026 — Blueprint: per-page `hide_author_geo`»**; unit-тесты — **`tests/services/test_template_engine.py`**.
+
+**`PipelineContext.author` (task51, май 2026)** — при создании **`PipelineContext`** один раз загружается модель **`Author`** для **`task.author_id`**; **`template_vars.setup_template_vars`** и **`assembly._apply_author_footer`** используют **`ctx.author`** вместо повторных запросов к БД в одном прогоне пайплайна — см. **`docs/CURRENT_STATUS.md`**, **«Май 2026 — task51»**.
 
 ## База данных
 
@@ -93,6 +98,7 @@ tasks (**`status`**: enum PostgreSQL **`task_status`** — **`pending`**, **`pro
 - Ретраи внутри **`generate_text`**: **`max_retries=2`**; backoff для 502/504/timeout: **5 с**, **10 с** (rate-limit по-прежнему 60/120/180 с)
 - **task54 (24.04.2026):** отдельная ветка для **OpenRouter 402** — если в ошибке есть `can only afford N`, `max_tokens` адаптивно снижается и запрос повторяется без sleep; если кейс неразрешим, кидается **`InsufficientCreditsError`** (fail-fast, без бессмысленных повторов)
 - **task55 (24.04.2026):** exclude-words retry больше не дублируется в upstream-шагах (`primary_generation*`, `improver`, `primary_generation_legal`) и остаётся только в `final_editing` (через `call_agent_with_exclude_validation` + финальный `remove_violations`)
+- **task60 (26.04.2026):** `print` в `generate_text` заменён на logger; `HTTP-Referer` вынесен в `OPENROUTER_HTTP_REFERER`
 - OpenRouter fallback routing: при **`LLM_MODEL_FALLBACKS`** вида **`primary=fb1|fb2`** в запрос добавляется **`extra_body={"models": [primary, fb1, fb2]}`** (дедуп primary в хвосте)
 - Параметр **`max_tokens`**: из записи промпта (**`prompts.max_tokens`**) передаётся в Chat Completions, если в БД задано **положительное** значение; **`NULL`** или отсутствие параметра — дефолт модели на стороне OpenRouter
 - Sampling: **`temperature`** в запросе всегда; **`frequency_penalty`**, **`presence_penalty`**, **`top_p`** добавляются в **`chat.completions.create`** только если заданы (через **`llm_sampling_kwargs_from_prompt`** при **`_*_enabled`** — см. **`docs/CURRENT_STATUS.md`**, **8.04.2026**)
@@ -134,6 +140,7 @@ tasks (**`status`**: enum PostgreSQL **`task_status`** — **`pending`**, **`pro
 **Requests** (v2.31.0+)
 - HTTP-клиент для всех внешних API
 - ThreadPoolExecutor для параллельного скрапинга (до 10 потоков)
+- task60: URL-фетчи, идущие от пользовательского ввода, проходят SSRF-валидацию через `app/utils/url_safety.py` (блок private/loopback/link-local/reserved адресов, небезопасных схем и non-80/443 портов)
 
 **SERP cache настройки**
 - `SERP_CACHE_ENABLED` — kill-switch кэш-слоя
@@ -173,6 +180,7 @@ tasks (**`status`**: enum PostgreSQL **`task_status`** — **`pending`**, **`pro
 
 **Docker** + **docker-compose** (v3.8)
 - 5 сервисов: web, worker, beat, redis, frontend (React/Vite, порт **3000**)
+- task60: runtime-контейнеры запускаются non-root (`USER appuser` для backend-образа, `USER node` для frontend-образа)
 - Health checks для web, worker, redis
 - Volumes: для **web / worker / beat** в типичном compose смонтирован **`.:/app`** — исполняется **код с хоста**; пересборка образа не подменяет Python без обновления файлов на диске. Сервис **frontend** статику собирает **в образе** — после смены React/TS нужны **`docker compose build --no-cache frontend`** и **`docker compose up -d --force-recreate frontend`** (только **`--build`** иногда оставляет старые слои кэша Docker); затем жёсткое обновление страницы или инкогнито (кэш **`index.html`**).
 - Проверка содержимого образа: **`docker compose exec frontend sh -c 'grep -l "Use site HTML template" /app/dist/assets/*.js'`**; ленивые страницы — отдельные чанки (**`ProjectsPage-*.js`** и т.д.).
