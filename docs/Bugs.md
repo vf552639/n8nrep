@@ -230,3 +230,16 @@
 ### ~~BUG-015: Белый экран после «Start Project» (422 + React #31)~~ ✅ ИСПРАВЛЕНО
 **Описание:** (1) Форма **New Project** отправляла **`site_id`**, бэкенд ожидает **`target_site`** → **422 Unprocessable Entity**. (2) Глобальный Axios interceptor передавал в **`toast.error`** значение **`response.data.detail`** как есть; при ошибке валидации FastAPI это **массив объектов** — **react-hot-toast** пытался отрендерить его как React child → **React error #31**, белый экран без Error Boundary. (3) В **`GET /api/projects`** не было поля **`progress`**, таблица на списке проектов опиралась на него.
 **Исправление:** Маппинг **`target_site`** в **`ProjectsPage.tsx`**; тип **`SiteProjectCreatePayload`** и **`projectsApi.create`** с **`skipErrorToast`**; **`formatApiErrorDetail`** в **`frontend/src/lib/apiErrorMessage.ts`** + использование в **`client.ts`** interceptor; **`onError`** мутации создаёт строку для toast; **`progress`** в **`get_projects`** (`app/api/projects.py`); **`RouteErrorBoundary`** вокруг **`Routes`** в **`App.tsx`**. Подробности: **`docs/CURRENT_STATUS.md`**, раздел **30 марта 2026 — Projects…**.
+
+---
+
+### Известные ограничения
+
+Перенесено из **`docs/CURRENT_STATUS.md`** (раздел «Известные проблемы», май 2026). Это не регистрации BUG-NNN, а текущие системные ограничения; частично пересекаются с бэклогом Quality Gate / Fallback в **`Roadmap.md`**.
+
+- [ ] Pipeline не валидирует вывод LLM — мусор или обрезанный ответ передаётся дальше (→ Quality Gate)
+- [ ] При падении модели весь пайплайн падает — нет полноценного fallback на другую модель *(частично: **`LLM_MODEL_FALLBACKS`** / OpenRouter — см. **task52**)*
+- [ ] Settings API пишет напрямую в `.env` — требует ручного рестарта контейнеров для применения
+- [x] ~~Нет endpoint для правки статей~~ — реализовано **`PATCH /api/articles/{id}`** + UI на **`ArticleDetailPage`** (апрель 2026)
+- [ ] Alembic миграции содержат `pass` в некоторых upgrade/downgrade (пустые миграции)
+- [ ] cost tracking может быть неточным — если в сыром JSON нет **`usage.cost`** и нет **`x-openrouter-cost`**, используется грубая оценка по токенам (см. **`docs/changelog/2026-04-llm-cost-tokens-from-raw.md`** и **`CURRENT_STATUS`**, раздел **`llm.py`: стоимость…**)

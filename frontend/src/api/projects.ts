@@ -38,6 +38,40 @@ export interface SiteProjectCreatePayload {
   competitor_urls?: string[];
 }
 
+/** Matches backend `SiteProjectDraftCreate` — only `name` is required. */
+export interface SiteProjectDraftPayload {
+  name: string;
+  blueprint_id?: string | null;
+  seed_keyword?: string | null;
+  seed_is_brand?: boolean;
+  target_site?: string | null;
+  country?: string | null;
+  language?: string | null;
+  author_id?: number | null;
+  serp_config?: SiteProjectCreatePayload["serp_config"];
+  project_keywords?: SiteProjectCreatePayload["project_keywords"];
+  legal_template_map?: Record<string, string>;
+  use_site_template?: boolean;
+  competitor_urls?: string[];
+}
+
+/** Matches backend `SiteProjectUpdate` — all fields optional (PATCH). */
+export type SiteProjectUpdatePayload = Partial<Omit<SiteProjectDraftPayload, "name">> & {
+  name?: string;
+};
+
+export interface ProjectDraftResponse {
+  id: string;
+  status: string;
+}
+
+export interface ProjectLaunchResponse {
+  id: string;
+  status: string;
+  celery_task_id: string;
+  serp_warning?: string | null;
+}
+
 export interface ClusterKeywordsResult {
   clustered: Record<
     string,
@@ -76,6 +110,21 @@ export const projectsApi = {
       .post<ProjectCreateResponse>("/projects", data, {
         skipErrorToast: true,
       })
+      .then((res) => res.data),
+
+  saveDraft: (data: SiteProjectDraftPayload) =>
+    api
+      .post<ProjectDraftResponse>("/projects/draft", data, { skipErrorToast: true })
+      .then((res) => res.data),
+
+  updateDraft: (id: string, data: SiteProjectUpdatePayload) =>
+    api
+      .patch<ProjectDraftResponse>(`/projects/${id}`, data, { skipErrorToast: true })
+      .then((res) => res.data),
+
+  launchDraft: (id: string) =>
+    api
+      .post<ProjectLaunchResponse>(`/projects/${id}/launch`, {}, { skipErrorToast: true })
       .then((res) => res.data),
 
   archiveProject: (id: string) =>

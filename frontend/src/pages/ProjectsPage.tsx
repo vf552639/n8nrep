@@ -7,6 +7,7 @@ import {
   projectsApi,
   type ClusterKeywordsResult,
   type SiteProjectCreatePayload,
+  type SiteProjectDraftPayload,
 } from "@/api/projects";
 import { formatApiErrorDetail } from "@/lib/apiErrorMessage";
 import { languageEquals, normalizeLanguageDisplay } from "@/lib/languageDisplay";
@@ -59,8 +60,26 @@ function parseUrls(raw: string): string[] {
     .slice(0, 50);
 }
 
+function validateRequiredForLaunch(formData: {
+  name: string;
+  blueprint_id: string;
+  site_id: string;
+  seed_keyword: string;
+  country: string;
+  language: string;
+  markup_only: boolean;
+}): string | null {
+  if (!formData.name.trim()) return "Project name is required";
+  if (!formData.blueprint_id) return "Blueprint is required";
+  if (!formData.seed_keyword.trim()) return "Seed keyword is required";
+  if (!formData.country || !formData.language) return "Country and language are required";
+  if (!formData.markup_only && !formData.site_id) return "Target site is required";
+  return null;
+}
+
 const STATUS_OPTIONS = [
   { value: "", label: "All statuses" },
+  { value: "draft", label: "Draft" },
   { value: "pending", label: "Pending" },
   { value: "generating", label: "Generating" },
   { value: "completed", label: "Completed" },
@@ -72,6 +91,7 @@ export default function ProjectsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [editDraftProject, setEditDraftProject] = useState<Project | null>(null);
   const [viewArchived, setViewArchived] = useState(false);
   const [statusFilter, setStatusFilter] = useState("");
   const [searchInput, setSearchInput] = useState("");
@@ -234,7 +254,7 @@ export default function ProjectsPage() {
         header: "Seed Keyword",
         cell: ({ row }: { row: { original: Project } }) => (
           <span className="text-slate-600 bg-slate-50 px-2 py-0.5 rounded border leading-tight">
-            {row.original.seed_keyword}
+            {row.original.seed_keyword?.trim() ? row.original.seed_keyword : "—"}
           </span>
         ),
       },
@@ -406,7 +426,10 @@ export default function ProjectsPage() {
             </p>
           </div>
           <button
-            onClick={() => setIsCreateOpen(true)}
+            onClick={() => {
+              setEditDraftProject(null);
+              setIsCreateOpen(true);
+            }}
             className="flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg transition-colors text-sm font-medium shadow-sm w-full sm:w-auto"
           >
             <Plus className="w-4 h-4" /> New Project
@@ -499,7 +522,14 @@ export default function ProjectsPage() {
         rowSelection={rowSelection}
         onRowSelectionChange={setRowSelection}
         getRowId={(row) => row.id}
-        onRowClick={(p: Project) => navigate(`/projects/${p.id}`)}
+        onRowClick={(p: Project) => {
+          if (p.status === "draft") {
+            setEditDraftProject(p);
+            setIsCreateOpen(true);
+          } else {
+            navigate(`/projects/${p.id}`);
+          }
+        }}
       />
 
       {forceDeleteModal && (
@@ -538,12 +568,32 @@ export default function ProjectsPage() {
         </div>
       )}
 
-      {isCreateOpen && <CreateProjectModal onClose={() => setIsCreateOpen(false)} />}
+      {isCreateOpen && (
+        <CreateProjectModal
+          key={editDraftProject?.id ?? "new"}
+          onClose={() => {
+            setIsCreateOpen(false);
+            setEditDraftProject(null);
+          }}
+          mode={editDraftProject ? "edit-draft" : "create"}
+          draftProject={editDraftProject ?? undefined}
+        />
+      )}
     </div>
   );
 }
 
-function CreateProjectModal({ onClose }: { onClose: () => void }) {
+type CreateProjectModalMode = "create" | "edit-draft";
+
+function CreateProjectModal({
+  onClose,
+  mode = "create",
+  draftProject,
+}: {
+  onClose: () => void;
+  mode?: CreateProjectModalMode;
+  draftProject?: Project;
+}) {
   const queryClient = useQueryClient();
   const [formData, setFormData] = useState({
     name: "",
@@ -567,6 +617,45 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [serpAdvancedOpen, setSerpAdvancedOpen] = useState(false);
   const [preview, setPreview] = useState<ProjectPreview | null>(null);
   const [clusterResult, setClusterResult] = useState<ClusterKeywordsResult | null>(null);
+
+  useEffect(() => {
+    if (mode !== "edit-draft" || !draftProject) return;
+    const p = draftProject;
+    const sc = (p.serp_config || {}) as Record<string, unknown>;
+    const rawKw = p.project_keywords?.raw;
+    const additionalKeywordsRaw = Array.isArray(rawKw) ? rawKw.join("\n") : "";
+    const comp = Array.isArray(p.competitor_urls) ? p.competitor_urls.join("\n") : "";
+    const ts = (p.target_site || "").trim();
+    const sid = (p.site_id || "").trim();
+    const markupOnly = !ts && !sid && p.use_site_template === false;
+    const depthNum = Number(sc.depth ?? 10);
+    const depth = [10, 20, 30, 50, 100].includes(depthNum) ? depthNum : 10;
+    setFormData({
+      name: p.name || "",
+      blueprint_id: p.blueprint_id || "",
+      site_id: ts || sid || "",
+      seed_keyword: p.seed_keyword || "",
+      seed_is_brand: Boolean(p.seed_is_brand),
+      country: (p.country || "").toUpperCase(),
+      language: p.language || "",
+      author_id: p.author_id != null && String(p.author_id) !== "" ? String(p.author_id) : "",
+      serp_engine: (sc.search_engine as "google" | "bing" | "google+bing") || "google",
+      serp_depth: depth,
+      serp_device: (sc.device as "mobile" | "desktop") || "mobile",
+      serp_os: (sc.os as "android" | "ios" | "windows" | "macos") || "android",
+      additional_keywords_raw: additionalKeywordsRaw,
+      competitor_urls_raw: comp,
+      legal_template_map:
+        p.legal_template_map && typeof p.legal_template_map === "object"
+          ? { ...(p.legal_template_map as Record<string, string>) }
+          : {},
+      use_site_template: p.use_site_template !== false,
+      markup_only: markupOnly,
+    });
+    setClusterResult(null);
+    setPreview(null);
+    // Intentionally key off id so refetches of the list do not reset the form while the modal stays open.
+  }, [mode, draftProject?.id]);
 
   const parsedKeywords = useMemo(
     () => parseKeywords(formData.additional_keywords_raw),
@@ -690,6 +779,60 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
     };
   };
 
+  const assembleExtras = () => {
+    const authorId =
+      formData.author_id && formData.author_id.trim() !== ""
+        ? Number(formData.author_id)
+        : undefined;
+    const serp = buildSerpConfig();
+    let project_keywords: SiteProjectCreatePayload["project_keywords"];
+    if (clusterResult && parsedKeywords.length > 0) {
+      project_keywords = {
+        raw: parsedKeywords,
+        clustered: clusterResult.clustered,
+        unassigned: clusterResult.unassigned,
+        clustering_model: clusterResult.model,
+        clustering_cost: clusterResult.cost,
+      };
+    } else if (parsedKeywords.length > 0) {
+      project_keywords = { raw: parsedKeywords };
+    } else {
+      project_keywords = undefined;
+    }
+    const ltmRaw = formData.legal_template_map || {};
+    const legal_template_map = Object.fromEntries(
+      Object.entries(ltmRaw).filter(([, templateId]) => templateId && String(templateId).trim())
+    );
+    const hasLegal = Object.keys(legal_template_map).length > 0;
+    return {
+      authorId,
+      serp,
+      project_keywords,
+      legal_template_map: hasLegal ? legal_template_map : undefined,
+      competitor_urls: parsedCompetitorUrls.length > 0 ? parsedCompetitorUrls : undefined,
+    };
+  };
+
+  const buildDraftPayload = (): SiteProjectDraftPayload => {
+    const { authorId, serp, project_keywords, legal_template_map, competitor_urls } =
+      assembleExtras();
+    return {
+      name: formData.name.trim(),
+      blueprint_id: formData.blueprint_id || null,
+      seed_keyword: formData.seed_keyword || null,
+      seed_is_brand: formData.seed_is_brand,
+      target_site: formData.markup_only ? null : formData.site_id || null,
+      country: formData.country || null,
+      language: formData.language || null,
+      author_id: authorId != null && !Number.isNaN(authorId) ? authorId : null,
+      ...(serp ? { serp_config: serp } : {}),
+      ...(project_keywords ? { project_keywords } : {}),
+      ...(legal_template_map ? { legal_template_map } : {}),
+      use_site_template: formData.markup_only ? false : formData.use_site_template,
+      ...(competitor_urls ? { competitor_urls } : {}),
+    };
+  };
+
   const previewMutation = useMutation({
     mutationFn: () => {
       const authorId =
@@ -778,50 +921,80 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
     },
   });
 
+  const saveDraftMutation = useMutation({
+    mutationFn: async () => {
+      const payload = buildDraftPayload();
+      if (!payload.name.trim()) {
+        throw new Error("Project name is required to save a draft");
+      }
+      if (mode === "edit-draft" && draftProject) {
+        return projectsApi.updateDraft(draftProject.id, payload);
+      }
+      return projectsApi.saveDraft(payload);
+    },
+    onSuccess: () => {
+      toast.success("Draft saved");
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      onClose();
+    },
+    onError: (error: unknown) => {
+      const ax = error as {
+        response?: { data?: { detail?: unknown } };
+        message?: string;
+      };
+      const msg =
+        (error instanceof Error && error.message) ||
+        formatApiErrorDetail(ax.response?.data?.detail) ||
+        ax.message ||
+        "Failed to save draft";
+      toast.error(msg);
+    },
+  });
+
+  const launchMutation = useMutation({
+    mutationFn: async () => {
+      const msg = validateRequiredForLaunch(formData);
+      if (msg) throw new Error(msg);
+      if (!draftProject) throw new Error("Missing draft");
+      return projectsApi.launchDraft(draftProject.id);
+    },
+    onSuccess: (data) => {
+      toast.success("Project launched");
+      if (data?.serp_warning) {
+        toast(data.serp_warning, { icon: "⚠️", duration: 8000 });
+      }
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      onClose();
+    },
+    onError: (error: unknown) => {
+      const ax = error as {
+        response?: { data?: { detail?: unknown } };
+        message?: string;
+      };
+      const msg =
+        (error instanceof Error && error.message) ||
+        formatApiErrorDetail(ax.response?.data?.detail) ||
+        ax.message ||
+        "Launch failed";
+      toast.error(msg);
+    },
+  });
+
+  const footerActionPending =
+    mutation.isPending || saveDraftMutation.isPending || launchMutation.isPending;
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const needSite = !formData.markup_only;
-    if (
-      !formData.name ||
-      !formData.blueprint_id ||
-      (needSite && !formData.site_id) ||
-      !formData.seed_keyword ||
-      !formData.country ||
-      !formData.language
-    ) {
-      toast.error(
-        needSite
-          ? "Please fill in all required fields (Name, Blueprint, Site, Seed Keyword, Country, Language)"
-          : "Please fill in all required fields (Name, Blueprint, Seed Keyword, Country, Language)"
-      );
+    if (mode === "edit-draft") {
       return;
     }
-    const authorId =
-      formData.author_id && formData.author_id.trim() !== ""
-        ? Number(formData.author_id)
-        : undefined;
-    const serp = buildSerpConfig();
-
-    let project_keywords: SiteProjectCreatePayload["project_keywords"];
-    if (clusterResult && parsedKeywords.length > 0) {
-      project_keywords = {
-        raw: parsedKeywords,
-        clustered: clusterResult.clustered,
-        unassigned: clusterResult.unassigned,
-        clustering_model: clusterResult.model,
-        clustering_cost: clusterResult.cost,
-      };
-    } else if (parsedKeywords.length > 0) {
-      project_keywords = { raw: parsedKeywords };
-    } else {
-      project_keywords = undefined;
+    const err = validateRequiredForLaunch(formData);
+    if (err) {
+      toast.error(err);
+      return;
     }
-
-    const ltmRaw = formData.legal_template_map || {};
-    const legal_template_map = Object.fromEntries(
-      Object.entries(ltmRaw).filter(([, templateId]) => templateId && String(templateId).trim())
-    );
-    const hasLegal = Object.keys(legal_template_map).length > 0;
+    const { authorId, serp, project_keywords, legal_template_map, competitor_urls } =
+      assembleExtras();
 
     mutation.mutate({
       name: formData.name,
@@ -834,9 +1007,9 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
       ...(authorId != null && !Number.isNaN(authorId) ? { author_id: authorId } : {}),
       ...(serp ? { serp_config: serp } : {}),
       ...(project_keywords ? { project_keywords } : {}),
-      ...(hasLegal ? { legal_template_map } : {}),
+      ...(legal_template_map ? { legal_template_map } : {}),
       use_site_template: formData.markup_only ? false : formData.use_site_template,
-      ...(parsedCompetitorUrls.length > 0 ? { competitor_urls: parsedCompetitorUrls } : {}),
+      ...(competitor_urls ? { competitor_urls } : {}),
     });
   };
 
@@ -859,7 +1032,9 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
         <div className="px-6 py-4 border-b bg-slate-50 flex justify-between items-center shrink-0">
-          <h2 className="text-lg font-bold text-slate-900">Create Generative Project</h2>
+          <h2 className="text-lg font-bold text-slate-900">
+            {mode === "edit-draft" ? "Edit Draft" : "Create Generative Project"}
+          </h2>
           <button onClick={onClose} className="p-1 hover:bg-slate-200 rounded text-slate-500">
             <X className="w-5 h-5" />
           </button>
@@ -1394,21 +1569,40 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
           </button>
           <button
             type="button"
-            disabled={!canPreview || previewMutation.isPending}
+            disabled={!formData.name.trim() || footerActionPending}
+            onClick={() => saveDraftMutation.mutate()}
+            className="px-4 py-2 border border-slate-300 bg-white text-slate-800 rounded-lg text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
+          >
+            {saveDraftMutation.isPending ? "Saving…" : "Save Draft"}
+          </button>
+          <button
+            type="button"
+            disabled={!canPreview || previewMutation.isPending || footerActionPending}
             onClick={() => previewMutation.mutate()}
             className="flex items-center gap-2 px-4 py-2 border border-slate-300 bg-white text-slate-800 rounded-lg text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
           >
             <Eye className="w-4 h-4" />
             {previewMutation.isPending ? "Loading…" : "Preview"}
           </button>
-          <button
-            type="submit"
-            form="create-project-form"
-            disabled={mutation.isPending}
-            className="px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 text-sm font-medium transition-colors shadow-sm disabled:opacity-50"
-          >
-            {mutation.isPending ? "Starting..." : "Start Project"}
-          </button>
+          {mode === "edit-draft" ? (
+            <button
+              type="button"
+              disabled={footerActionPending}
+              onClick={() => launchMutation.mutate()}
+              className="px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 text-sm font-medium transition-colors shadow-sm disabled:opacity-50"
+            >
+              {launchMutation.isPending ? "Launching…" : "Launch Project"}
+            </button>
+          ) : (
+            <button
+              type="submit"
+              form="create-project-form"
+              disabled={footerActionPending}
+              className="px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 text-sm font-medium transition-colors shadow-sm disabled:opacity-50"
+            >
+              {mutation.isPending ? "Starting..." : "Start Project"}
+            </button>
+          )}
         </div>
       </div>
     </div>

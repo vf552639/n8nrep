@@ -13,17 +13,22 @@ class SiteProject(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(300), nullable=False)
-    blueprint_id = Column(UUID(as_uuid=True), ForeignKey("site_blueprints.id"), nullable=False)
-    site_id = Column(UUID(as_uuid=True), ForeignKey("sites.id"), nullable=False)
-    seed_keyword = Column(String(500), nullable=False)
-    country = Column(String(10), nullable=False)
-    language = Column(String(10), nullable=False)
+    blueprint_id = Column(UUID(as_uuid=True), ForeignKey("site_blueprints.id"), nullable=True)
+    site_id = Column(UUID(as_uuid=True), ForeignKey("sites.id"), nullable=True)
+    seed_keyword = Column(String(500), nullable=True)
+    country = Column(String(10), nullable=True)
+    language = Column(String(10), nullable=True)
+    target_site = Column(
+        String(500),
+        nullable=True,
+        comment="Target site (UUID or domain) while draft; resolved at launch",
+    )
     seed_is_brand = Column(Boolean, default=False)
     author_id = Column(BigInteger, ForeignKey("authors.id"), nullable=True)
     status = Column(
         String(50),
         default="pending",
-        comment="pending | generating | awaiting_page_approval | completed | failed | stopped",
+        comment="pending | generating | awaiting_page_approval | completed | failed | stopped | draft",
     )
     current_page_index = Column(Integer, default=0)
     celery_task_id = Column(String(255), nullable=True, comment="Celery task ID для отладки")

@@ -29,6 +29,86 @@ def _validate_competitor_urls_value(v: Any) -> list[str]:
     return out
 
 
+class SiteProjectDraftCreate(BaseModel):
+    name: str
+    blueprint_id: str | None = None
+    seed_keyword: str | None = None
+    seed_is_brand: bool = False
+    target_site: str | None = None
+    country: str | None = None
+    language: str | None = None
+    author_id: int | None = None
+    serp_config: dict[str, Any] | None = None
+    project_keywords: dict[str, Any] | None = None
+    legal_template_map: dict[str, str] | None = None
+    use_site_template: bool = True
+    competitor_urls: list[str] | None = None
+
+    @field_validator("competitor_urls", mode="before")
+    @classmethod
+    def validate_competitor_urls_draft(cls, v: Any) -> list[str]:
+        return _validate_competitor_urls_value(v)
+
+    @field_validator("target_site", mode="before")
+    @classmethod
+    def normalize_target_site_draft(cls, v: Any) -> str | None:
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s if s else None
+
+    @field_validator("country")
+    @classmethod
+    def validate_country_draft(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip().upper()
+        if len(v) != 2 or not v.isalpha():
+            raise ValueError("Country must be a 2-letter ISO code (e.g. DE, FR, US)")
+        return v
+
+
+class SiteProjectUpdate(BaseModel):
+    name: str | None = None
+    blueprint_id: str | None = None
+    seed_keyword: str | None = None
+    seed_is_brand: bool | None = None
+    target_site: str | None = None
+    country: str | None = None
+    language: str | None = None
+    author_id: int | None = None
+    serp_config: dict[str, Any] | None = None
+    project_keywords: dict[str, Any] | None = None
+    legal_template_map: dict[str, str] | None = None
+    use_site_template: bool | None = None
+    competitor_urls: list[str] | None = None
+
+    @field_validator("competitor_urls", mode="before")
+    @classmethod
+    def validate_competitor_urls_update(cls, v: Any) -> list[str] | None:
+        if v is None:
+            return None
+        return _validate_competitor_urls_value(v)
+
+    @field_validator("target_site", mode="before")
+    @classmethod
+    def normalize_target_site_update(cls, v: Any) -> str | None:
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s if s else None
+
+    @field_validator("country")
+    @classmethod
+    def validate_country_update(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip().upper()
+        if len(v) != 2 or not v.isalpha():
+            raise ValueError("Country must be a 2-letter ISO code (e.g. DE, FR, US)")
+        return v
+
+
 class SiteProjectCreate(BaseModel):
     name: str
     blueprint_id: str
@@ -147,9 +227,9 @@ class SiteProjectResponse(BaseModel):
 
     id: str
     name: str
-    blueprint_id: str
-    site_id: str
-    seed_keyword: str
+    blueprint_id: str | None
+    site_id: str | None
+    seed_keyword: str | None
     seed_is_brand: bool
     status: str
     current_page_index: int

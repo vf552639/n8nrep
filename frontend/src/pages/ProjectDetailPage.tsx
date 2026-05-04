@@ -88,6 +88,11 @@ export default function ProjectDetailPage() {
     return () => clearInterval(t);
   }, [project?.status, project?.started_at, project?.generation_started_at]);
 
+  useEffect(() => {
+    if (!project || project.status !== "draft") return;
+    navigate("/projects", { replace: true });
+  }, [project, navigate]);
+
   const actionMutation = useMutation({
     mutationFn: (action: "stop" | "resume") => api.post(`/projects/${id}/${action}`),
     onSuccess: (_, action) => {
@@ -239,6 +244,9 @@ export default function ProjectDetailPage() {
 
   if (isLoading) return <div className="p-6 text-slate-500">Loading project...</div>;
   if (!project) return <div className="p-6 text-red-500">Project not found</div>;
+  if (project.status === "draft") {
+    return <div className="p-6 text-slate-600">Redirecting…</div>;
+  }
 
   const elapsedSec =
     (project.generation_started_at ?? project.started_at) != null
@@ -280,16 +288,18 @@ export default function ProjectDetailPage() {
           <div className="text-sm text-slate-500 mt-2 flex flex-wrap gap-x-4 gap-y-1">
             <span className="flex items-center gap-1">
               Blueprint:{" "}
-              <span className="font-semibold text-slate-700">{project.blueprint_id}</span>
+              <span className="font-semibold text-slate-700">
+                {project.blueprint_id ?? "—"}
+              </span>
             </span>
             <span className="flex items-center gap-1">
               Seed:{" "}
               <span className="font-semibold text-slate-700 bg-slate-100 px-2 rounded">
-                {project.seed_keyword}
+                {project.seed_keyword?.trim() ? project.seed_keyword : "—"}
               </span>
             </span>
             <span className="flex items-center gap-1">
-              Site: <span className="font-medium">{project.site_id}</span>
+              Site: <span className="font-medium">{project.site_id ?? "—"}</span>
             </span>
             <span className="flex items-center gap-1">
               GEO:{" "}

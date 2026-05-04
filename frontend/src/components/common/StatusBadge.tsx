@@ -15,6 +15,7 @@ interface Props {
 }
 
 const STATUS_COLORS: Record<string, string> = {
+  draft: "bg-slate-300 text-slate-800",
   pending: "bg-gray-200 text-gray-800",
   processing: "bg-blue-200 text-blue-800 animate-pulse",
   completed: "bg-green-200 text-green-800",
@@ -30,7 +31,11 @@ export default function StatusBadge({ status }: Props) {
   
   return (
     <span className={cn("px-2.5 py-0.5 rounded-full text-xs font-medium uppercase tracking-wider", colorClass)}>
-      {status.toLowerCase() === "awaiting_page_approval" ? "Awaiting Approval" : status}
+      {status.toLowerCase() === "awaiting_page_approval"
+        ? "Awaiting Approval"
+        : status.toLowerCase() === "draft"
+          ? "Draft"
+          : status}
     </span>
   );
 }

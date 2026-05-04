@@ -46,14 +46,23 @@ export interface ProjectPreview {
 export interface Project {
   id: string;
   name: string;
-  seed_keyword: string;
+  seed_keyword?: string | null;
   seed_is_brand?: boolean;
-  blueprint_id: string;
-  site_id: string;
-  country: string;
-  language: string;
-  author_id?: string;
-  status: "pending" | "generating" | "stopped" | "completed" | "failed" | "awaiting_page_approval";
+  blueprint_id?: string | null;
+  site_id?: string | null;
+  /** Draft: site UUID or domain string before launch (backend `target_site`). */
+  target_site?: string | null;
+  country?: string | null;
+  language?: string | null;
+  author_id?: number | string | null;
+  status:
+    | "draft"
+    | "pending"
+    | "generating"
+    | "stopped"
+    | "completed"
+    | "failed"
+    | "awaiting_page_approval";
   progress: number;
   error_log?: string | null;
   created_at: string;

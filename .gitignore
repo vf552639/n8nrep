@@ -27,6 +27,8 @@ __pycache__/
 logs/
 *.log
 
-# Docs
-docs/
+# Docs (ignore ad-hoc notes under docs/; versioned tree + changelog stay tracked)
+docs/*
+!docs/changelog/
+!docs/changelog/**
 frontend/node_modules

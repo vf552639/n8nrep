@@ -31,6 +31,8 @@ from app.schemas.project import (
     ProjectPreviewRequest,
     SiteProjectCloneBody,
     SiteProjectCreate,
+    SiteProjectDraftCreate,
+    SiteProjectUpdate,
 )
 from app.services.pipeline_presets import pipeline_steps_use_serp, resolve_pipeline_steps
 from app.services.site_utils import MARKUP_ONLY_SITE_KEY
@@ -305,8 +307,8 @@ def get_projects(
             {
                 "id": str(p.id),
                 "name": p.name,
-                "blueprint_id": str(p.blueprint_id),
-                "site_id": str(p.site_id),
+                "blueprint_id": str(p.blueprint_id) if p.blueprint_id else None,
+                "site_id": str(p.site_id) if p.site_id else None,
                 "seed_keyword": p.seed_keyword,
                 "seed_is_brand": getattr(p, "seed_is_brand", False),
                 "status": p.status,
@@ -320,13 +322,19 @@ def get_projects(
                 "is_archived": bool(getattr(p, "is_archived", False)),
                 "country": p.country,
                 "language": p.language,
+                "author_id": getattr(p, "author_id", None),
                 "total_tasks": total,
                 "completed_tasks": completed,
                 "failed_tasks": failed_n,
                 "total_cost": total_cost,
                 "serp_config": getattr(p, "serp_config", None) or {},
+                "project_keywords": getattr(p, "project_keywords", None),
+                "legal_template_map": p.legal_template_map
+                if isinstance(getattr(p, "legal_template_map", None), dict)
+                else {},
                 "use_site_template": bool(getattr(p, "use_site_template", True)),
                 "competitor_urls": list(getattr(p, "competitor_urls", None) or []),
+                "target_site": getattr(p, "target_site", None),
             }
         )
     return out
@@ -548,7 +556,7 @@ def create_project(project_in: SiteProjectCreate, db: Session = Depends(get_db))
             SiteProject.seed_keyword == project_in.seed_keyword,
             SiteProject.site_id == site.id,
             SiteProject.is_archived == False,  # noqa: E712
-            SiteProject.status.not_in(["failed"]),
+            SiteProject.status.not_in(["failed", "draft"]),
         )
         .first()
     )
@@ -642,6 +650,221 @@ def create_project(project_in: SiteProjectCreate, db: Session = Depends(get_db))
     return {
         "id": str(new_project.id),
         "status": "Project created and queued",
+        "serp_warning": serp_warning,
+    }
+
+
+def _blueprint_uuid_from_str(raw: str | None) -> uuid.UUID | None:
+    if raw is None or not str(raw).strip():
+        return None
+    try:
+        return uuid.UUID(str(raw).strip())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="Invalid blueprint_id") from e
+
+
+def _apply_site_project_update(project: SiteProject, payload: SiteProjectUpdate) -> None:
+    data = payload.model_dump(exclude_unset=True)
+    for key, val in data.items():
+        if key == "blueprint_id":
+            project.blueprint_id = _blueprint_uuid_from_str(val) if val is not None else None
+            continue
+        if key == "competitor_urls" and val is not None:
+            project.competitor_urls = list(val)
+            continue
+        if key == "serp_config":
+            project.serp_config = _validate_serp_config(val) if val is not None else {}
+            continue
+        setattr(project, key, val)
+
+
+@router.post("/draft")
+def create_project_draft(payload: SiteProjectDraftCreate, db: Session = Depends(get_db)):
+    bp_uuid = _blueprint_uuid_from_str(payload.blueprint_id)
+    if bp_uuid is not None:
+        if not db.query(SiteBlueprint).filter(SiteBlueprint.id == bp_uuid).first():
+            raise HTTPException(status_code=400, detail="Blueprint not found")
+
+    new_p = SiteProject(
+        name=payload.name,
+        blueprint_id=bp_uuid,
+        site_id=None,
+        target_site=payload.target_site,
+        seed_keyword=payload.seed_keyword,
+        country=payload.country,
+        language=payload.language,
+        author_id=payload.author_id,
+        seed_is_brand=payload.seed_is_brand,
+        status="draft",
+        serp_config=_validate_serp_config(payload.serp_config) if payload.serp_config is not None else {},
+        project_keywords=payload.project_keywords,
+        legal_template_map=payload.legal_template_map
+        if payload.legal_template_map is None or isinstance(payload.legal_template_map, dict)
+        else None,
+        use_site_template=bool(payload.use_site_template),
+        competitor_urls=list(payload.competitor_urls or []),
+    )
+    db.add(new_p)
+    db.commit()
+    db.refresh(new_p)
+    return {"id": str(new_p.id), "status": "draft"}
+
+
+@router.patch("/{id}")
+def update_project_draft(id: str, payload: SiteProjectUpdate, db: Session = Depends(get_db)):
+    try:
+        uid = uuid.UUID(str(id))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail="Project not found") from e
+    project = db.query(SiteProject).filter(SiteProject.id == uid).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.status != "draft":
+        raise HTTPException(status_code=400, detail="Only drafts can be edited")
+
+    data = payload.model_dump(exclude_unset=True)
+    if "blueprint_id" in data and data["blueprint_id"] is not None:
+        bp_uuid = _blueprint_uuid_from_str(data["blueprint_id"])
+        if bp_uuid is not None and not db.query(SiteBlueprint).filter(SiteBlueprint.id == bp_uuid).first():
+            raise HTTPException(status_code=400, detail="Blueprint not found")
+
+    _apply_site_project_update(project, payload)
+    db.commit()
+    db.refresh(project)
+    return {"id": str(project.id), "status": project.status}
+
+
+@router.post("/{id}/launch")
+def launch_project_draft(id: str, db: Session = Depends(get_db)):
+    try:
+        uid = uuid.UUID(str(id))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail="Project not found") from e
+    project = db.query(SiteProject).filter(SiteProject.id == uid).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.status != "draft":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Only drafts can be launched (current: {project.status})",
+        )
+
+    if not project.name or not project.name.strip():
+        raise HTTPException(status_code=400, detail="Project name is required")
+    if not project.blueprint_id:
+        raise HTTPException(status_code=400, detail="Blueprint is required")
+    if not project.seed_keyword or not str(project.seed_keyword).strip():
+        raise HTTPException(status_code=400, detail="Seed keyword is required")
+    if not project.country or not project.language:
+        raise HTTPException(status_code=400, detail="Country and language are required")
+
+    blueprint = db.query(SiteBlueprint).filter(SiteBlueprint.id == project.blueprint_id).first()
+    if not blueprint:
+        raise HTTPException(status_code=404, detail="Blueprint not found")
+
+    ts = (getattr(project, "target_site", None) or "").strip()
+    site, effective_use_site_template = _resolve_site_or_markup_only(
+        db,
+        ts if ts else None,
+        project.country,
+        project.language,
+        bool(getattr(project, "use_site_template", True)),
+    )
+
+    existing = (
+        db.query(SiteProject)
+        .filter(
+            SiteProject.blueprint_id == blueprint.id,
+            SiteProject.seed_keyword == project.seed_keyword,
+            SiteProject.site_id == site.id,
+            SiteProject.is_archived == False,  # noqa: E712
+            SiteProject.status.not_in(["failed", "draft"]),
+            SiteProject.id != project.id,
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": (
+                    f"Active project with same blueprint + seed + site already exists "
+                    f"(status: {existing.status})"
+                ),
+                "existing_project_id": str(existing.id),
+            },
+        )
+
+    serp_normalized: dict[str, Any] = {}
+    if getattr(project, "serp_config", None) is not None:
+        serp_normalized = _validate_serp_config(project.serp_config)
+
+    pk_val: dict[str, Any] | None = None
+    pk = getattr(project, "project_keywords", None)
+    if pk is not None and isinstance(pk, dict):
+        raw = pk.get("raw")
+        if isinstance(raw, list) and len(raw) > settings.MAX_PROJECT_KEYWORDS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Maximum {settings.MAX_PROJECT_KEYWORDS} keywords allowed",
+            )
+        pk_val = pk
+
+    final_author_id = project.author_id
+    if not final_author_id:
+        author = (
+            db.query(Author)
+            .filter(
+                func.lower(Author.country) == project.country.lower(),
+                func.lower(Author.language) == project.language.lower(),
+            )
+            .first()
+        )
+        if author:
+            final_author_id = author.id
+
+    ltm_norm = _validate_legal_template_map(db, project.legal_template_map)
+
+    _ensure_worker_available()
+
+    project.site_id = site.id
+    project.author_id = final_author_id
+    project.seed_is_brand = bool(getattr(project, "seed_is_brand", False))
+    project.status = "pending"
+    project.serp_config = serp_normalized or {}
+    project.project_keywords = pk_val
+    project.legal_template_map = ltm_norm
+    project.use_site_template = bool(effective_use_site_template)
+    project.target_site = None
+
+    db.commit()
+    db.refresh(project)
+
+    result = process_site_project.delay(str(project.id))
+    project.celery_task_id = result.id
+    db.commit()
+
+    serp_warning = None
+    try:
+        from app.services.serp import get_serp_health
+
+        health = get_serp_health()
+        if health.get("overall") == "error":
+            providers_down = [
+                k for k, v in health.items() if isinstance(v, dict) and v.get("status") == "error"
+            ]
+            serp_warning = (
+                f"SERP providers may be unavailable: {', '.join(providers_down)}. Some pages may fail."
+            )
+        elif health.get("overall") == "unconfigured":
+            serp_warning = "No SERP providers configured. Pages with use_serp=true will fail."
+    except Exception:
+        pass
+
+    return {
+        "id": str(project.id),
+        "status": "Project queued",
+        "celery_task_id": result.id,
         "serp_warning": serp_warning,
     }
 
@@ -845,10 +1068,14 @@ def get_project_details(id: str, db: Session = Depends(get_db)):
     progress_pct = round((completed_tasks / total_tasks) * 100) if total_tasks > 0 else 0
 
     blueprint_page_count = (
-        db.query(func.count(BlueprintPage.id))
-        .filter(BlueprintPage.blueprint_id == project.blueprint_id)
-        .scalar()
-        or 0
+        (
+            db.query(func.count(BlueprintPage.id))
+            .filter(BlueprintPage.blueprint_id == project.blueprint_id)
+            .scalar()
+            or 0
+        )
+        if project.blueprint_id
+        else 0
     )
     extras = _project_detail_extras(project, tasks, int(blueprint_page_count))
     log_events = [
@@ -858,9 +1085,10 @@ def get_project_details(id: str, db: Session = Depends(get_db)):
     return {
         "id": str(project.id),
         "name": project.name,
-        "blueprint_id": str(project.blueprint_id),
-        "site_id": str(project.site_id),
+        "blueprint_id": str(project.blueprint_id) if project.blueprint_id else None,
+        "site_id": str(project.site_id) if project.site_id else None,
         "seed_keyword": project.seed_keyword,
+        "target_site": getattr(project, "target_site", None),
         "seed_is_brand": bool(getattr(project, "seed_is_brand", False)),
         "status": project.status,
         "current_page_index": project.current_page_index,
@@ -944,6 +1172,11 @@ def clone_project(id: str, body: SiteProjectCloneBody, db: Session = Depends(get
             db, body.target_site, country, language, default_ust
         )
     else:
+        if not src.site_id:
+            raise HTTPException(
+                status_code=400,
+                detail="target_site is required when cloning a draft or site-less project",
+            )
         site = db.query(Site).filter(Site.id == src.site_id).first()
         if not site:
             raise HTTPException(status_code=404, detail="Site not found for project")
@@ -977,7 +1210,7 @@ def clone_project(id: str, body: SiteProjectCloneBody, db: Session = Depends(get
             SiteProject.seed_keyword == seed_keyword,
             SiteProject.site_id == site.id,
             SiteProject.is_archived == False,  # noqa: E712
-            SiteProject.status.not_in(["failed"]),
+            SiteProject.status.not_in(["failed", "draft"]),
         )
         .first()
     )
