@@ -10,6 +10,7 @@ import {
   DEFAULT_FULL_PIPELINE_STEPS,
   normalizeCustomPipelineSteps,
 } from "@/lib/pipelineSteps";
+import { formatApiErrorDetail } from "@/lib/apiErrorMessage";
 import { ChevronDown, ChevronRight, LayoutTemplate, Pencil, Plus, Trash2, X } from "lucide-react";
 
 const PIPELINE_PRESET_LABEL: Record<PipelinePreset, string> = {
@@ -151,7 +152,12 @@ function CreateBlueprintModal({
       }
       onClose();
     },
-    onError: () => toast.error("Failed to create blueprint")
+    onError: (error: unknown) => {
+      const ax = error as { response?: { data?: { detail?: unknown } }; message?: string };
+      toast.error(
+        formatApiErrorDetail(ax.response?.data?.detail) || ax.message || "Failed to create blueprint"
+      );
+    },
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -239,7 +245,12 @@ function BlueprintPagesPanel({ blueprintId }: { blueprintId: string }) {
       toast.success("Page deleted");
       queryClient.invalidateQueries({ queryKey: ["blueprint-pages", blueprintId] });
     },
-    onError: () => toast.error("Failed to delete page"),
+    onError: (error: unknown) => {
+      const ax = error as { response?: { data?: { detail?: unknown } }; message?: string };
+      toast.error(
+        formatApiErrorDetail(ax.response?.data?.detail) || ax.message || "Failed to delete page"
+      );
+    },
   });
 
   const onDelete = (page: BlueprintPage) => {
@@ -298,7 +309,17 @@ function BlueprintPagesPanel({ blueprintId }: { blueprintId: string }) {
                 <td className="px-2 py-2 font-mono text-xs">{page.sort_order}</td>
                 <td className="px-2 py-2 font-mono text-xs">{page.page_slug}</td>
                 <td className="px-2 py-2">{page.page_title}</td>
-                <td className="px-2 py-2">{page.page_type}</td>
+                <td className="px-2 py-2">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-xs font-medium text-slate-700">
+                      {BLUEPRINT_PAGE_TYPE_OPTIONS.find((opt) => opt.value === page.page_type)?.label ||
+                        "Custom"}
+                    </span>
+                    <span className="inline-flex w-fit rounded-md border border-slate-300 bg-slate-100 px-2 py-0.5 font-mono text-[11px] text-slate-700">
+                      {page.page_type}
+                    </span>
+                  </div>
+                </td>
                 <td className="px-2 py-2 font-mono text-xs">{page.keyword_template}</td>
                 <td className="px-2 py-2 font-mono text-xs text-slate-600">{page.keyword_template_brand || "-"}</td>
                 <td className="px-2 py-2 font-mono text-xs">{page.filename}</td>
@@ -504,7 +525,12 @@ function AddBlueprintPageModal({ blueprintId, onClose }: { blueprintId: string; 
       queryClient.invalidateQueries({ queryKey: ["blueprint-pages", blueprintId] });
       onClose();
     },
-    onError: () => toast.error("Failed to add page"),
+    onError: (error: unknown) => {
+      const ax = error as { response?: { data?: { detail?: unknown } }; message?: string };
+      toast.error(
+        formatApiErrorDetail(ax.response?.data?.detail) || ax.message || "Failed to add page"
+      );
+    },
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -755,7 +781,12 @@ function EditBlueprintPageModal({
       queryClient.invalidateQueries({ queryKey: ["blueprint-pages", blueprintId] });
       onClose();
     },
-    onError: () => toast.error("Failed to update page"),
+    onError: (error: unknown) => {
+      const ax = error as { response?: { data?: { detail?: unknown } }; message?: string };
+      toast.error(
+        formatApiErrorDetail(ax.response?.data?.detail) || ax.message || "Failed to update page"
+      );
+    },
   });
 
   const handleSubmit = (e: React.FormEvent) => {

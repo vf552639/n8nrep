@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import type { RowSelectionState } from "@tanstack/react-table";
 import toast from "react-hot-toast";
@@ -58,6 +58,160 @@ function parseUrls(raw: string): string[] {
     .map((u) => u.trim())
     .filter((u) => u.length > 0)
     .slice(0, 50);
+}
+
+function removeKeyword(
+  state: ClusterKeywordsResult,
+  keyword: string,
+  fromSlug: string | null
+): ClusterKeywordsResult {
+  const clustered = Object.fromEntries(
+    Object.entries(state.clustered).map(([slug, data]) => {
+      if (fromSlug !== null && slug !== fromSlug) return [slug, data];
+      return [
+        slug,
+        {
+          ...data,
+          assigned_keywords: data.assigned_keywords.filter((kw) => kw !== keyword),
+        },
+      ];
+    })
+  );
+  const unassigned = state.unassigned.filter((kw) => kw !== keyword);
+  const totalAssigned = Object.values(clustered).reduce(
+    (sum, data) => sum + data.assigned_keywords.length,
+    0
+  );
+  return { ...state, clustered, unassigned, total_assigned: totalAssigned };
+}
+
+function moveKeyword(
+  state: ClusterKeywordsResult,
+  keyword: string,
+  fromSlug: string | null,
+  toSlug: string | null
+): ClusterKeywordsResult {
+  if (fromSlug === toSlug) return state;
+  let next = removeKeyword(state, keyword, fromSlug);
+  if (toSlug === null) {
+    if (!next.unassigned.includes(keyword)) {
+      next = { ...next, unassigned: [...next.unassigned, keyword] };
+    }
+    return next;
+  }
+  const target = next.clustered[toSlug];
+  if (!target) return next;
+  if (target.assigned_keywords.includes(keyword)) return next;
+  const clustered = {
+    ...next.clustered,
+    [toSlug]: {
+      ...target,
+      assigned_keywords: [...target.assigned_keywords, keyword],
+    },
+  };
+  const totalAssigned = Object.values(clustered).reduce(
+    (sum, data) => sum + data.assigned_keywords.length,
+    0
+  );
+  return { ...next, clustered, total_assigned: totalAssigned };
+}
+
+type ClusterPageOption = {
+  slug: string;
+  title: string;
+};
+
+function KeywordChip({
+  keyword,
+  variant,
+  pages,
+  currentSlug,
+  onDelete,
+  onMove,
+}: {
+  keyword: string;
+  variant: "assigned" | "unassigned";
+  pages: ClusterPageOption[];
+  currentSlug: string | null;
+  onDelete: () => void;
+  onMove: (toSlug: string | null) => void;
+}) {
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!isMenuOpen) return;
+    const onDocMouseDown = (event: MouseEvent) => {
+      if (!rootRef.current) return;
+      if (!rootRef.current.contains(event.target as Node)) {
+        setIsMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [isMenuOpen]);
+
+  const chipClass =
+    variant === "assigned"
+      ? "bg-blue-50 text-blue-700 hover:bg-blue-100"
+      : "bg-amber-100 text-amber-800 hover:bg-amber-200";
+
+  return (
+    <div ref={rootRef} className="relative group">
+      <button
+        type="button"
+        onClick={() => setIsMenuOpen((prev) => !prev)}
+        className={`rounded px-2 py-0.5 text-xs pr-6 transition-colors ${chipClass}`}
+        title="Move keyword"
+      >
+        {keyword}
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setIsMenuOpen(false);
+          onDelete();
+        }}
+        className="absolute right-1 top-1/2 -translate-y-1/2 h-4 w-4 rounded text-slate-400 opacity-0 group-hover:opacity-100 hover:bg-black/10 hover:text-slate-700"
+        title="Delete keyword"
+      >
+        ×
+      </button>
+      {isMenuOpen && (
+        <div className="absolute left-0 top-full mt-1 z-20 min-w-[190px] rounded-md border border-slate-200 bg-white shadow-lg py-1">
+          {pages.map((page) => {
+            const disabled = currentSlug === page.slug;
+            return (
+              <button
+                key={page.slug}
+                type="button"
+                disabled={disabled}
+                onClick={() => {
+                  onMove(page.slug);
+                  setIsMenuOpen(false);
+                }}
+                className="block w-full text-left px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-100 disabled:text-slate-400 disabled:hover:bg-transparent"
+              >
+                {page.title}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            disabled={currentSlug === null}
+            onClick={() => {
+              onMove(null);
+              setIsMenuOpen(false);
+            }}
+            className="block w-full text-left px-3 py-1.5 text-xs text-amber-800 hover:bg-amber-50 disabled:text-slate-400 disabled:hover:bg-transparent"
+          >
+            Unassigned
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function validateRequiredForLaunch(formData: {
@@ -897,6 +1051,16 @@ function CreateProjectModal({
     Boolean(formData.country) &&
     Boolean(formData.language) &&
     (formData.markup_only || Boolean(formData.site_id));
+  const clusterPages = useMemo(
+    () =>
+      clusterResult
+        ? Object.entries(clusterResult.clustered).map(([slug, data]) => ({
+            slug,
+            title: data.page_title,
+          }))
+        : [],
+    [clusterResult]
+  );
 
   const mutation = useMutation({
     mutationFn: projectsApi.create,
@@ -1242,12 +1406,23 @@ function CreateProjectModal({
                     {data.assigned_keywords.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-2">
                         {data.assigned_keywords.map((kw, i) => (
-                          <span
-                            key={i}
-                            className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs"
-                          >
-                            {kw}
-                          </span>
+                          <KeywordChip
+                            key={`${slug}-${kw}-${i}`}
+                            keyword={kw}
+                            variant="assigned"
+                            pages={clusterPages}
+                            currentSlug={slug}
+                            onDelete={() =>
+                              setClusterResult((prev) =>
+                                prev ? removeKeyword(prev, kw, slug) : prev
+                              )
+                            }
+                            onMove={(toSlug) =>
+                              setClusterResult((prev) =>
+                                prev ? moveKeyword(prev, kw, slug, toSlug) : prev
+                              )
+                            }
+                          />
                         ))}
                       </div>
                     )}
@@ -1260,16 +1435,30 @@ function CreateProjectModal({
                     </span>
                     <div className="flex flex-wrap gap-1 mt-2">
                       {clusterResult.unassigned.map((kw, i) => (
-                        <span
-                          key={i}
-                          className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded text-xs"
-                        >
-                          {kw}
-                        </span>
+                        <KeywordChip
+                          key={`unassigned-${kw}-${i}`}
+                          keyword={kw}
+                          variant="unassigned"
+                          pages={clusterPages}
+                          currentSlug={null}
+                          onDelete={() =>
+                            setClusterResult((prev) =>
+                              prev ? removeKeyword(prev, kw, null) : prev
+                            )
+                          }
+                          onMove={(toSlug) =>
+                            setClusterResult((prev) =>
+                              prev ? moveKeyword(prev, kw, null, toSlug) : prev
+                            )
+                          }
+                        />
                       ))}
                     </div>
                   </div>
                 )}
+                <p className="text-xs text-slate-500">
+                  Edits here apply to the current cluster only. Re-clustering uses the keyword list above.
+                </p>
               </div>
             )}
             <div className="grid grid-cols-2 gap-4">

@@ -4,6 +4,23 @@
 
 ---
 
+### Май 2026 — task55: Blueprints/Legal visibility + editable clustering preview (`task55.md`)
+
+**Контекст:** в `Create Project` legal-блок зависел от фактических `page_type` в `blueprint_pages`, но в UI Blueprints не было явного индикатора «как сохранено в БД». Плюс результат `Cluster Keywords` был read-only: нельзя удалить шумные ключи и переназначить ключ между страницами.
+
+**Сделано**
+- `BlueprintsPage` (таблица Pages): в колонке Type добавлен label + monospace badge с **raw `page_type`** из записи.
+- `CreateBlueprintModal` / `AddBlueprintPageModal` / `EditBlueprintPageModal` / delete page: в `onError` используется `formatApiErrorDetail(...)`, чтобы показывать backend detail (а не только generic toast).
+- `ProjectsPage` (`Keyword Distribution Preview`): внедрён локальный `KeywordChip` с двумя действиями:
+  - hover `×` — удалить keyword из текущего cluster preview;
+  - click — меню переноса keyword в любую страницу или в `Unassigned`.
+- Добавлены pure-хелперы `removeKeyword(...)` и `moveKeyword(...)` с пересчётом `total_assigned`; перемещение в текущую секцию отключено (no-op).
+- Добавлена заметка в UI: правки применяются только к текущему cluster result; re-cluster берёт исходный список из textarea.
+
+**Полный текст:** [changelog/2026-05-task55-blueprints-clustering-ux.md](changelog/2026-05-task55-blueprints-clustering-ux.md).
+
+---
+
 ### Май 2026 — task53: черновики проектов (модалка Add Project, `task53.md`)
 
 **Контекст:** в попапе «New Project» нужно сохранять неполную форму и возвращаться к ней позже; минимальное требование к черновику — только имя проекта.
