@@ -4,6 +4,7 @@
 
 ## 2026-05
 
+- [Май 2026 — task58: per-page competitor URLs + search_engine=off](2026-05-task58-per-page-competitor-urls-off-engine.md)
 - [Май 2026 — task55: Blueprints/Legal visibility + editable clustering preview](2026-05-task55-blueprints-clustering-ux.md)
 - [Май 2026 — task53: черновики проектов (модалка Add Project)](2026-05-task53-project-drafts-modal.md)
 

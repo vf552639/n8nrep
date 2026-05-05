@@ -758,12 +758,13 @@ function CreateProjectModal({
     country: "",
     language: "",
     author_id: "" as string,
-    serp_engine: "google" as "google" | "bing" | "google+bing",
+    serp_engine: "google" as "google" | "bing" | "google+bing" | "off",
     serp_depth: 10 as number,
     serp_device: "mobile" as "mobile" | "desktop",
     serp_os: "android" as "android" | "ios" | "windows" | "macos",
     additional_keywords_raw: "",
     competitor_urls_raw: "",
+    page_competitor_urls_raw: {} as Record<string, string>,
     legal_template_map: {} as Record<string, string>,
     use_site_template: true,
     markup_only: false,
@@ -780,6 +781,15 @@ function CreateProjectModal({
     const rawKw = p.project_keywords?.raw;
     const additionalKeywordsRaw = Array.isArray(rawKw) ? rawKw.join("\n") : "";
     const comp = Array.isArray(p.competitor_urls) ? p.competitor_urls.join("\n") : "";
+    const clusteredEntries =
+      (p.project_keywords?.clustered as Record<string, { competitor_urls?: string[] }> | undefined) ||
+      {};
+    const pageRaw: Record<string, string> = {};
+    for (const [slug, data] of Object.entries(clusteredEntries)) {
+      if (Array.isArray(data?.competitor_urls)) {
+        pageRaw[slug] = data.competitor_urls.join("\n");
+      }
+    }
     const ts = (p.target_site || "").trim();
     const sid = (p.site_id || "").trim();
     const markupOnly = !ts && !sid && p.use_site_template === false;
@@ -794,12 +804,13 @@ function CreateProjectModal({
       country: (p.country || "").toUpperCase(),
       language: p.language || "",
       author_id: p.author_id != null && String(p.author_id) !== "" ? String(p.author_id) : "",
-      serp_engine: (sc.search_engine as "google" | "bing" | "google+bing") || "google",
+      serp_engine: (sc.search_engine as "google" | "bing" | "google+bing" | "off") || "google",
       serp_depth: depth,
       serp_device: (sc.device as "mobile" | "desktop") || "mobile",
       serp_os: (sc.os as "android" | "ios" | "windows" | "macos") || "android",
       additional_keywords_raw: additionalKeywordsRaw,
       competitor_urls_raw: comp,
+      page_competitor_urls_raw: pageRaw,
       legal_template_map:
         p.legal_template_map && typeof p.legal_template_map === "object"
           ? { ...(p.legal_template_map as Record<string, string>) }
@@ -948,6 +959,9 @@ function CreateProjectModal({
     ) {
       return undefined;
     }
+    if (formData.serp_engine === "off") {
+      return { search_engine: "off" } as SiteProjectCreatePayload["serp_config"];
+    }
     return {
       search_engine: formData.serp_engine,
       depth: formData.serp_depth,
@@ -964,9 +978,16 @@ function CreateProjectModal({
     const serp = buildSerpConfig();
     let project_keywords: SiteProjectCreatePayload["project_keywords"];
     if (clusterResult && parsedKeywords.length > 0) {
+      const clusteredWithUrls = Object.fromEntries(
+        Object.entries(clusterResult.clustered).map(([slug, data]) => {
+          const raw = (formData.page_competitor_urls_raw[slug] || "").trim();
+          const urls = raw ? parseUrls(raw) : [];
+          return [slug, urls.length > 0 ? { ...data, competitor_urls: urls } : data];
+        })
+      );
       project_keywords = {
         raw: parsedKeywords,
-        clustered: clusterResult.clustered,
+        clustered: clusteredWithUrls,
         unassigned: clusterResult.unassigned,
         clustering_model: clusterResult.model,
         clustering_cost: clusterResult.cost,
@@ -1451,6 +1472,26 @@ function CreateProjectModal({
                         ))}
                       </div>
                     )}
+                    <div className="mt-2 pt-2 border-t border-slate-100">
+                      <label className="block text-xs font-medium text-slate-600 mb-1">
+                        Competitor URLs (optional, one per line)
+                      </label>
+                      <textarea
+                        rows={2}
+                        placeholder="https://example.com/page"
+                        className="w-full text-xs px-2 py-1 border border-slate-200 rounded font-mono"
+                        value={formData.page_competitor_urls_raw[slug] || ""}
+                        onChange={(e) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            page_competitor_urls_raw: {
+                              ...prev.page_competitor_urls_raw,
+                              [slug]: e.target.value,
+                            },
+                          }))
+                        }
+                      />
+                    </div>
                   </div>
                 ))}
                 {clusterResult.unassigned.length > 0 && (
@@ -1615,13 +1656,14 @@ function CreateProjectModal({
                       onChange={(e) =>
                         setFormData({
                           ...formData,
-                          serp_engine: e.target.value as "google" | "bing" | "google+bing",
+                          serp_engine: e.target.value as "google" | "bing" | "google+bing" | "off",
                         })
                       }
                     >
                       <option value="google">Google (DataForSEO → SerpAPI fallback)</option>
                       <option value="bing">Bing (DataForSEO)</option>
                       <option value="google+bing">Google + Bing (merged)</option>
+                      <option value="off">Off (skip DataForSEO)</option>
                     </select>
                   </div>
                   <div>

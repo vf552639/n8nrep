@@ -88,7 +88,12 @@ export interface Project {
     raw?: string[];
     clustered?: Record<
       string,
-      { page_title: string; keyword: string; assigned_keywords: string[] }
+      {
+        page_title: string;
+        keyword: string;
+        assigned_keywords: string[];
+        competitor_urls?: string[];
+      }
     >;
     unassigned?: string[];
     clustering_model?: string;

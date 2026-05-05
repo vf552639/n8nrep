@@ -101,7 +101,7 @@ def _validate_serp_config(cfg: dict[str, Any] | None) -> dict[str, Any]:
     """Validate and normalize SERP config; returns dict (possibly empty)."""
     if not cfg:
         return {}
-    allowed_engines = {"google", "bing", "google+bing"}
+    allowed_engines = {"google", "bing", "google+bing", "off"}
     allowed_depths = {10, 20, 30, 50, 100}
     allowed_devices = {"mobile", "desktop"}
     allowed_os = {"android", "ios", "windows", "macos"}

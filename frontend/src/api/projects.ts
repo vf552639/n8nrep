@@ -17,7 +17,7 @@ export interface SiteProjectCreatePayload {
   language: string;
   author_id?: number;
   serp_config?: {
-    search_engine?: "google" | "bing" | "google+bing";
+    search_engine?: "google" | "bing" | "google+bing" | "off";
     depth?: number;
     device?: "mobile" | "desktop";
     os?: string;
@@ -26,7 +26,12 @@ export interface SiteProjectCreatePayload {
     raw?: string[];
     clustered?: Record<
       string,
-      { page_title: string; keyword: string; assigned_keywords: string[] }
+      {
+        page_title: string;
+        keyword: string;
+        assigned_keywords: string[];
+        competitor_urls?: string[];
+      }
     >;
     unassigned?: string[];
     clustering_model?: string;
@@ -75,7 +80,12 @@ export interface ProjectLaunchResponse {
 export interface ClusterKeywordsResult {
   clustered: Record<
     string,
-    { page_title: string; keyword: string; assigned_keywords: string[] }
+    {
+      page_title: string;
+      keyword: string;
+      assigned_keywords: string[];
+      competitor_urls?: string[];
+    }
   >;
   unassigned: string[];
   total_keywords: number;

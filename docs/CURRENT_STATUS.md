@@ -4,6 +4,24 @@
 
 ---
 
+### Май 2026 — task58: per-page competitor URLs + `search_engine='off'` (`task58.md`)
+
+**Контекст:** project-wide `competitor_urls` не покрывал кейс с разными конкурентами для разных страниц кластера. Дополнительно требовался явный режим отключения DataForSEO/SERP при запуске проекта.
+
+**Сделано**
+- Backend: `_validate_serp_config` принимает `search_engine='off'`.
+- `SerpStep`: читаются per-page URL из `project_keywords.clustered[page_slug].competitor_urls`, fallback на `project.competitor_urls`.
+- При `engine='off'` `fetch_serp_data()` не вызывается; `serp_data` формируется из пользовательских URL (`source='user_only'`) с warning-логом при пустом списке.
+- При обычных engine сохранён fetch+merge; при наличии per-page URL они имеют приоритет над project-wide.
+- UI `ProjectsPage`: добавлена опция `Off (skip DataForSEO)` в advanced SERP settings.
+- UI `ProjectsPage`: под каждой карточкой `Keyword Distribution Preview` добавлен textarea `Competitor URLs` с сохранением в `project_keywords.clustered[slug].competitor_urls` и восстановлением в режиме `edit-draft`.
+- Типы frontend (`api/projects.ts`, `types/project.ts`) расширены для `search_engine='off'` и `competitor_urls?: string[]` в clustered-элементе.
+- Добавлены тесты: `tests/api/test_projects_serp_engine_off.py`, `tests/services/test_serp_step_per_page_urls.py`.
+
+**Полный текст:** [changelog/2026-05-task58-per-page-competitor-urls-off-engine.md](changelog/2026-05-task58-per-page-competitor-urls-off-engine.md).
+
+---
+
 ### Май 2026 — task55: Blueprints/Legal visibility + editable clustering preview (`task55.md`)
 
 **Контекст:** в `Create Project` legal-блок зависел от фактических `page_type` в `blueprint_pages`, но в UI Blueprints не было явного индикатора «как сохранено в БД». Плюс результат `Cluster Keywords` был read-only: нельзя удалить шумные ключи и переназначить ключ между страницами.

@@ -1,5 +1,6 @@
 import json
 
+from app.models.blueprint import BlueprintPage
 from app.models.project import SiteProject
 from app.services.pipeline.errors import LLMError, ScrapingError, SerpError
 from app.services.pipeline.persistence import add_log
@@ -28,6 +29,90 @@ class SerpStep:
         if ctx.task.serp_data:
             return StepResult(status="completed", result=json.dumps({"skipped": True}))
 
+        engine = "google"
+        if isinstance(ctx.task.serp_config, dict):
+            engine = str(ctx.task.serp_config.get("search_engine", "google") or "google")
+
+        # Resolve per-page URLs from project_keywords.clustered[slug].competitor_urls
+        # and fallback to project-wide competitor_urls.
+        user_urls: list[str] = []
+        page_slug = ""
+        if ctx.task.project_id:
+            project_row = ctx.db.query(SiteProject).filter(SiteProject.id == ctx.task.project_id).first()
+            if project_row:
+                if ctx.task.blueprint_page_id:
+                    bp_page = (
+                        ctx.db.query(BlueprintPage)
+                        .filter(BlueprintPage.id == ctx.task.blueprint_page_id)
+                        .first()
+                    )
+                    if bp_page:
+                        page_slug = bp_page.page_slug
+                pk = project_row.project_keywords if isinstance(project_row.project_keywords, dict) else {}
+                clustered = pk.get("clustered") if isinstance(pk, dict) else {}
+                page_entry = clustered.get(page_slug) if isinstance(clustered, dict) else None
+                page_urls_raw = page_entry.get("competitor_urls") if isinstance(page_entry, dict) else None
+                if isinstance(page_urls_raw, list) and page_urls_raw:
+                    user_urls = [u for u in (normalize_url(x) for x in page_urls_raw) if u]
+                elif project_row.competitor_urls:
+                    user_urls = [u for u in (normalize_url(x) for x in project_row.competitor_urls) if u]
+
+        if engine == "off":
+            serp_data: dict = {
+                "source": "user_only",
+                "urls": list(user_urls),
+                "organic_results": [
+                    {
+                        "url": u,
+                        "title": "",
+                        "description": "",
+                        "position": idx + 1,
+                        "manually_added": True,
+                    }
+                    for idx, u in enumerate(user_urls)
+                ],
+                "user_competitor_urls": list(user_urls),
+                "user_competitor_duplicates": [],
+            }
+            if not user_urls:
+                add_log(
+                    ctx.db,
+                    ctx.task,
+                    "⚠️ search_engine='off' but no user competitor URLs — pipeline will likely fail at scraping",
+                    level="warning",
+                    step=STEP_SERP,
+                )
+            else:
+                add_log(
+                    ctx.db,
+                    ctx.task,
+                    f"DataForSEO disabled (engine='off'); using {len(user_urls)} user URL(s) as competitor source",
+                    step=STEP_SERP,
+                )
+            serp_data = strip_nul(serp_data)
+            ctx.task.serp_data = serp_data
+            ctx.db.commit()
+            serp_summary = {
+                "source": "user_only",
+                "urls_count": len(user_urls),
+                "user_competitor_urls_count": len(user_urls),
+                "urls": list(user_urls),
+                "user_competitor_duplicates": [],
+            }
+            if not ctx.auto_mode:
+                step_results = dict(ctx.task.step_results or {})
+                step_results["_pipeline_pause"] = {"active": True, "reason": "serp_review"}
+                ctx.task.step_results = step_results
+                ctx.task.status = "paused"
+                ctx.db.commit()
+                add_log(
+                    ctx.db,
+                    ctx.task,
+                    "⏸️ Pipeline paused: waiting for SERP URLs review",
+                    step=STEP_SERP,
+                )
+            return StepResult(status="completed", result=json.dumps(serp_summary, ensure_ascii=False))
+
         add_log(ctx.db, ctx.task, "Fetching SERP data...", step=STEP_SERP)
         try:
             serp_data = fetch_serp_data(
@@ -45,12 +130,6 @@ class SerpStep:
                 step=STEP_SERP,
             )
             raise SerpError(str(serp_err)) from serp_err
-
-        user_urls: list[str] = []
-        if ctx.task.project_id:
-            project_row = ctx.db.query(SiteProject).filter(SiteProject.id == ctx.task.project_id).first()
-            if project_row and project_row.competitor_urls:
-                user_urls = [u for u in (normalize_url(x) for x in project_row.competitor_urls) if u]
 
         if user_urls and isinstance(serp_data, dict):
             orig_urls = list(serp_data.get("urls") or [])
