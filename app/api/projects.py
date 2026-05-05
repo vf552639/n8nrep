@@ -54,6 +54,15 @@ def _revoke_project_celery_task(celery_task_id: str | None) -> None:
         logger.warning("Celery revoke failed for task_id=%s: %s", celery_task_id, exc)
 
 
+def _purge_project_dependents(db: Session, project_id: uuid.UUID | str) -> None:
+    """Delete project-owned articles and tasks in FK-safe order."""
+    task_ids_subq = db.query(Task.id).filter(Task.project_id == project_id).subquery()
+    db.query(GeneratedArticle).filter(GeneratedArticle.task_id.in_(task_ids_subq)).delete(
+        synchronize_session=False
+    )
+    db.query(Task).filter(Task.project_id == project_id).delete(synchronize_session=False)
+
+
 def _validate_legal_template_map(
     db: Session, legal_template_map: dict[str, Any] | None
 ) -> dict[str, str] | None:
@@ -893,7 +902,7 @@ def delete_selected_projects(payload: DeleteSelectedProjectsRequest, db: Session
             continue
         if payload.force:
             _revoke_project_celery_task(project.celery_task_id)
-        db.query(Task).filter(Task.project_id == uid).delete(synchronize_session=False)
+        _purge_project_dependents(db, uid)
         db.delete(project)
         deleted += 1
 
@@ -1313,7 +1322,7 @@ def delete_project(
         )
     if force:
         _revoke_project_celery_task(project.celery_task_id)
-    db.query(Task).filter(Task.project_id == id).delete(synchronize_session=False)
+    _purge_project_dependents(db, project.id)
     db.delete(project)
     db.commit()
     return {"msg": "Project deleted", "project_id": id}

@@ -4,6 +4,7 @@
 
 ## 2026-05
 
+- [Май 2026 — task60: удаление проектов без FK-падений на generated_articles](2026-05-task60-project-delete-fk-cleanup.md)
 - [Май 2026 — task59 (UI): стабильность Cluster Keywords в черновиках проектов](2026-05-task59-project-keyword-clustering-draft-persistence.md)
 - [Май 2026 — task58: per-page competitor URLs + search_engine=off](2026-05-task58-per-page-competitor-urls-off-engine.md)
 - [Май 2026 — task55: Blueprints/Legal visibility + editable clustering preview](2026-05-task55-blueprints-clustering-ux.md)
