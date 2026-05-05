@@ -244,6 +244,7 @@ function BlueprintPagesPanel({ blueprintId }: { blueprintId: string }) {
     onSuccess: () => {
       toast.success("Page deleted");
       queryClient.invalidateQueries({ queryKey: ["blueprint-pages", blueprintId] });
+      queryClient.invalidateQueries({ queryKey: ["legal-for-blueprint", blueprintId] });
     },
     onError: (error: unknown) => {
       const ax = error as { response?: { data?: { detail?: unknown } }; message?: string };
@@ -523,6 +524,7 @@ function AddBlueprintPageModal({ blueprintId, onClose }: { blueprintId: string; 
     onSuccess: () => {
       toast.success("Page added");
       queryClient.invalidateQueries({ queryKey: ["blueprint-pages", blueprintId] });
+      queryClient.invalidateQueries({ queryKey: ["legal-for-blueprint", blueprintId] });
       onClose();
     },
     onError: (error: unknown) => {
@@ -779,6 +781,7 @@ function EditBlueprintPageModal({
     onSuccess: () => {
       toast.success("Page updated");
       queryClient.invalidateQueries({ queryKey: ["blueprint-pages", blueprintId] });
+      queryClient.invalidateQueries({ queryKey: ["legal-for-blueprint", blueprintId] });
       onClose();
     },
     onError: (error: unknown) => {

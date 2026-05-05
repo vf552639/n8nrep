@@ -771,6 +771,7 @@ function CreateProjectModal({
   const [serpAdvancedOpen, setSerpAdvancedOpen] = useState(false);
   const [preview, setPreview] = useState<ProjectPreview | null>(null);
   const [clusterResult, setClusterResult] = useState<ClusterKeywordsResult | null>(null);
+  const initializedRef = useRef(false);
 
   useEffect(() => {
     if (mode !== "edit-draft" || !draftProject) return;
@@ -806,7 +807,24 @@ function CreateProjectModal({
       use_site_template: p.use_site_template !== false,
       markup_only: markupOnly,
     });
-    setClusterResult(null);
+    const pk = p.project_keywords;
+    if (pk?.clustered && Object.keys(pk.clustered).length > 0) {
+      const totalKeywords = Array.isArray(pk.raw) ? pk.raw.length : 0;
+      const totalAssigned = Object.values(pk.clustered).reduce(
+        (sum, data) => sum + (data?.assigned_keywords?.length || 0),
+        0
+      );
+      setClusterResult({
+        clustered: pk.clustered,
+        unassigned: pk.unassigned || [],
+        total_keywords: totalKeywords,
+        total_assigned: totalAssigned,
+        cost: pk.clustering_cost ?? 0,
+        model: pk.clustering_model,
+      });
+    } else {
+      setClusterResult(null);
+    }
     setPreview(null);
     // Intentionally key off id so refetches of the list do not reset the form while the modal stays open.
   }, [mode, draftProject?.id]);
@@ -822,6 +840,10 @@ function CreateProjectModal({
   );
 
   useEffect(() => {
+    if (!initializedRef.current) {
+      initializedRef.current = true;
+      return;
+    }
     setClusterResult(null);
   }, [formData.additional_keywords_raw, formData.blueprint_id]);
 
@@ -893,6 +915,7 @@ function CreateProjectModal({
     queryKey: ["legal-for-blueprint", formData.blueprint_id],
     queryFn: () => legalPagesApi.getForBlueprint(formData.blueprint_id),
     enabled: Boolean(formData.blueprint_id),
+    refetchOnMount: "always",
   });
 
   useEffect(() => {
@@ -1023,11 +1046,8 @@ function CreateProjectModal({
   });
 
   const clusterMutation = useMutation({
-    mutationFn: (kw: string[]) =>
-      projectsApi.clusterKeywords({
-        keywords: kw,
-        blueprint_id: formData.blueprint_id,
-      }),
+    mutationFn: (args: { keywords: string[]; blueprint_id: string }) =>
+      projectsApi.clusterKeywords(args),
     onSuccess: (data) => {
       setClusterResult(data);
       toast.success("Keywords clustered");
@@ -1352,7 +1372,12 @@ function CreateProjectModal({
                 {parsedKeywords.length > 0 && formData.blueprint_id && (
                   <button
                     type="button"
-                    onClick={() => clusterMutation.mutate(parsedKeywords)}
+                    onClick={() =>
+                      clusterMutation.mutate({
+                        keywords: parsedKeywords,
+                        blueprint_id: formData.blueprint_id,
+                      })
+                    }
                     disabled={clusterMutation.isPending}
                     className="flex items-center gap-2 px-3 py-1.5 border border-slate-300 bg-white text-slate-800 rounded-lg text-xs font-medium hover:bg-slate-50 disabled:opacity-50"
                   >
