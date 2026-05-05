@@ -4,6 +4,21 @@
 
 ---
 
+### Май 2026 — task59 (UI): стабильность `Cluster Keywords` в черновиках проектов (`task59.md`)
+
+**Контекст:** в `CreateProjectModal` кластеризация могла пропадать после открытия сохранённого черновика и неочевидно отрабатывать на длинных списках ключей (~90).
+
+**Сделано**
+- `ProjectsPage` (`CreateProjectModal`): удалён destructive `useEffect`, который очищал `clusterResult` после программного `setFormData(...)` при загрузке draft.
+- Очистка `clusterResult` перенесена в user-driven `onChange` у `Blueprint` и `Additional Keywords` (functional updates `setFormData(prev => ...)` + `setClusterResult(null)`).
+- `keyword_clusterer.py`: `max_tokens` увеличен с `4000` до `8000` для более длинных списков ключей.
+- `keyword_clusterer.py`: добавлен `logger.info` с метриками `total_keywords`, `total_assigned`, `unassigned`, `response_length`, `model` для диагностики.
+- UI: при успешной кластеризации с `total_assigned=0` добавлен явный `toast.error` (в дополнение к amber-баннеру), чтобы пользователь видел проблему сразу.
+
+**Ожидаемый эффект:** кластер из `project_keywords.clustered` сохраняется при повторном открытии черновика; при длинных списках ключей результат чаще возвращается, а при пустом распределении пользователь получает явный сигнал и подсказку.
+
+---
+
 ### Май 2026 — task58: per-page competitor URLs + `search_engine='off'` (`task58.md`)
 
 **Контекст:** project-wide `competitor_urls` не покрывал кейс с разными конкурентами для разных страниц кластера. Дополнительно требовался явный режим отключения DataForSEO/SERP при запуске проекта.

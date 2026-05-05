@@ -5,6 +5,7 @@ Cluster additional project keywords across blueprint pages via a single LLM call
 import json
 from typing import Any
 
+from app.logger import logger
 from app.config import settings
 from app.services.llm import generate_text
 
@@ -58,7 +59,7 @@ Use exact page slugs and exact keywords from the lists above. Every keyword must
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         model=model,
-        max_tokens=4000,
+        max_tokens=8000,
         temperature=0.3,
         response_format={"type": "json_object"},
     )
@@ -103,7 +104,7 @@ Use exact page slugs and exact keywords from the lists above. Every keyword must
                 "assigned_keywords": [],
             }
 
-    return {
+    result = {
         "clustered": clustered,
         "unassigned": [str(x).strip() for x in unassigned if str(x).strip()],
         "total_keywords": len(keywords),
@@ -111,3 +112,14 @@ Use exact page slugs and exact keywords from the lists above. Every keyword must
         "cost": cost,
         "model": actual_model,
     }
+
+    logger.info(
+        "cluster_keywords completed",
+        total_keywords=len(keywords),
+        total_assigned=total_assigned,
+        unassigned=len(result["unassigned"]),
+        response_length=len(response),
+        model=actual_model,
+    )
+
+    return result

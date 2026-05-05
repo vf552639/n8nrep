@@ -772,7 +772,6 @@ function CreateProjectModal({
   const [serpAdvancedOpen, setSerpAdvancedOpen] = useState(false);
   const [preview, setPreview] = useState<ProjectPreview | null>(null);
   const [clusterResult, setClusterResult] = useState<ClusterKeywordsResult | null>(null);
-  const initializedRef = useRef(false);
 
   useEffect(() => {
     if (mode !== "edit-draft" || !draftProject) return;
@@ -849,14 +848,6 @@ function CreateProjectModal({
     () => parseUrls(formData.competitor_urls_raw),
     [formData.competitor_urls_raw]
   );
-
-  useEffect(() => {
-    if (!initializedRef.current) {
-      initializedRef.current = true;
-      return;
-    }
-    setClusterResult(null);
-  }, [formData.additional_keywords_raw, formData.blueprint_id]);
 
   const { data: authors } = useQuery(authorsLightListQueryOptions());
 
@@ -1071,7 +1062,13 @@ function CreateProjectModal({
       projectsApi.clusterKeywords(args),
     onSuccess: (data) => {
       setClusterResult(data);
-      toast.success("Keywords clustered");
+      if (data.total_assigned === 0 && data.total_keywords > 0) {
+        toast.error(
+          "LLM не смог распределить ключи. Попробуйте уменьшить список или сменить blueprint."
+        );
+      } else {
+        toast.success("Keywords clustered");
+      }
     },
     onError: (error: unknown) => {
       const ax = error as {
@@ -1262,13 +1259,15 @@ function CreateProjectModal({
               <select
                 required
                 value={formData.blueprint_id}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    blueprint_id: e.target.value,
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setFormData((prev) => ({
+                    ...prev,
+                    blueprint_id: value,
                     legal_template_map: {},
-                  })
-                }
+                  }));
+                  setClusterResult(null);
+                }}
                 className="w-full border outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-sm bg-white"
               >
                 <option value="" disabled>
@@ -1383,9 +1382,11 @@ function CreateProjectModal({
                   "One per line or comma-separated\ncasino bonus codes\nfree spins no deposit"
                 }
                 value={formData.additional_keywords_raw}
-                onChange={(e) =>
-                  setFormData({ ...formData, additional_keywords_raw: e.target.value })
-                }
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setFormData((prev) => ({ ...prev, additional_keywords_raw: value }));
+                  setClusterResult(null);
+                }}
                 className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
               />
               <div className="flex flex-wrap items-center justify-between gap-2 mt-1">

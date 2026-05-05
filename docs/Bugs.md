@@ -4,6 +4,18 @@
 
 ---
 
+## ✅ Исправлено в task59 (май 2026, UI)
+
+### Кластеризация в draft-проекте пропадала после повторного открытия модалки
+**Было:** в `CreateProjectModal` (`frontend/src/pages/ProjectsPage.tsx`) `useEffect` очищал `clusterResult` при изменении `additional_keywords_raw`/`blueprint_id`. При загрузке draft выполнялся программный `setFormData(...)`, после чего на следующем рендере эффект мог затирать только что восстановленный `project_keywords.clustered`.  
+**Сделано:** удален destructive-эффект; `setClusterResult(null)` перенесен в user-driven `onChange` (textarea ключей и select blueprint) с functional updates `setFormData(prev => ...)`.
+
+### На больших списках ключей (~90) кластеризация часто завершалась «пусто» без явного сигнала
+**Было:** `keyword_clusterer.py` вызывал LLM c `max_tokens=4000`, что увеличивало риск усеченного/неполного JSON и `total_assigned=0`; пользователь мог не заметить amber-баннер.  
+**Сделано:** `max_tokens` увеличен до `8000`, добавлен `logger.info` с метриками (`total_keywords`, `total_assigned`, `unassigned`, `response_length`, `model`), а во фронте добавлен явный `toast.error`, когда `total_assigned=0` при непустом входе.
+
+---
+
 ## ✅ Исправлено в task60 (26.04.2026)
 
 ### API мог стартовать без реальной auth-защиты при пустом `API_KEY`
