@@ -15,7 +15,11 @@ if settings.DESKTOP_MODE:
     # Enable WAL mode for concurrent reads and enforce FK constraints
     @event.listens_for(async_engine.sync_engine, "connect")
     def _set_wal(dbapi_conn, _):
-        dbapi_conn.execute("PRAGMA journal_mode=WAL")
+        import warnings
+        cursor = dbapi_conn.execute("PRAGMA journal_mode=WAL")
+        mode = cursor.fetchone()[0]
+        if mode != "wal":
+            warnings.warn(f"SQLite WAL mode not activated; got '{mode}'", RuntimeWarning, stacklevel=2)
         dbapi_conn.execute("PRAGMA foreign_keys=ON")
 
     AsyncSessionLocal = async_sessionmaker(
@@ -27,6 +31,7 @@ if settings.DESKTOP_MODE:
     SessionLocal = None  # type: ignore[assignment]
 
 else:
+    # PostgreSQL engine via psycopg2 — pool tuning for Supabase/Supavisor (idle-in-transaction, stale conns)
     engine = create_engine(
         settings.SUPABASE_DB_URL,
         echo=False,
@@ -36,6 +41,7 @@ else:
         max_overflow=20,
         pool_timeout=10,
         connect_args={
+            # statement_timeout: pipeline commits large JSONB (task53). TCP keepalives: reduce silent drops during long LLM calls (task59).
             "options": "-c statement_timeout=600000",
             "keepalives": 1,
             "keepalives_idle": 30,
@@ -43,6 +49,7 @@ else:
             "keepalives_count": 5,
         },
     )
+    # expire_on_commit=False: avoid expired ORM attrs triggering lazy SELECTs after mid-LLM commits (task59).
     SessionLocal = sessionmaker(
         autocommit=False, autoflush=False, expire_on_commit=False, bind=engine
     )
