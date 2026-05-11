@@ -2,9 +2,16 @@ import axios from "axios";
 import toast from "react-hot-toast";
 import { formatApiErrorDetail } from "@/lib/apiErrorMessage";
 
+function resolveBaseURL(): string {
+  const params = new URLSearchParams(window.location.search);
+  const port = params.get("backendPort");
+  if (port) return `http://127.0.0.1:${port}/api`;
+  return import.meta.env.VITE_API_URL || "http://localhost:8000/api";
+}
+
 const api = axios.create({
   // Fallback to localhost:8000/api if the env variable isn't set
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:8000/api",
+  baseURL: resolveBaseURL(),
   headers: {
     "Content-Type": "application/json",
   },
