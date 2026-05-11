@@ -1,15 +1,13 @@
 fastapi[all]>=0.109.0
 sqlalchemy>=2.0.25
+aiosqlite>=0.20.0
 alembic>=1.13.1
-psycopg2-binary>=2.9.9
-celery>=5.3.6
-redis>=5.0.1
 python-dotenv>=1.0.1
 beautifulsoup4>=4.12.3
 python-docx>=1.1.0
 requests>=2.31.0
 openai>=1.12.0
-supabase>=2.3.4
 pydantic>=2.6.1
 pydantic-settings>=2.2.1
 structlog>=24.1
+pyinstaller>=6.5.0
