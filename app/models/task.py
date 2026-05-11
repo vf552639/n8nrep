@@ -1,7 +1,7 @@
-import sqlalchemy as sa
 import uuid
 from datetime import datetime
 
+import sqlalchemy as sa
 from sqlalchemy import BigInteger, Column, DateTime, Float, ForeignKey, Integer, String, Text
 
 from app.database import Base
