@@ -33,8 +33,8 @@ def upgrade() -> None:
         sa.Column("target_audience", sa.Text(), nullable=True),
         sa.Column("rhythms_style", sa.Text(), nullable=True),
         sa.Column("exclude_words", sa.Text(), nullable=True),
-        sa.Column("created_at", sa.DateTime(), nullable=True),
-        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True, server_default=sa.text("(CURRENT_TIMESTAMP)")),
+        sa.Column("updated_at", sa.DateTime(), nullable=True, server_default=sa.text("(CURRENT_TIMESTAMP)")),
         sa.PrimaryKeyConstraint("id"),
     )
 
