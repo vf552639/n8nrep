@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from "electron";
+import { app, BrowserWindow, dialog } from "electron";
 import { spawn, ChildProcess } from "child_process";
 import * as path from "path";
 import * as net from "net";
@@ -28,6 +28,8 @@ function waitForSidecar(port: number, maxMs = 30_000): Promise<void> {
       }
       http
         .get(`http://127.0.0.1:${port}/api/health`, (res) => {
+          // Always consume the response body to avoid socket stalls
+          res.resume();
           if (res.statusCode === 200) resolve();
           else setTimeout(poll, 500);
         })
@@ -75,6 +77,7 @@ async function createWindow(port: number): Promise<void> {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   });
 
@@ -91,18 +94,35 @@ async function createWindow(port: number): Promise<void> {
   });
 }
 
+function killSidecar(): void {
+  if (sidecar) {
+    sidecar.kill();
+    sidecar = null;
+  }
+}
+
 app.whenReady().then(async () => {
-  const port = await findFreePort();
-  await startSidecar(port);
-  await waitForSidecar(port);
-  await createWindow(port);
+  try {
+    const port = await findFreePort();
+    await startSidecar(port);
+    await waitForSidecar(port);
+    await createWindow(port);
+  } catch (err) {
+    dialog.showErrorBox(
+      "Startup failed",
+      err instanceof Error ? err.message : String(err)
+    );
+    app.quit();
+  }
 });
 
 app.on("window-all-closed", () => {
-  sidecar?.kill();
+  killSidecar();
   app.quit();
 });
 
+// before-quit fires after window-all-closed; sidecar is already null at this point
+// but the handler is kept as a safety net for direct app.quit() calls
 app.on("before-quit", () => {
-  sidecar?.kill();
+  killSidecar();
 });
