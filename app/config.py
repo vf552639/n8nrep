@@ -92,8 +92,8 @@ class Settings(BaseSettings):
                 "For CI/local tests set AUTH_DISABLED=true, or set a non-empty API_KEY in .env."
             )
         if self.DESKTOP_MODE and not self.SQLITE_DB_PATH:
+            # macOS standard app data dir (this app targets macOS only)
             default_dir = Path.home() / "Library" / "Application Support" / "n8nrep-desktop"
-            default_dir.mkdir(parents=True, exist_ok=True)
             self.SQLITE_DB_PATH = str(default_dir / "db.sqlite")
         if not self.DESKTOP_MODE and not self.SUPABASE_DB_URL:
             raise ValueError("SUPABASE_DB_URL is required in web mode (DESKTOP_MODE=false)")
