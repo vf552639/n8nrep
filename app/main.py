@@ -1,5 +1,7 @@
 import logging
 import os
+import subprocess
+import sys
 import traceback
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -45,8 +47,6 @@ logger = logging.getLogger(__name__)
 
 def _run_desktop_migrations() -> None:
     """Auto-apply desktop Alembic branch migrations at startup and ensure the DB dir exists."""
-    import subprocess, sys
-    from pathlib import Path
     # Ensure the SQLite DB directory exists before migration (mkdir was deferred from config validator)
     db_path = Path(settings.SQLITE_DB_PATH)
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -56,6 +56,7 @@ def _run_desktop_migrations() -> None:
         cwd=str(root),
         capture_output=True,
         text=True,
+        timeout=60,
     )
     if result.returncode != 0:
         logger.error("Alembic desktop migration failed:\n%s\n%s", result.stdout, result.stderr)
