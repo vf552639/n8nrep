@@ -43,6 +43,26 @@ configure_logging(
 logger = logging.getLogger(__name__)
 
 
+def _run_desktop_migrations() -> None:
+    """Auto-apply desktop Alembic branch migrations at startup and ensure the DB dir exists."""
+    import subprocess, sys
+    from pathlib import Path
+    # Ensure the SQLite DB directory exists before migration (mkdir was deferred from config validator)
+    db_path = Path(settings.SQLITE_DB_PATH)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    root = Path(__file__).resolve().parent.parent
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "desktop@head"],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        logger.error("Alembic desktop migration failed:\n%s\n%s", result.stdout, result.stderr)
+        raise RuntimeError("Database migration failed — cannot start")
+    logger.info("Desktop migrations applied: %s", result.stdout.strip() or "up to date")
+
+
 def verify_migrations() -> None:
     try:
         root = Path(__file__).resolve().parent.parent
@@ -79,7 +99,10 @@ async def lifespan(_app: FastAPI):
         logger.warning(
             "AUTH_DISABLED is true: X-API-Key checks are disabled. Never enable this in production."
         )
-    verify_migrations()
+    if settings.DESKTOP_MODE:
+        _run_desktop_migrations()
+    else:
+        verify_migrations()
     yield
 
 
