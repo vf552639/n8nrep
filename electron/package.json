@@ -1,0 +1,36 @@
+{
+  "name": "n8nrep-desktop",
+  "version": "1.0.0",
+  "description": "SEO content generator — macOS desktop app",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "tsc -p electron/tsconfig.json --outDir dist-electron && electron dist-electron/main.js",
+    "build:electron": "tsc -p electron/tsconfig.json --outDir dist-electron",
+    "dist": "npm run build:electron && electron-builder --mac"
+  },
+  "devDependencies": {
+    "electron": "^36.0.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.4.5",
+    "@types/node": "^20.12.12"
+  },
+  "build": {
+    "appId": "com.n8nrep.desktop",
+    "productName": "n8nrep",
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [{ "target": "dmg", "arch": ["arm64", "x64"] }]
+    },
+    "files": [
+      "dist-electron/**/*",
+      "frontend/dist/**/*",
+      "resources/**/*"
+    ],
+    "extraResources": [
+      { "from": "resources/", "to": "resources/" }
+    ],
+    "directories": {
+      "output": "release"
+    }
+  }
+}
