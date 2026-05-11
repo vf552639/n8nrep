@@ -1,8 +1,9 @@
 import uuid
 from datetime import datetime
 
+import sqlalchemy as sa
+
 from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text
-from sqlalchemy.dialects.postgresql import UUID
 
 from app.database import Base
 
@@ -10,7 +11,7 @@ from app.database import Base
 class Prompt(Base):
     __tablename__ = "prompts"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(sa.Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     agent_name = Column(String(100), nullable=False, index=True)
     version = Column(Integer, default=1, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False, index=True)

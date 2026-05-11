@@ -1,8 +1,9 @@
 import uuid
 from datetime import datetime
 
+import sqlalchemy as sa
+
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -11,7 +12,7 @@ from app.database import Base
 class SiteBlueprint(Base):
     __tablename__ = "site_blueprints"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(sa.Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(200), nullable=False)
     slug = Column(String(100), nullable=False, unique=True)
     description = Column(Text, nullable=True)
@@ -25,9 +26,9 @@ class SiteBlueprint(Base):
 class BlueprintPage(Base):
     __tablename__ = "blueprint_pages"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(sa.Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     blueprint_id = Column(
-        UUID(as_uuid=True), ForeignKey("site_blueprints.id", ondelete="CASCADE"), nullable=False
+        sa.Uuid(as_uuid=True), ForeignKey("site_blueprints.id", ondelete="CASCADE"), nullable=False
     )
     page_slug = Column(String(100), nullable=False)
     page_title = Column(String(300), nullable=False)
@@ -42,9 +43,9 @@ class BlueprintPage(Base):
     hide_author_geo = Column(Boolean, default=False, nullable=False)
     use_serp = Column(Boolean, default=True)
     pipeline_preset = Column(String(20), nullable=False, default="full")
-    pipeline_steps_custom = Column(JSONB, nullable=True)
+    pipeline_steps_custom = Column(sa.JSON, nullable=True)
     default_legal_template_id = Column(
-        UUID(as_uuid=True),
+        sa.Uuid(as_uuid=True),
         ForeignKey("legal_page_templates.id", ondelete="SET NULL"),
         nullable=True,
     )

@@ -1,8 +1,9 @@
 import uuid
 from datetime import datetime
 
+import sqlalchemy as sa
+
 from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -11,10 +12,10 @@ from app.database import Base
 class SiteProject(Base):
     __tablename__ = "site_projects"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(sa.Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(300), nullable=False)
-    blueprint_id = Column(UUID(as_uuid=True), ForeignKey("site_blueprints.id"), nullable=True)
-    site_id = Column(UUID(as_uuid=True), ForeignKey("sites.id"), nullable=True)
+    blueprint_id = Column(sa.Uuid(as_uuid=True), ForeignKey("site_blueprints.id"), nullable=True)
+    site_id = Column(sa.Uuid(as_uuid=True), ForeignKey("sites.id"), nullable=True)
     seed_keyword = Column(String(500), nullable=True)
     country = Column(String(10), nullable=True)
     language = Column(String(10), nullable=True)
@@ -41,20 +42,20 @@ class SiteProject(Base):
     started_at = Column(DateTime, nullable=True)
     generation_started_at = Column(DateTime, nullable=True, comment="Actual generation start time")
     completed_at = Column(DateTime, nullable=True)
-    log_events = Column(JSONB, nullable=False, default=list, server_default="[]")
+    log_events = Column(sa.JSON, nullable=False, default=list, server_default="[]")
     serp_config = Column(
-        JSONB,
+        sa.JSON,
         nullable=True,
         default=dict,
         comment="SERP config: search_engine, depth, device, os",
     )
     project_keywords = Column(
-        JSONB,
+        sa.JSON,
         nullable=True,
         comment="Additional keywords pool + clustering: raw, clustered, unassigned, etc.",
     )
     legal_template_map = Column(
-        JSONB,
+        sa.JSON,
         nullable=True,
         comment="Mapping page_type -> legal_page_template_id (UUID string)",
     )
@@ -66,7 +67,7 @@ class SiteProject(Base):
         comment="Use site HTML template wrapper for generated pages",
     )
     competitor_urls = Column(
-        JSONB,
+        sa.JSON,
         nullable=False,
         default=list,
         server_default="[]",

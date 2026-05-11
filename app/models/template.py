@@ -1,8 +1,9 @@
 import uuid
 from datetime import datetime
 
+import sqlalchemy as sa
+
 from sqlalchemy import Boolean, Column, DateTime, String, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -15,7 +16,7 @@ class Template(Base):
 
     sites = relationship("Site", back_populates="template")
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(sa.Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(200), nullable=False)
     html_template = Column(Text, nullable=False)
     description = Column(Text, nullable=True)
@@ -31,12 +32,12 @@ class LegalPageTemplate(Base):
     __tablename__ = "legal_page_templates"
     __table_args__ = (UniqueConstraint("name", "page_type", name="uq_legal_tpl_name_page_type"),)
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(sa.Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(200), nullable=False)
     page_type = Column(String(50), nullable=False)
     content = Column(Text, nullable=False)
     content_format = Column(String(10), nullable=False, default="text")
-    variables = Column(JSONB, nullable=False, default=dict)
+    variables = Column(sa.JSON, nullable=False, default=dict)
     notes = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
