@@ -9,10 +9,11 @@
     "dist": "npm run build:electron && electron-builder --mac"
   },
   "devDependencies": {
+    "@electron/notarize": "^2.5.0",
+    "@types/node": "^20.12.12",
     "electron": "^36.0.0",
     "electron-builder": "^25.1.8",
-    "typescript": "^5.4.5",
-    "@types/node": "^20.12.12"
+    "typescript": "^5.4.5"
   },
   "dependencies": {
     "electron-updater": "^6.3.9"
@@ -29,8 +30,20 @@
       "entitlements": "entitlements.mac.plist",
       "entitlementsInherit": "entitlements.mac.plist",
       "target": [
-        { "target": "dmg", "arch": ["arm64", "x64"] },
-        { "target": "zip", "arch": ["arm64", "x64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
       ],
       "extendInfo": {
         "NSCameraUsageDescription": "Not used",
@@ -46,7 +59,10 @@
       "../resources/**/*"
     ],
     "extraResources": [
-      { "from": "../resources/", "to": "resources/" }
+      {
+        "from": "../resources/",
+        "to": "resources/"
+      }
     ],
     "publish": [
       {
