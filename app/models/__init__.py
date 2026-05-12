@@ -4,6 +4,7 @@ from app.models.blueprint import BlueprintPage, SiteBlueprint
 from app.models.project import SiteProject
 from app.models.project_content_anchor import ProjectContentAnchor
 from app.models.prompt import Prompt
+from app.models.prompt_preset import PromptPreset, PromptPresetItem
 from app.models.site import Site
 from app.models.task import Task
 from app.models.template import LegalPageTemplate, Template
@@ -15,6 +16,8 @@ __all__ = [
     "LegalPageTemplate",
     "ProjectContentAnchor",
     "Prompt",
+    "PromptPreset",
+    "PromptPresetItem",
     "Site",
     "SiteBlueprint",
     "SiteProject",
