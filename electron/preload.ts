@@ -12,3 +12,16 @@ contextBridge.exposeInMainWorld("electron", {
     },
   },
 });
+
+interface UpdaterStatus {
+  kind: string;
+  [key: string]: unknown;
+}
+
+contextBridge.exposeInMainWorld("updater", {
+  onStatus: (cb: (status: UpdaterStatus) => void) => {
+    const handler = (_: unknown, status: UpdaterStatus) => cb(status);
+    ipcRenderer.on("updater:status", handler);
+    return () => ipcRenderer.off("updater:status", handler);
+  },
+});

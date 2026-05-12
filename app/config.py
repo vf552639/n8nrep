@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     # Perplexity
     PERPLEXITY_API_KEY: str = ""
     PERPLEXITY_BASE_URL: str = "https://api.perplexity.ai"
+    # Auto-update (Electron reads this from process.env; Python doesn't use it)
+    AUTO_UPDATE_FEED_URL: str = ""
     OPENROUTER_HTTP_REFERER: str = "https://example.com"
     DEFAULT_MODEL: str = "openai/gpt-5"
     ANALYST_MODEL: str = "google/gemini-2.5-pro"
