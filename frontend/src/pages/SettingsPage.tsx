@@ -1,8 +1,123 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { Save, Settings2, Webhook, BoxSelect } from "lucide-react";
 import api from "@/api/client";
+
+function LlmAuthTab({
+  settings,
+  setSettings,
+}: {
+  settings: Record<string, string>;
+  setSettings: (s: Record<string, string>) => void;
+}) {
+  const [loginStatus, setLoginStatus] = useState<{ logged_in: boolean; email?: string | null } | null>(null);
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    api.get<{ logged_in: boolean; email?: string | null }>("/auth/claude/status")
+      .then((r) => setLoginStatus(r.data))
+      .catch(() => {});
+
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
+
+  function startPolling() {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const r = await api.get<{ logged_in: boolean; email?: string | null }>("/auth/claude/status");
+        setLoginStatus(r.data);
+        if (r.data.logged_in && pollRef.current) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+        }
+      } catch {
+        // ignore
+      }
+    }, 3000);
+  }
+
+  async function handleClaudeLogin() {
+    setLoginLoading(true);
+    setLoginError(null);
+    try {
+      const r = await api.post<{ url?: string; error?: string }>("/auth/claude/login");
+      if (r.data.error) {
+        setLoginError(r.data.error);
+      } else if (r.data.url) {
+        const w = (window as unknown as { electron?: { openExternal: (url: string) => void } }).electron;
+        if (w?.openExternal) {
+          w.openExternal(r.data.url);
+        } else {
+          window.open(r.data.url, "_blank");
+        }
+        startPolling();
+      }
+    } catch {
+      setLoginError("Failed to start login. Is the backend running?");
+    } finally {
+      setLoginLoading(false);
+    }
+  }
+
+  return (
+    <div className="space-y-8 max-w-2xl">
+      <div>
+        <h2 className="text-lg font-semibold text-slate-800 border-b pb-2 mb-4">Claude (Direct)</h2>
+        <p className="text-sm text-slate-500 mb-4">
+          Log in with your Claude.ai account to use claude-opus-4-7, claude-sonnet-4-6,
+          and claude-haiku-4-5-20251001 directly without OpenRouter.
+        </p>
+
+        <div className="flex items-center gap-4 mb-4">
+          <button
+            onClick={handleClaudeLogin}
+            disabled={loginLoading}
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-60"
+          >
+            {loginLoading ? "Starting login..." : "Login with Claude"}
+          </button>
+
+          {loginStatus?.logged_in ? (
+            <span className="flex items-center gap-1.5 text-sm text-green-700 bg-green-50 border border-green-200 px-3 py-1.5 rounded-full">
+              <span className="w-2 h-2 bg-green-500 rounded-full inline-block" />
+              Logged in{loginStatus.email ? ` as ${loginStatus.email}` : ""}
+            </span>
+          ) : (
+            <span className="text-sm text-slate-400">Not logged in</span>
+          )}
+        </div>
+
+        {loginError && (
+          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+            {loginError}
+          </p>
+        )}
+
+        <div className="mt-4 max-w-md">
+          <label className="block text-sm font-medium text-slate-700 mb-1">
+            Anthropic API Key (alternative to OAuth)
+          </label>
+          <input
+            type="password"
+            value={settings.ANTHROPIC_API_KEY || ""}
+            onChange={(e) => setSettings({ ...settings, ANTHROPIC_API_KEY: e.target.value })}
+            className="w-full border p-2.5 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+            placeholder="sk-ant-api03-..."
+          />
+          <p className="text-xs text-slate-400 mt-1">
+            Used only if Claude OAuth is not active. Save settings to persist.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState("general");
@@ -50,7 +165,8 @@ export default function SettingsPage() {
         {[
           { id: "general", label: "General", icon: Settings2 },
           { id: "integrations", label: "Integrations", icon: Webhook },
-          { id: "crawling", label: "Crawling", icon: BoxSelect }
+          { id: "crawling", label: "Crawling", icon: BoxSelect },
+          { id: "llm", label: "LLM & Auth", icon: Settings2 }
         ].map((tab) => (
           <button
             key={tab.id}
@@ -193,6 +309,8 @@ export default function SettingsPage() {
              </div>
           </div>
         )}
+
+        {activeTab === "llm" && <LlmAuthTab settings={settings} setSettings={setSettings} />}
 
         {activeTab === "crawling" && (
           <div className="space-y-8 max-w-2xl">
