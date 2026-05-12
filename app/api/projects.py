@@ -36,16 +36,21 @@ from app.schemas.project import (
 )
 from app.services.pipeline_presets import pipeline_steps_use_serp, resolve_pipeline_steps
 from app.services.site_utils import MARKUP_ONLY_SITE_KEY
-from app.workers.celery_app import celery_app
 
-# Imported to defer circular dep issues, will verify app.workers.tasks is available
-from app.workers.tasks import advance_project, process_site_project
+if settings.DESKTOP_MODE:
+    import asyncio as _asyncio
+    from app.services.project_runner import launch_project as _launch_project
+else:
+    from app.workers.celery_app import celery_app
+    from app.workers.tasks import advance_project, process_site_project
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
 def _revoke_project_celery_task(celery_task_id: str | None) -> None:
+    if settings.DESKTOP_MODE:
+        return  # asyncio tasks are cancelled via stopping_requested flag
     if not celery_task_id or not str(celery_task_id).strip():
         return
     try:
@@ -228,6 +233,8 @@ def _resolve_site_or_markup_only(
 
 
 def _ensure_worker_available() -> None:
+    if settings.DESKTOP_MODE:
+        return
     try:
         inspect = celery_app.control.inspect(timeout=3)
         ping = inspect.ping()
@@ -544,7 +551,7 @@ def cluster_project_keywords(body: ClusterKeywordsRequest, db: Session = Depends
 
 
 @router.post("/")
-def create_project(project_in: SiteProjectCreate, db: Session = Depends(get_db)):
+async def create_project(project_in: SiteProjectCreate, db: Session = Depends(get_db)):
     # Verify blueprint
     blueprint = db.query(SiteBlueprint).filter(SiteBlueprint.id == project_in.blueprint_id).first()
     if not blueprint:
@@ -635,9 +642,12 @@ def create_project(project_in: SiteProjectCreate, db: Session = Depends(get_db))
 
     _ensure_worker_available()
 
-    result = process_site_project.delay(str(new_project.id))
-    new_project.celery_task_id = result.id
-    db.commit()
+    if settings.DESKTOP_MODE:
+        _asyncio.create_task(_launch_project(str(new_project.id)))
+    else:
+        result = process_site_project.delay(str(new_project.id))
+        new_project.celery_task_id = result.id
+        db.commit()
 
     serp_warning = None
     try:
@@ -744,7 +754,7 @@ def update_project_draft(id: str, payload: SiteProjectUpdate, db: Session = Depe
 
 
 @router.post("/{id}/launch")
-def launch_project_draft(id: str, db: Session = Depends(get_db)):
+async def launch_project_draft(id: str, db: Session = Depends(get_db)):
     try:
         uid = uuid.UUID(str(id))
     except ValueError as e:
@@ -849,9 +859,12 @@ def launch_project_draft(id: str, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(project)
 
-    result = process_site_project.delay(str(project.id))
-    project.celery_task_id = result.id
-    db.commit()
+    if settings.DESKTOP_MODE:
+        _asyncio.create_task(_launch_project(str(project.id)))
+    else:
+        result = process_site_project.delay(str(project.id))
+        project.celery_task_id = result.id
+        db.commit()
 
     serp_warning = None
     try:
@@ -1273,7 +1286,7 @@ def clone_project(id: str, body: SiteProjectCloneBody, db: Session = Depends(get
 
 
 @router.post("/{id}/start")
-def start_project(id: str, db: Session = Depends(get_db)):
+async def start_project(id: str, db: Session = Depends(get_db)):
     project = db.query(SiteProject).filter(SiteProject.id == id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -1285,15 +1298,21 @@ def start_project(id: str, db: Session = Depends(get_db)):
 
     _ensure_worker_available()
 
-    result = process_site_project.delay(str(project.id))
-    project.celery_task_id = result.id
-    db.commit()
-
-    return {
-        "msg": "Project queued",
-        "project_id": str(project.id),
-        "celery_task_id": result.id,
-    }
+    if settings.DESKTOP_MODE:
+        _asyncio.create_task(_launch_project(str(project.id)))
+        return {
+            "msg": "Project queued",
+            "project_id": str(project.id),
+        }
+    else:
+        result = process_site_project.delay(str(project.id))
+        project.celery_task_id = result.id
+        db.commit()
+        return {
+            "msg": "Project queued",
+            "project_id": str(project.id),
+            "celery_task_id": result.id,
+        }
 
 
 @router.post("/{id}/unarchive")
@@ -1349,7 +1368,7 @@ def reset_project_status(id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{id}/retry-failed")
-def retry_failed_project_pages(id: str, db: Session = Depends(get_db)):
+async def retry_failed_project_pages(id: str, db: Session = Depends(get_db)):
     project = db.query(SiteProject).filter(SiteProject.id == id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -1363,7 +1382,10 @@ def retry_failed_project_pages(id: str, db: Session = Depends(get_db)):
     project.stopping_requested = False
     project.completed_at = None
     db.commit()
-    process_site_project.delay(str(project.id))
+    if settings.DESKTOP_MODE:
+        _asyncio.create_task(_launch_project(str(project.id)))
+    else:
+        process_site_project.delay(str(project.id))
     return {
         "msg": "Failed pages reset to pending; project run queued",
         "project_id": str(project.id),
@@ -1395,7 +1417,7 @@ def stop_project(id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{id}/resume")
-def resume_project(id: str, db: Session = Depends(get_db)):
+async def resume_project(id: str, db: Session = Depends(get_db)):
     project = db.query(SiteProject).filter(SiteProject.id == id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -1409,13 +1431,16 @@ def resume_project(id: str, db: Session = Depends(get_db)):
     db.commit()
 
     # Resume from where we left off
-    process_site_project.delay(str(project.id))
+    if settings.DESKTOP_MODE:
+        _asyncio.create_task(_launch_project(str(project.id)))
+    else:
+        process_site_project.delay(str(project.id))
 
     return {"msg": "Project resumed", "project_id": str(project.id)}
 
 
 @router.post("/{id}/approve-page")
-def approve_page(id: str, db: Session = Depends(get_db)):
+async def approve_page(id: str, db: Session = Depends(get_db)):
     """Approve latest completed page and continue project generation."""
     project = db.query(SiteProject).filter(SiteProject.id == id).first()
     if not project:
@@ -1435,7 +1460,10 @@ def approve_page(id: str, db: Session = Depends(get_db)):
     project.log_events = append_log_event(project.log_events, log_event, max_len=500)
     db.commit()
 
-    advance_project.delay(str(project.id), True)
+    if settings.DESKTOP_MODE:
+        _asyncio.create_task(_launch_project(str(project.id)))
+    else:
+        advance_project.delay(str(project.id), True)
     return {"msg": "Page approved, generation resumed", "project_id": str(project.id)}
 
 
