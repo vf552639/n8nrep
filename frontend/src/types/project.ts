@@ -50,6 +50,7 @@ export interface Project {
   seed_is_brand?: boolean;
   blueprint_id?: string | null;
   site_id?: string | null;
+  prompt_preset_id?: string | null;
   /** Draft: site UUID or domain string before launch (backend `target_site`). */
   target_site?: string | null;
   country?: string | null;
