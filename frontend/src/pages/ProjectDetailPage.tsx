@@ -1,6 +1,7 @@
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect, useMemo } from "react";
+import { useProjectEvents } from "@/hooks/useProjectEvents";
 import toast from "react-hot-toast";
 import api from "@/api/client";
 import { projectsApi } from "@/api/projects";
@@ -74,11 +75,12 @@ export default function ProjectDetailPage() {
       const res = await api.get<Project>(`/projects/${id}`);
       return res.data;
     },
-    refetchInterval: (query) => {
-      const p = query.state.data;
-      if (p?.status === "generating" || p?.status === "pending") return 3000;
-      return false;
-    }
+  });
+
+  const isActive = project?.status === "generating" || project?.status === "pending";
+
+  useProjectEvents(id, isActive ?? false, () => {
+    queryClient.invalidateQueries({ queryKey: ["project", id] });
   });
 
   useEffect(() => {

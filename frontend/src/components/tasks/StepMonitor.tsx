@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { tasksApi } from "@/api/tasks";
-import { usePolling } from "@/hooks/usePolling";
 import StepCard from "./StepCard";
 import { orderedStepKeysFromResults } from "@/lib/pipelineSteps";
 
@@ -15,7 +15,17 @@ export default function StepMonitor({ taskId, isActive }: Props) {
     queryFn: () => tasksApi.getSteps(taskId),
   });
 
-  usePolling(refetch, isActive ? 8000 : null);
+  useEffect(() => {
+    if (!isActive || !taskId) return;
+
+    const es = new EventSource(`/api/sse/tasks/${taskId}/events`);
+
+    es.onmessage = () => {
+      refetch();
+    };
+
+    return () => es.close();
+  }, [taskId, isActive, refetch]);
 
   if (!stepResp) return <div className="text-sm text-slate-500 text-center py-4">Loading pipeline steps...</div>;
 
