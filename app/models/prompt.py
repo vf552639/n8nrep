@@ -29,4 +29,6 @@ class Prompt(Base):
     presence_penalty_enabled = Column(Boolean, default=False, nullable=False, server_default="false")
     top_p = Column(Float, default=1.0)
     top_p_enabled = Column(Boolean, default=False, nullable=False, server_default="false")
+    effort = Column(String(20), nullable=False, server_default="low", default="low")
+    fast_mode = Column(Boolean, nullable=False, server_default="false", default=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
