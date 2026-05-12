@@ -28,6 +28,9 @@ pyinstaller \
 mkdir -p resources
 cp dist/sidecar resources/sidecar
 
+# Sign the standalone sidecar before electron-builder bundles it.
+bash scripts/sign-sidecar.sh resources/sidecar
+
 # 3. Electron
 echo "--- Building Electron app ---"
 cd electron
