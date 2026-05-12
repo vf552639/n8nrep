@@ -153,6 +153,20 @@ function LlmAuthTab({
           </p>
         </div>
       </div>
+
+      <div>
+        <h2 className="text-lg font-semibold text-slate-800 border-b pb-2 mb-4">Perplexity</h2>
+        <div className="border rounded-lg p-4 bg-white space-y-1">
+          <h3 className="font-semibold text-slate-900">Perplexity</h3>
+          <p className="text-xs text-slate-500">
+            Perplexity uses API-key auth only (no OAuth). Set
+            <code className="mx-1 px-1 bg-slate-100 rounded">PERPLEXITY_API_KEY</code>
+            under <strong>Integrations</strong>, then route prompts via
+            <code className="mx-1 px-1 bg-slate-100 rounded">provider = perplexity</code>
+            on the Prompts page.
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -294,13 +308,26 @@ export default function SettingsPage() {
                  </div>
                  <div>
                      <label className="block text-sm font-medium text-slate-700 mb-1">OpenAI API Key</label>
-                     <input 
-                       type="password" 
-                       value={settings.OPENAI_API_KEY || ""} 
+                     <input
+                       type="password"
+                       value={settings.OPENAI_API_KEY || ""}
                        onChange={(e) => setSettings({...settings, OPENAI_API_KEY: e.target.value})}
-                       className="w-full border p-2.5 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500 font-mono" 
+                       className="w-full border p-2.5 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500 font-mono"
                        placeholder="sk-..."
                      />
+                 </div>
+                 <div>
+                     <label className="block text-sm font-medium text-slate-700 mb-1">Perplexity API Key</label>
+                     <input
+                       type="password"
+                       value={settings.PERPLEXITY_API_KEY || ""}
+                       onChange={(e) => setSettings({ ...settings, PERPLEXITY_API_KEY: e.target.value })}
+                       className="w-full border p-2.5 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                       placeholder="pplx-..."
+                     />
+                     <p className="text-xs text-slate-400 mt-1">
+                       Used when <code className="px-1 bg-slate-100 rounded">prompt.provider</code> = perplexity (sonar, sonar-pro, etc).
+                     </p>
                  </div>
 
                  <div className="pt-2">
