@@ -19,6 +19,7 @@ from starlette.exceptions import HTTPException
 
 from app.api import (
     articles,
+    auth,
     authors,
     blueprints,
     dashboard,
@@ -161,6 +162,7 @@ async def add_security_headers(request: Request, call_next):
 
 
 # API Routers
+app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["Tasks"])
 app.include_router(articles.router, prefix="/api/articles", tags=["Articles"])
