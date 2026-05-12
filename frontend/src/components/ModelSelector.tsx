@@ -3,12 +3,27 @@ import { createPortal } from "react-dom";
 import { ChevronDown, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+export interface ModelGroup {
+  label: string;
+  models: string[];
+}
+
 interface ModelSelectorProps {
   value: string;
-  models: string[];
+  models: string[] | ModelGroup[];
   onChange: (model: string) => void;
-  /** Override width; default full width of parent */
   className?: string;
+}
+
+function isGrouped(models: string[] | ModelGroup[]): models is ModelGroup[] {
+  return models.length > 0 && typeof models[0] === "object" && "label" in (models[0] as object);
+}
+
+function flattenModels(models: string[] | ModelGroup[]): string[] {
+  if (isGrouped(models)) {
+    return models.flatMap((g) => g.models);
+  }
+  return models as string[];
 }
 
 export function ModelSelector({ value, models, onChange, className }: ModelSelectorProps) {
@@ -52,19 +67,51 @@ export function ModelSelector({ value, models, onChange, className }: ModelSelec
     }
   }, [isOpen]);
 
-  const filtered = models.filter((m) => m.toLowerCase().includes(search.toLowerCase()));
+  const lowerSearch = search.toLowerCase();
+
+  function renderItems() {
+    if (isGrouped(models)) {
+      return (models as ModelGroup[]).map((group) => {
+        const filtered = group.models.filter((m) => m.toLowerCase().includes(lowerSearch));
+        if (filtered.length === 0) return null;
+        return (
+          <div key={group.label}>
+            <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400 bg-slate-50 border-b border-slate-100">
+              {group.label}
+            </div>
+            {filtered.map((m) => (
+              <ModelItem key={m} model={m} selected={value === m} onSelect={handleSelect} />
+            ))}
+          </div>
+        );
+      });
+    }
+    const flat = (models as string[]).filter((m) => m.toLowerCase().includes(lowerSearch));
+    if (flat.length === 0) return <div className="p-3 text-center text-sm text-slate-500">No models found</div>;
+    return flat.map((m) => (
+      <ModelItem key={m} model={m} selected={value === m} onSelect={handleSelect} />
+    ));
+  }
+
+  function handleSelect(m: string) {
+    onChange(m);
+    setIsOpen(false);
+    setSearch("");
+  }
+
+  const hasResults = flattenModels(models).some((m) => m.toLowerCase().includes(lowerSearch));
 
   const menu =
     isOpen &&
     createPortal(
       <div
         ref={menuRef}
-        className="flex max-h-64 flex-col overflow-hidden rounded-xl border border-slate-300 bg-white shadow-xl"
+        className="flex max-h-72 flex-col overflow-hidden rounded-xl border border-slate-300 bg-white shadow-xl"
         style={{
           position: "fixed",
           top: menuPos.top,
           left: menuPos.left,
-          width: Math.max(menuPos.width, 220),
+          width: Math.max(menuPos.width, 240),
           zIndex: 100,
         }}
       >
@@ -81,34 +128,8 @@ export function ModelSelector({ value, models, onChange, className }: ModelSelec
             />
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-1">
-          {filtered.length > 0 ? (
-            filtered.map((m) => (
-              <div
-                key={m}
-                role="option"
-                tabIndex={0}
-                onClick={() => {
-                  onChange(m);
-                  setIsOpen(false);
-                  setSearch("");
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    onChange(m);
-                    setIsOpen(false);
-                    setSearch("");
-                  }
-                }}
-                className={`cursor-pointer rounded-md px-3 py-2 text-sm transition-colors ${
-                  value === m ? "bg-blue-50 font-medium text-blue-700" : "text-slate-700 hover:bg-slate-50"
-                }`}
-              >
-                {m}
-              </div>
-            ))
-          ) : (
+        <div className="flex-1 overflow-y-auto">
+          {hasResults ? renderItems() : (
             <div className="p-3 text-center text-sm text-slate-500">No models found</div>
           )}
         </div>
@@ -128,6 +149,35 @@ export function ModelSelector({ value, models, onChange, className }: ModelSelec
         <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
       </button>
       {menu}
+    </div>
+  );
+}
+
+function ModelItem({
+  model,
+  selected,
+  onSelect,
+}: {
+  model: string;
+  selected: boolean;
+  onSelect: (m: string) => void;
+}) {
+  return (
+    <div
+      role="option"
+      tabIndex={0}
+      onClick={() => onSelect(model)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect(model);
+        }
+      }}
+      className={`cursor-pointer px-3 py-2 text-sm transition-colors ${
+        selected ? "bg-blue-50 font-medium text-blue-700" : "text-slate-700 hover:bg-slate-50"
+      }`}
+    >
+      {model}
     </div>
   );
 }
