@@ -28,6 +28,7 @@ from app.api import (
     legal_pages,
     logs,
     projects,
+    prompt_presets,
     prompts,
     settings_api,
     sites,
@@ -173,6 +174,7 @@ app.include_router(templates.router, prefix="/api/templates", tags=["Templates"]
 app.include_router(legal_pages.router, prefix="/api/legal-pages", tags=["Legal Pages"])
 app.include_router(authors.router, prefix="/api/authors", tags=["Authors"])
 app.include_router(prompts.router, prefix="/api/prompts", tags=["Prompts"])
+app.include_router(prompt_presets.router, prefix="/api/prompt-presets", tags=["Prompts"])
 app.include_router(settings_api.router, prefix="/api/settings", tags=["Settings"])
 app.include_router(blueprints.router, prefix="/api/blueprints", tags=["Blueprints"])
 app.include_router(projects.router, prefix="/api/projects", tags=["Projects"])
