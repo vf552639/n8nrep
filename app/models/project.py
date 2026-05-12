@@ -15,6 +15,11 @@ class SiteProject(Base):
     id = Column(sa.Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(300), nullable=False)
     blueprint_id = Column(sa.Uuid(as_uuid=True), ForeignKey("site_blueprints.id"), nullable=True)
+    prompt_preset_id = Column(
+        sa.Uuid(as_uuid=True),
+        ForeignKey("prompt_presets.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     site_id = Column(sa.Uuid(as_uuid=True), ForeignKey("sites.id"), nullable=True)
     seed_keyword = Column(String(500), nullable=True)
     country = Column(String(10), nullable=True)

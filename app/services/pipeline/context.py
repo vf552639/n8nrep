@@ -22,10 +22,18 @@ class PipelineContext:
         self.db = db
         self.task_id = task_id
         self.auto_mode = auto_mode
+        self.prompt_preset_id = None
 
         self.task = db.query(Task).filter(Task.id == task_id).first()
         if not self.task:
             raise ValueError(f"Task {task_id} not found")
+
+        if self.task.project_id:
+            project_row = (
+                db.query(SiteProject).filter(SiteProject.id == self.task.project_id).first()
+            )
+            if project_row is not None:
+                self.prompt_preset_id = getattr(project_row, "prompt_preset_id", None)
 
         self.author: Author | None = None
         if self.task.author_id:

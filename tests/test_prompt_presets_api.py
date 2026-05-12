@@ -10,19 +10,26 @@ import pytest
 
 @pytest.fixture(scope="module", autouse=True)
 def _desktop_env(tmp_path_factory):
-    """Bootstrap desktop SQLite once per module — avoids stale `app.main`
-    references when the database module is reloaded mid-session."""
+    """Bootstrap desktop SQLite once per module. Saves/restores the app.* module
+    cache so downstream test modules that imported pipeline internals at the
+    top level keep working references."""
     db_path = tmp_path_factory.mktemp("p5_presets") / "db.sqlite"
     os.environ["AUTH_DISABLED"] = "true"
     os.environ["DESKTOP_MODE"] = "true"
     os.environ["SQLITE_DB_PATH"] = str(db_path)
-    for name in list(sys.modules):
-        if name.startswith("app."):
-            sys.modules.pop(name, None)
-    sys.modules.pop("app", None)
+    saved = {name: mod for name, mod in sys.modules.items() if name == "app" or name.startswith("app.")}
+    for name in list(saved):
+        sys.modules.pop(name, None)
     from app.main import _run_desktop_migrations
     _run_desktop_migrations()
     yield
+    # Restore the original module objects so other test modules' module-level
+    # imports (`from app.x import Y`) keep their cached references valid.
+    for name in [n for n in sys.modules if n == "app" or n.startswith("app.")]:
+        if name not in saved:
+            sys.modules.pop(name, None)
+    for name, mod in saved.items():
+        sys.modules[name] = mod
 
 
 @pytest.fixture(autouse=True)

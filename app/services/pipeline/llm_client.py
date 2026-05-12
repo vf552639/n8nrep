@@ -22,21 +22,16 @@ if TYPE_CHECKING:
 _logger = structlog.stdlib.get_logger(__name__)
 
 
-def get_prompt_obj(db: Session, agent_name: str) -> Prompt:
-    prompt_obj = db.query(Prompt).filter(Prompt.agent_name == agent_name, Prompt.is_active.is_(True)).first()
-    if not prompt_obj and agent_name == "content_fact_checking":
-        prompt_obj = (
-            db.query(Prompt).filter(Prompt.agent_name == "fact_checking", Prompt.is_active.is_(True)).first()
-        )
-    if not prompt_obj:
-        raise LLMError(f"No active prompt found for agent: {agent_name}")
-    return prompt_obj
+def get_prompt_obj(db: Session, agent_name: str, preset_id=None) -> Prompt:
+    from app.services.prompt_presets import resolve_prompt_for_agent
+    return resolve_prompt_for_agent(db, agent_name=agent_name, preset_id=preset_id)
 
 
 def call_agent(
     ctx: "PipelineContext", agent_name: str, context: str, response_format=None, variables: dict = None
 ) -> tuple[str, float, str, dict, dict]:
-    prompt = get_prompt_obj(ctx.db, agent_name)
+    preset_id = getattr(ctx, "prompt_preset_id", None)
+    prompt = get_prompt_obj(ctx.db, agent_name, preset_id=preset_id)
 
     if getattr(prompt, "skip_in_pipeline", False):
         print(f"Agent {agent_name} skipped (toggle off)")
