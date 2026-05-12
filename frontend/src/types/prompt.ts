@@ -19,8 +19,9 @@ export interface Prompt {
   response_format?: string;
   skip_in_pipeline?: boolean;
   min_output_length?: number;
-  effort?: string;
+  effort?: "low" | "medium" | "high" | "extra_high";
   fast_mode?: boolean;
+  provider?: "openrouter" | "anthropic" | "openai_codex" | "perplexity";
   updated_at: string;
 }
 

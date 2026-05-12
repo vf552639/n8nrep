@@ -491,7 +491,9 @@ export default function PromptsPage() {
                     <select
                       value={editState.effort ?? "low"}
                       onChange={(e) =>
-                        setEditState((prev) => (prev ? { ...prev, effort: e.target.value } : prev))
+                        setEditState((prev) =>
+                          prev ? { ...prev, effort: e.target.value as Prompt["effort"] } : prev,
+                        )
                       }
                       className="border rounded-md px-2 py-1.5 text-sm bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
                     >
