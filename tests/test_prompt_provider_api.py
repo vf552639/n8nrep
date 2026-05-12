@@ -17,13 +17,26 @@ def _desktop_env(tmp_path):
     os.environ["AUTH_DISABLED"] = "true"
     os.environ["DESKTOP_MODE"] = "true"
     os.environ["SQLITE_DB_PATH"] = str(tmp_path / "p4.sqlite")
-    for mod in list(sys.modules):
-        if mod.startswith("app."):
-            sys.modules.pop(mod, None)
-    # Lifespan-equivalent: run migrations once so the prompts table exists.
+    # Reload only the modules that cache SQLITE_DB_PATH at import time;
+    # leave the rest of `app.*` alone so concurrently-loaded test modules
+    # keep working references to llm_client / pipeline internals.
+    saved = {}
+    import importlib
+    for name in ("app.config", "app.database"):
+        if name in sys.modules:
+            saved[name] = sys.modules[name]
+            del sys.modules[name]
+    import app.config  # noqa: F401  — re-import with fresh env
+    import app.database  # noqa: F401  — picks up SQLITE_DB_PATH
     from app.main import _run_desktop_migrations
     _run_desktop_migrations()
     yield
+    # Restore the original module objects so other tests' top-level imports
+    # (which captured the old engine/session) keep functioning.
+    for name, mod in saved.items():
+        sys.modules[name] = mod
+    importlib.reload(sys.modules["app.config"])
+    importlib.reload(sys.modules["app.database"])
 
 
 def _seed_prompt(db, agent_name: str):
