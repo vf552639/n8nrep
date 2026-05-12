@@ -123,6 +123,7 @@ class SiteProjectCreate(BaseModel):
     legal_template_map: dict[str, str] | None = None
     use_site_template: bool = True
     competitor_urls: list[str] | None = None
+    prompt_preset_id: str | None = None
 
     @field_validator("competitor_urls", mode="before")
     @classmethod

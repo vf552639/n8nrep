@@ -325,6 +325,9 @@ def get_projects(
                 "name": p.name,
                 "blueprint_id": str(p.blueprint_id) if p.blueprint_id else None,
                 "site_id": str(p.site_id) if p.site_id else None,
+                "prompt_preset_id": (
+                    str(p.prompt_preset_id) if getattr(p, "prompt_preset_id", None) else None
+                ),
                 "seed_keyword": p.seed_keyword,
                 "seed_is_brand": getattr(p, "seed_is_brand", False),
                 "status": p.status,
@@ -620,6 +623,13 @@ async def create_project(project_in: SiteProjectCreate, db: Session = Depends(ge
 
     ltm_norm = _validate_legal_template_map(db, project_in.legal_template_map)
 
+    preset_uuid = None
+    if project_in.prompt_preset_id:
+        try:
+            preset_uuid = uuid.UUID(project_in.prompt_preset_id)
+        except (ValueError, AttributeError) as e:
+            raise HTTPException(status_code=400, detail="Invalid prompt_preset_id") from e
+
     new_project = SiteProject(
         name=project_in.name,
         blueprint_id=blueprint.id,
@@ -635,6 +645,7 @@ async def create_project(project_in: SiteProjectCreate, db: Session = Depends(ge
         legal_template_map=ltm_norm,
         use_site_template=bool(effective_use_site_template),
         competitor_urls=list(project_in.competitor_urls or []),
+        prompt_preset_id=preset_uuid,
     )
     db.add(new_project)
     db.commit()
@@ -1111,6 +1122,9 @@ def get_project_details(id: str, db: Session = Depends(get_db)):
         "name": project.name,
         "blueprint_id": str(project.blueprint_id) if project.blueprint_id else None,
         "site_id": str(project.site_id) if project.site_id else None,
+        "prompt_preset_id": (
+            str(project.prompt_preset_id) if getattr(project, "prompt_preset_id", None) else None
+        ),
         "seed_keyword": project.seed_keyword,
         "target_site": getattr(project, "target_site", None),
         "seed_is_brand": bool(getattr(project, "seed_is_brand", False)),
