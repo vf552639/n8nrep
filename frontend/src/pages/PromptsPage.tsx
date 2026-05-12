@@ -17,7 +17,16 @@ import {
   Search,
   PanelRightOpen,
   Copy,
+  Layers,
+  ChevronDown,
+  ChevronRight,
+  Plus,
+  Edit2,
+  Trash2,
 } from "lucide-react";
+import PromptPresetEditor from "@/components/PromptPresetEditor";
+import { promptPresetsApi } from "@/api/promptPresets";
+import type { PromptPreset, PromptPresetCreate } from "@/types/promptPreset";
 
 const AGENT_MAP: Record<string, string> = {
   ai_structure_analysis: "AI Structure Analysis",
@@ -237,6 +246,52 @@ export default function PromptsPage() {
   const [activePromptId, setActivePromptId] = useState<string | null>(null);
   const [editState, setEditState] = useState<Partial<Prompt> | null>(null);
   const [isTestOpen, setIsTestOpen] = useState(false);
+  const [presetsOpen, setPresetsOpen] = useState(false);
+  const [editingPreset, setEditingPreset] = useState<PromptPreset | null | undefined>(undefined);
+
+  const { data: presets = [] } = useQuery({
+    queryKey: ["prompt-presets"],
+    queryFn: () => promptPresetsApi.list(),
+  });
+
+  const createPresetMutation = useMutation({
+    mutationFn: (body: PromptPresetCreate) => promptPresetsApi.create(body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["prompt-presets"] });
+      toast.success("Preset created");
+      setEditingPreset(undefined);
+    },
+    onError: () => toast.error("Failed to create preset"),
+  });
+
+  const updatePresetMutation = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: PromptPresetCreate }) =>
+      promptPresetsApi.update(id, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["prompt-presets"] });
+      toast.success("Preset saved");
+      setEditingPreset(undefined);
+    },
+    onError: () => toast.error("Failed to save preset"),
+  });
+
+  const deletePresetMutation = useMutation({
+    mutationFn: (id: string) => promptPresetsApi.remove(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["prompt-presets"] });
+      toast.success("Preset deleted");
+    },
+    onError: () => toast.error("Failed to delete preset"),
+  });
+
+  async function submitPreset(body: PromptPresetCreate) {
+    if (editingPreset && editingPreset.id) {
+      await updatePresetMutation.mutateAsync({ id: editingPreset.id, body });
+    } else {
+      await createPresetMutation.mutateAsync(body);
+    }
+  }
+
   const [testTab, setTestTab] = useState<TestTab>("context");
   const [variablesQuery, setVariablesQuery] = useState("");
   const [paramsEnabled, setParamsEnabled] = useState({
@@ -471,6 +526,86 @@ export default function PromptsPage() {
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 px-3">
       <h1 className="shrink-0 text-xl font-bold text-slate-900">SEO Workflow Optimizer</h1>
+
+      <div className="shrink-0 rounded-lg border border-slate-300 bg-white">
+        <button
+          type="button"
+          onClick={() => setPresetsOpen((v) => !v)}
+          className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        >
+          <span className="flex items-center gap-2">
+            {presetsOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+            <Layers className="w-4 h-4" />
+            Prompt presets ({presets.length})
+          </span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setEditingPreset(null);
+              setPresetsOpen(true);
+            }}
+            className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
+          >
+            <Plus className="w-3 h-3" /> New preset
+          </button>
+        </button>
+        {presetsOpen && (
+          <div className="border-t border-slate-200 p-3 space-y-2">
+            {presets.length === 0 && editingPreset === undefined && (
+              <div className="text-xs text-slate-500">
+                No presets yet. Create one to curate per-agent prompt selections; projects can pick a preset on creation.
+              </div>
+            )}
+            {presets.map((p) => (
+              <div
+                key={p.id}
+                className="flex items-center justify-between text-sm border border-slate-200 rounded px-3 py-2"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="font-medium text-slate-800">{p.name}</span>
+                  {p.is_default && (
+                    <span className="text-[10px] uppercase tracking-wide bg-green-100 text-green-700 px-1.5 py-0.5 rounded">
+                      default
+                    </span>
+                  )}
+                  <span className="text-xs text-slate-500">{p.items.length} overrides</span>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className="text-blue-600 hover:text-blue-700"
+                    onClick={() => setEditingPreset(p)}
+                    aria-label={`Edit ${p.name}`}
+                  >
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    className="text-red-600 hover:text-red-700"
+                    onClick={() => {
+                      if (window.confirm(`Delete preset "${p.name}"?`)) {
+                        deletePresetMutation.mutate(p.id);
+                      }
+                    }}
+                    aria-label={`Delete ${p.name}`}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+            {editingPreset !== undefined && (
+              <PromptPresetEditor
+                initial={editingPreset}
+                onSubmit={submitPreset}
+                onCancel={() => setEditingPreset(undefined)}
+                busy={createPresetMutation.isPending || updatePresetMutation.isPending}
+              />
+            )}
+          </div>
+        )}
+      </div>
 
       {activePromptListInfo && editState && !isLoadingPrompt && (
         <div className="w-full min-w-0 shrink-0 rounded-xl border border-slate-300/80 bg-gradient-to-b from-[#e8ebef] to-[#d5d9df] px-4 py-2.5 shadow-md">
