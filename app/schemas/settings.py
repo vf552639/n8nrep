@@ -3,6 +3,7 @@ from pydantic import BaseModel
 
 class SettingsUpdate(BaseModel):
     OPENROUTER_API_KEY: str | None = None
+    PERPLEXITY_API_KEY: str | None = None
     DATAFORSEO_LOGIN: str | None = None
     DATAFORSEO_PASSWORD: str | None = None
     SERPAPI_KEY: str | None = None

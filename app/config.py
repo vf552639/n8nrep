@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     OPENAI_OAUTH_DIR: str = ""  # resolved in validator when empty (~/.codex)
+    # Perplexity
+    PERPLEXITY_API_KEY: str = ""
+    PERPLEXITY_BASE_URL: str = "https://api.perplexity.ai"
     OPENROUTER_HTTP_REFERER: str = "https://example.com"
     DEFAULT_MODEL: str = "openai/gpt-5"
     ANALYST_MODEL: str = "google/gemini-2.5-pro"
