@@ -74,3 +74,26 @@ def test_dispatch_routes_to_openai_codex():
         kwargs = gtc.call_args.kwargs
         assert kwargs["model"] == "gpt-5"
         assert "effort" not in kwargs  # codex provider does not consume effort
+
+
+def test_dispatch_routes_to_perplexity():
+    from app.services.llm import dispatch_llm
+    with patch("app.services.llm_providers.perplexity.generate_text_perplexity") as gtp:
+        gtp.return_value = (
+            "hi from pplx",
+            0.001,
+            "sonar-pro",
+            {"prompt_tokens": 10, "completion_tokens": 5},
+        )
+        text, cost, model, _ = dispatch_llm(
+            provider="perplexity",
+            system_prompt="s",
+            user_prompt="u",
+            model="sonar-pro",
+            temperature=0.7,
+            max_tokens=100,
+            timeout=60,
+        )
+        assert gtp.called
+        assert model == "sonar-pro"
+        assert text == "hi from pplx"
