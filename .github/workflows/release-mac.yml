@@ -1,0 +1,57 @@
+name: release-mac
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    if: false  # enable once secrets are configured
+    runs-on: macos-14
+    timeout-minutes: 60
+    env:
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      CSC_LINK: ${{ secrets.MAC_CERTS }}             # base64-encoded .p12
+      CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTS_PASSWORD }}
+      AUTO_UPDATE_FEED_URL: ${{ secrets.AUTO_UPDATE_FEED_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Python deps + PyInstaller
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller>=6.5.0
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install electron deps
+        working-directory: electron
+        run: npm ci
+
+      - name: Build everything
+        run: bash scripts/build.sh
+
+      - name: Upload .dmg artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dmg
+          path: release/*.dmg
+
+      - name: Publish to update feed
+        if: ${{ env.AUTO_UPDATE_FEED_URL != '' }}
+        run: |
+          echo "TODO: rsync/aws s3 cp release/*.dmg release/*.yml ${{ env.AUTO_UPDATE_FEED_URL }}"
+          # Implement the upload step that matches your update-feed provider.
