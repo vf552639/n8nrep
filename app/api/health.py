@@ -1,13 +1,18 @@
 from fastapi import APIRouter, Query
 
-from app.workers.celery_app import celery_app
+from app.config import settings
 
 router = APIRouter()
 
 
 @router.get("/worker")
 def check_worker_health():
-    """Check Celery worker availability and current load."""
+    if settings.DESKTOP_MODE:
+        from app.services.project_runner import get_runner_status
+        return get_runner_status()
+    # Web mode: Celery inspect
+    from app.workers.celery_app import celery_app
+
     try:
         inspect = celery_app.control.inspect(timeout=3)
         ping = inspect.ping()
