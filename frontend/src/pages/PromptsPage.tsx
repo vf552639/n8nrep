@@ -5,7 +5,7 @@ import toast from "react-hot-toast";
 import api from "@/api/client";
 import { promptsApi } from "@/api/prompts";
 import { Prompt } from "@/types/prompt";
-import { ModelSelector } from "@/components/ModelSelector";
+import { ModelSelector, ModelGroup } from "@/components/ModelSelector";
 import { ToggleSwitch } from "@/components/ToggleSwitch";
 import CopyButton from "@/components/common/CopyButton";
 import {
@@ -276,6 +276,12 @@ export default function PromptsPage() {
     staleTime: 3600000,
   });
 
+  const CLAUDE_MODELS = ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"];
+  const groupedModels: ModelGroup[] = [
+    { label: "Claude (Direct)", models: CLAUDE_MODELS },
+    { label: "OpenRouter", models: orModels ?? [] },
+  ];
+
   const { data: fullPrompt, isLoading: isLoadingPrompt } = useQuery({
     queryKey: ["prompt", derivedActiveId],
     queryFn: () => (derivedActiveId ? promptsApi.getOne(derivedActiveId) : null),
@@ -295,7 +301,12 @@ export default function PromptsPage() {
     if (!fullPrompt || fullPrompt.id !== derivedActiveId) return;
 
     if (syncedPromptIdRef.current !== fullPrompt.id) {
-      setEditState(buildCleanPromptFromServer(fullPrompt));
+      const clean = buildCleanPromptFromServer(fullPrompt);
+      setEditState({
+        ...clean,
+        effort: clean.effort ?? "low",
+        fast_mode: clean.fast_mode ?? false,
+      });
       setParamsEnabled(paramsEnabledFromPrompt(fullPrompt));
       syncedPromptIdRef.current = fullPrompt.id;
     }
@@ -327,6 +338,8 @@ export default function PromptsPage() {
         top_p: paramsEnabled.top ? (data.top_p ?? 0) : 0,
         top_p_enabled: paramsEnabled.top,
         skip_in_pipeline: !!data.skip_in_pipeline,
+        effort: data.effort ?? "low",
+        fast_mode: data.fast_mode ?? false,
       });
     },
     onSuccess: (fullUpdatedPrompt) => {
@@ -467,9 +480,43 @@ export default function PromptsPage() {
               <ModelSelector
                 className="w-[240px]"
                 value={editState.model || "openai/gpt-4o"}
-                models={orModels || ["openai/gpt-4o"]}
+                models={groupedModels}
                 onChange={(m) => setEditState((prev) => (prev ? { ...prev, model: m } : prev))}
               />
+              {/* Effort + Fast mode — only for direct Claude models */}
+              {(editState.model || "").startsWith("claude-") && (
+                <div className="flex items-center gap-4 mt-2">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">Effort (thinking)</label>
+                    <select
+                      value={editState.effort ?? "low"}
+                      onChange={(e) =>
+                        setEditState((prev) => (prev ? { ...prev, effort: e.target.value } : prev))
+                      }
+                      className="border rounded-md px-2 py-1.5 text-sm bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    >
+                      <option value="low">Low (no thinking)</option>
+                      <option value="medium">Medium (5k tokens)</option>
+                      <option value="high">High (10k tokens)</option>
+                      <option value="extra_high">Extra High (20k tokens)</option>
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2 mt-4">
+                    <input
+                      type="checkbox"
+                      id="fast_mode"
+                      checked={editState.fast_mode ?? false}
+                      onChange={(e) =>
+                        setEditState((prev) => (prev ? { ...prev, fast_mode: e.target.checked } : prev))
+                      }
+                      className="w-4 h-4 rounded border-slate-300"
+                    />
+                    <label htmlFor="fast_mode" className="text-sm text-slate-700 cursor-pointer">
+                      Fast mode (skip thinking)
+                    </label>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="w-[170px] shrink-0">

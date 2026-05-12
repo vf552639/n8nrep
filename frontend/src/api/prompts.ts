@@ -34,6 +34,8 @@ export const promptsApi = {
       top_p?: number;
       top_p_enabled: boolean;
       skip_in_pipeline: boolean;
+      effort: string;
+      fast_mode: boolean;
     }
   ) => api.put<Prompt>(`/prompts/${id}`, data).then((res) => res.data),
     
