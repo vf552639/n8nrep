@@ -3,6 +3,7 @@ import { spawn, ChildProcess } from "child_process";
 import * as path from "path";
 import * as net from "net";
 import * as http from "http";
+import { registerLoginHandlers } from "./login_handlers";
 
 let sidecar: ChildProcess | null = null;
 let mainWindow: BrowserWindow | null = null;
@@ -107,6 +108,7 @@ app.whenReady().then(async () => {
     await startSidecar(port);
     await waitForSidecar(port);
     await createWindow(port);
+    if (mainWindow) registerLoginHandlers(mainWindow);
   } catch (err) {
     dialog.showErrorBox(
       "Startup failed",
