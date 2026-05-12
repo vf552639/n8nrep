@@ -86,6 +86,14 @@ def add_log(db: Session, task: Task, msg: str, level: str = "info", step: str = 
     task.log_events = append_log_event(task.log_events, event, max_len=500)
     db.commit()
 
+    # Push to SSE subscribers (thread-safe — pipeline runs in executor)
+    from app.services import event_bus as _event_bus  # local import avoids circular dep at module load
+
+    payload = event.model_dump(mode="json", exclude_none=True)
+    _event_bus.publish(f"task:{task.id}", payload)
+    if task.project_id:
+        _event_bus.publish(f"project:{task.project_id}", payload)
+
 
 def completed_step_body(task: Task, step_key: str) -> str:
     sr = task.step_results or {}
