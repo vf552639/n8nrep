@@ -80,7 +80,7 @@ def test_call_agent_survives_callback_db_error(pipeline_ctx):
     with (
         patch("app.services.pipeline.llm_client.get_prompt_obj", return_value=prompt),
         patch("app.services.pipeline.llm_client.add_log", side_effect=add_log_side_effect),
-        patch("app.services.pipeline.llm_client.generate_text", side_effect=fake_generate_text),
+        patch("app.services.llm.dispatch_llm", side_effect=fake_generate_text),
     ):
         res, _cost, _model, _, _ = call_agent(ctx, "reader_opinion", "ctx", variables=None)
 

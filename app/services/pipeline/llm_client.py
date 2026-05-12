@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models.prompt import Prompt
 from app.services.exclude_words_validator import ExcludeWordsValidator
-from app.services.llm import route_to_provider, timeout_for_model
+from app.services.llm import timeout_for_model
 from app.services.pipeline.errors import InsufficientCreditsError, LLMError
 from app.services.pipeline.persistence import add_log
 from app.services.pipeline.vars import apply_template_vars
@@ -161,6 +161,9 @@ def call_agent(
         "system_prompt": system_text,
         "user_prompt": user_msg,
         "model": prompt.model,
+        "provider": getattr(prompt, "provider", "openrouter") or "openrouter",
+        "effort": getattr(prompt, "effort", "low") or "low",
+        "fast_mode": bool(getattr(prompt, "fast_mode", False)),
         **sampling,
     }
     if response_format:
@@ -272,7 +275,8 @@ def call_agent(
     kwargs["progress_callback"] = _on_llm_progress
 
     try:
-        res, cost, model, _ = route_to_provider(**kwargs)
+        from app.services.llm import dispatch_llm
+        res, cost, model, _ = dispatch_llm(**kwargs)
     except InsufficientCreditsError:
         try:
             ctx.db.rollback()

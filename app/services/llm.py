@@ -330,3 +330,81 @@ def generate_text(
     raise Exception(
         f"LLM Generation failed after {max_retries} attempts. Model: {model}. Last error: {last_error}"
     )
+
+
+def dispatch_llm(
+    *,
+    provider: str,
+    system_prompt: str,
+    user_prompt: str,
+    model: str,
+    temperature: float = 0.7,
+    max_tokens: int | None = None,
+    timeout: int = 600,
+    frequency_penalty: float | None = None,
+    presence_penalty: float | None = None,
+    top_p: float | None = None,
+    effort: str = "low",
+    fast_mode: bool = False,
+    response_format: dict[str, str] | None = None,
+    progress_callback: Callable[[str, dict[str, Any]], None] | None = None,
+    max_retries: int = 2,
+) -> tuple[str, float, str, dict[str, Any] | None]:
+    """Dispatch LLM call by provider. Returns (text, cost, actual_model, usage)."""
+    if provider == "openrouter":
+        return generate_text(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=model,
+            temperature=temperature,
+            frequency_penalty=frequency_penalty,
+            presence_penalty=presence_penalty,
+            top_p=top_p,
+            max_tokens=max_tokens,
+            max_retries=max_retries,
+            response_format=response_format,
+            timeout=timeout,
+            progress_callback=progress_callback,
+        )
+
+    if provider == "anthropic":
+        from app.services.llm_providers.claude import generate_text_claude
+        return generate_text_claude(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            effort=effort,
+            fast_mode=fast_mode,
+            timeout=timeout,
+            progress_callback=progress_callback,
+        )
+
+    if provider == "openai_codex":
+        from app.services.llm_providers.openai_codex import generate_text_codex
+        return generate_text_codex(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            progress_callback=progress_callback,
+            response_format=response_format,
+        )
+
+    if provider == "perplexity":
+        # Phase 6 will register this. Until then, the import fails when requested.
+        from app.services.llm_providers.perplexity import generate_text_perplexity
+        return generate_text_perplexity(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            progress_callback=progress_callback,
+        )
+
+    raise ValueError(f"Unknown provider: {provider!r}")
