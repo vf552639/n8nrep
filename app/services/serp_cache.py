@@ -7,6 +7,8 @@ from app.config import settings
 
 
 def _get_redis_client():
+    if settings.DESKTOP_MODE:
+        return None  # desktop uses in-memory TTL cache
     if not settings.SERP_CACHE_ENABLED:
         return None
     try:
@@ -17,6 +19,13 @@ def _get_redis_client():
         return redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
     except Exception:
         return None
+
+
+def _get_memory_cache():
+    if not settings.DESKTOP_MODE:
+        return None
+    from app.services.memory_cache import _cache
+    return _cache
 
 
 def _safe_json_loads(raw: str | None) -> dict | None:
@@ -41,10 +50,14 @@ def _serp_cache_key(
 def invalidate_serp_cache(
     keyword: str, country_code: str, language_code: str, serp_config: dict | None = None
 ) -> bool:
+    key = _serp_cache_key(keyword, country_code, language_code, serp_config)
+    mem = _get_memory_cache()
+    if mem:
+        mem.delete(key)
+        return True
     client = _get_redis_client()
     if not client:
         return False
-    key = _serp_cache_key(keyword, country_code, language_code, serp_config)
     try:
         return bool(client.delete(key))
     except Exception:
@@ -59,9 +72,16 @@ def get_cached_serp(
     fetch_fn: Callable[[str, str, str, dict | None], dict[str, Any]],
     force_refresh: bool = False,
 ) -> dict[str, Any]:
-    client = _get_redis_client()
     key = _serp_cache_key(keyword, country_code, language_code, serp_config)
 
+    mem = _get_memory_cache()
+    if mem and not force_refresh:
+        cached = mem.get(key)
+        if cached is not None:
+            cached["_from_cache"] = True
+            return cached
+
+    client = _get_redis_client()
     if client and not force_refresh:
         try:
             cached = _safe_json_loads(client.get(key))
@@ -77,7 +97,9 @@ def get_cached_serp(
 
     result.setdefault("_from_cache", False)
 
-    if client:
+    if mem:
+        mem.set(key, result, ttl=int(settings.SERP_CACHE_TTL))
+    elif client:
         try:
             client.setex(key, int(settings.SERP_CACHE_TTL), json.dumps(result, ensure_ascii=False))
         except Exception:
@@ -90,22 +112,31 @@ def _scrape_cache_key(url: str) -> str:
 
 
 def get_cached_scrape_item(url: str) -> dict | None:
+    key = _scrape_cache_key(url)
+    mem = _get_memory_cache()
+    if mem:
+        return mem.get(key)
     client = _get_redis_client()
     if not client:
         return None
     try:
-        return _safe_json_loads(client.get(_scrape_cache_key(url)))
+        return _safe_json_loads(client.get(key))
     except Exception:
         return None
 
 
 def set_cached_scrape_item(url: str, parsed_data: dict) -> None:
+    key = _scrape_cache_key(url)
+    mem = _get_memory_cache()
+    if mem:
+        mem.set(key, parsed_data, ttl=int(settings.SCRAPE_CACHE_TTL))
+        return
     client = _get_redis_client()
     if not client:
         return
     try:
         client.setex(
-            _scrape_cache_key(url),
+            key,
             int(settings.SCRAPE_CACHE_TTL),
             json.dumps(parsed_data, ensure_ascii=False),
         )
