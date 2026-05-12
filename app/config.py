@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     # LLM
     OPENROUTER_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
+    # OpenAI / Codex
+    OPENAI_API_KEY: str = ""
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
+    OPENAI_OAUTH_DIR: str = ""  # resolved in validator when empty (~/.codex)
     OPENROUTER_HTTP_REFERER: str = "https://example.com"
     DEFAULT_MODEL: str = "openai/gpt-5"
     ANALYST_MODEL: str = "google/gemini-2.5-pro"
@@ -96,6 +100,8 @@ class Settings(BaseSettings):
             # macOS standard app data dir (this app targets macOS only)
             default_dir = Path.home() / "Library" / "Application Support" / "n8nrep-desktop"
             self.SQLITE_DB_PATH = str(default_dir / "db.sqlite")
+        if not self.OPENAI_OAUTH_DIR:
+            self.OPENAI_OAUTH_DIR = str(Path.home() / ".codex")
         if not self.DESKTOP_MODE and not self.SUPABASE_DB_URL:
             raise ValueError("SUPABASE_DB_URL is required in web mode (DESKTOP_MODE=false)")
         return self
