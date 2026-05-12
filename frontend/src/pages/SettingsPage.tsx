@@ -3,6 +3,8 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { Save, Settings2, Webhook, BoxSelect } from "lucide-react";
 import api from "@/api/client";
+import LoginPanel from "@/components/LoginPanel";
+import { codexAuthApi } from "@/api/auth";
 
 function LlmAuthTab({
   settings,
@@ -112,6 +114,42 @@ function LlmAuthTab({
           />
           <p className="text-xs text-slate-400 mt-1">
             Used only if Claude OAuth is not active. Save settings to persist.
+          </p>
+        </div>
+      </div>
+
+      <div>
+        <h2 className="text-lg font-semibold text-slate-800 border-b pb-2 mb-4">
+          OpenAI / ChatGPT (Codex CLI)
+        </h2>
+        <p className="text-sm text-slate-500 mb-4">
+          Reuse your ChatGPT subscription via the OpenAI Codex CLI. Reads
+          <code className="mx-1 px-1 bg-slate-100 rounded text-xs">~/.codex/auth.json</code>;
+          falls back to <code className="mx-1 px-1 bg-slate-100 rounded text-xs">OPENAI_API_KEY</code>.
+        </p>
+        <LoginPanel
+          provider="codex"
+          label="OpenAI / ChatGPT (Codex CLI)"
+          api={codexAuthApi}
+          electronLogin={
+            (window as unknown as {
+              electron?: { codex?: { runLogin?: () => Promise<{ ok: boolean; error?: string }> } };
+            }).electron?.codex?.runLogin
+          }
+        />
+        <div className="mt-4 max-w-md">
+          <label className="block text-sm font-medium text-slate-700 mb-1">
+            OpenAI API Key (alternative to Codex CLI)
+          </label>
+          <input
+            type="password"
+            value={settings.OPENAI_API_KEY || ""}
+            onChange={(e) => setSettings({ ...settings, OPENAI_API_KEY: e.target.value })}
+            className="w-full border p-2.5 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+            placeholder="sk-..."
+          />
+          <p className="text-xs text-slate-400 mt-1">
+            Used only if Codex OAuth is not active. Save settings to persist.
           </p>
         </div>
       </div>
