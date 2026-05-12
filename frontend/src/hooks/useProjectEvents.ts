@@ -16,6 +16,8 @@ export function useProjectEvents(
 ) {
   const [events, setEvents] = useState<ProjectEvent[]>([]);
   const esRef = useRef<EventSource | null>(null);
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
 
   useEffect(() => {
     if (!active || !projectId) return;
@@ -27,7 +29,7 @@ export function useProjectEvents(
       try {
         const evt: ProjectEvent = JSON.parse(e.data);
         if (evt.type === "done") {
-          onDone?.(evt.status ?? "completed");
+          onDoneRef.current?.(evt.status ?? "completed");
           es.close();
           esRef.current = null;
           return;

@@ -859,10 +859,12 @@ async def launch_project_draft(id: str, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(project)
 
+    celery_task_id = None
     if settings.DESKTOP_MODE:
         _asyncio.create_task(_launch_project(str(project.id)))
     else:
         result = process_site_project.delay(str(project.id))
+        celery_task_id = result.id
         project.celery_task_id = result.id
         db.commit()
 
@@ -886,7 +888,7 @@ async def launch_project_draft(id: str, db: Session = Depends(get_db)):
     return {
         "id": str(project.id),
         "status": "Project queued",
-        "celery_task_id": result.id,
+        "celery_task_id": celery_task_id,
         "serp_warning": serp_warning,
     }
 

@@ -105,7 +105,7 @@ async def lifespan(_app: FastAPI):
     if settings.DESKTOP_MODE:
         _run_desktop_migrations()
         from app.services import event_bus as _event_bus
-        _event_bus.init(asyncio.get_event_loop())
+        _event_bus.init(asyncio.get_running_loop())
         from app.services.project_runner import start_cleanup_loop
         cleanup_task = asyncio.create_task(start_cleanup_loop())
     else:
