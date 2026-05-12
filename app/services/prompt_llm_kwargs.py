@@ -82,6 +82,8 @@ def llm_sampling_kwargs_from_prompt(
         out["top_p"] = eff_top_p
     if mte and mt is not None and mt > 0:
         out["max_tokens"] = int(mt)
+    out["effort"] = getattr(prompt, "effort", None) or "low"
+    out["fast_mode"] = bool(getattr(prompt, "fast_mode", False))
     return out
 
 

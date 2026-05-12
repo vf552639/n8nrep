@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models.prompt import Prompt
 from app.services.exclude_words_validator import ExcludeWordsValidator
-from app.services.llm import generate_text, timeout_for_model
+from app.services.llm import route_to_provider, timeout_for_model
 from app.services.pipeline.errors import InsufficientCreditsError, LLMError
 from app.services.pipeline.persistence import add_log
 from app.services.pipeline.vars import apply_template_vars
@@ -272,7 +272,7 @@ def call_agent(
     kwargs["progress_callback"] = _on_llm_progress
 
     try:
-        res, cost, model, _ = generate_text(**kwargs)
+        res, cost, model, _ = route_to_provider(**kwargs)
     except InsufficientCreditsError:
         try:
             ctx.db.rollback()

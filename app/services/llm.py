@@ -55,6 +55,40 @@ def get_openai_client() -> OpenAI:
     return _openai_client
 
 
+_CLAUDE_PREFIXES = ("claude-opus-", "claude-sonnet-", "claude-haiku-")
+
+
+def route_to_provider(
+    system_prompt: str,
+    user_prompt: str,
+    model: str,
+    effort: str = "low",
+    fast_mode: bool = False,
+    **kwargs,
+) -> tuple[str, float, str, dict | None]:
+    """Route LLM call to Anthropic SDK (direct) or OpenRouter based on model name."""
+    if model.startswith(_CLAUDE_PREFIXES):
+        from app.services.llm_providers.claude import generate_text_claude
+
+        return generate_text_claude(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=model,
+            max_tokens=kwargs.get("max_tokens"),
+            temperature=kwargs.get("temperature", 0.7),
+            effort=effort,
+            fast_mode=fast_mode,
+            timeout=kwargs.get("timeout", settings.LLM_REQUEST_TIMEOUT),
+            progress_callback=kwargs.get("progress_callback"),
+        )
+    return generate_text(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        model=model,
+        **kwargs,
+    )
+
+
 def generate_text(
     system_prompt: str,
     user_prompt: str,
