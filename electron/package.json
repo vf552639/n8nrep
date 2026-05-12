@@ -4,8 +4,8 @@
   "description": "SEO content generator — macOS desktop app",
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "tsc -p electron/tsconfig.json --outDir dist-electron && electron dist-electron/main.js",
-    "build:electron": "tsc -p electron/tsconfig.json --outDir dist-electron",
+    "dev": "tsc -p tsconfig.json --outDir ../dist-electron && electron ../dist-electron/main.js",
+    "build:electron": "tsc -p tsconfig.json --outDir ../dist-electron",
     "dist": "npm run build:electron && electron-builder --mac"
   },
   "devDependencies": {
@@ -14,23 +14,50 @@
     "typescript": "^5.4.5",
     "@types/node": "^20.12.12"
   },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
   "build": {
     "appId": "com.n8nrep.desktop",
     "productName": "n8nrep",
+    "asar": true,
+    "afterSign": "notarize.js",
     "mac": {
       "category": "public.app-category.productivity",
-      "target": [{ "target": "dmg", "arch": ["arm64", "x64"] }]
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "entitlements.mac.plist",
+      "entitlementsInherit": "entitlements.mac.plist",
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] },
+        { "target": "zip", "arch": ["arm64", "x64"] }
+      ],
+      "extendInfo": {
+        "NSCameraUsageDescription": "Not used",
+        "NSMicrophoneUsageDescription": "Not used"
+      }
+    },
+    "dmg": {
+      "sign": false
     },
     "files": [
-      "dist-electron/**/*",
-      "frontend/dist/**/*",
-      "resources/**/*"
+      "../dist-electron/**/*",
+      "../frontend/dist/**/*",
+      "../resources/**/*"
     ],
     "extraResources": [
-      { "from": "resources/", "to": "resources/" }
+      { "from": "../resources/", "to": "resources/" }
+    ],
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "${env.AUTO_UPDATE_FEED_URL}",
+        "channel": "latest"
+      }
     ],
     "directories": {
-      "output": "release"
+      "output": "../release",
+      "buildResources": "."
     }
   }
 }
