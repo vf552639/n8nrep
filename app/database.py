@@ -26,9 +26,20 @@ if settings.DESKTOP_MODE:
         async_engine, class_=AsyncSession, expire_on_commit=False
     )
 
-    # Stub sync engine — should not be used in desktop mode
-    engine = None  # type: ignore[assignment]
-    SessionLocal = None  # type: ignore[assignment]
+    # Sync engine — used by pipeline steps in thread-pool executor (run_in_executor)
+    _sqlite_sync_url = f"sqlite:///{settings.SQLITE_DB_PATH}"
+    engine = create_engine(
+        _sqlite_sync_url,
+        connect_args={"check_same_thread": False},
+        echo=False,
+    )
+
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragmas(dbapi_conn, _):
+        dbapi_conn.execute("PRAGMA journal_mode=WAL")
+        dbapi_conn.execute("PRAGMA foreign_keys=ON")
+
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 else:
     # PostgreSQL engine via psycopg2 — pool tuning for Supabase/Supavisor (idle-in-transaction, stale conns)
