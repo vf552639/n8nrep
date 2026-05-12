@@ -14,6 +14,8 @@ class PromptCreate(BaseModel):
     presence_penalty: float | None = 0.0
     top_p: float | None = 1.0
     skip_in_pipeline: bool = False
+    effort: str = "low"
+    fast_mode: bool = False
 
 
 class PromptUpdate(BaseModel):
@@ -33,6 +35,8 @@ class PromptUpdate(BaseModel):
     top_p: float | None = 1.0
     top_p_enabled: bool = False
     skip_in_pipeline: bool = False
+    effort: str = "low"
+    fast_mode: bool = False
 
 
 class PromptTest(BaseModel):

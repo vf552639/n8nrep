@@ -125,6 +125,8 @@ def _prompt_to_response(prompt: Prompt) -> dict[str, Any]:
         "presence_penalty_enabled": bool(getattr(prompt, "presence_penalty_enabled", False)),
         "top_p": prompt.top_p if prompt.top_p is not None else 1.0,
         "top_p_enabled": bool(getattr(prompt, "top_p_enabled", False)),
+        "effort": getattr(prompt, "effort", "low") or "low",
+        "fast_mode": bool(getattr(prompt, "fast_mode", False)),
         "updated_at": prompt.updated_at.isoformat() if prompt.updated_at else None,
     }
 
@@ -156,6 +158,8 @@ def update_prompt_in_place(prompt_id: str, body: PromptUpdate, db: Session = Dep
     prompt.top_p = body.top_p
     prompt.top_p_enabled = body.top_p_enabled
     prompt.skip_in_pipeline = body.skip_in_pipeline
+    prompt.effort = body.effort
+    prompt.fast_mode = body.fast_mode
     db.commit()
     db.refresh(prompt)
     return _prompt_to_response(prompt)
@@ -196,6 +200,8 @@ def create_prompt(prompt_in: PromptCreate, db: Session = Depends(get_db)):
         presence_penalty_enabled=abs(float(p_val)) > 0.0001,
         top_p=tp_val,
         top_p_enabled=abs(float(tp_val) - 1.0) > 0.0001,
+        effort=prompt_in.effort,
+        fast_mode=prompt_in.fast_mode,
     )
     db.add(new_prompt)
     db.commit()
