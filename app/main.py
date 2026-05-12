@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import subprocess
@@ -28,6 +29,7 @@ from app.api import (
     prompts,
     settings_api,
     sites,
+    sse,
     tasks,
     templates,
 )
@@ -102,9 +104,19 @@ async def lifespan(_app: FastAPI):
         )
     if settings.DESKTOP_MODE:
         _run_desktop_migrations()
+        from app.services import event_bus as _event_bus
+        _event_bus.init(asyncio.get_event_loop())
+        from app.services.project_runner import start_cleanup_loop
+        cleanup_task = asyncio.create_task(start_cleanup_loop())
     else:
         verify_migrations()
     yield
+    if settings.DESKTOP_MODE:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(
@@ -138,6 +150,9 @@ app.add_middleware(
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
+    # Skip buffering middleware for SSE streaming endpoints to avoid blocking the response stream.
+    if request.url.path.startswith("/api/sse"):
+        return await call_next(request)
     response = await call_next(request)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
@@ -159,6 +174,7 @@ app.include_router(blueprints.router, prefix="/api/blueprints", tags=["Blueprint
 app.include_router(projects.router, prefix="/api/projects", tags=["Projects"])
 app.include_router(health.router, prefix="/api/health", tags=["Health"])
 app.include_router(logs.router, prefix="/api/logs", tags=["Logs"])
+app.include_router(sse.router, prefix="/api/sse", tags=["SSE"])
 
 
 @app.exception_handler(Exception)
