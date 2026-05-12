@@ -31,4 +31,5 @@ class Prompt(Base):
     top_p_enabled = Column(Boolean, default=False, nullable=False, server_default="false")
     effort = Column(String(20), nullable=False, server_default="low", default="low")
     fast_mode = Column(Boolean, nullable=False, server_default="false", default=False)
+    provider = Column(String(20), nullable=False, server_default="openrouter", default="openrouter")
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
