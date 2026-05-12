@@ -340,6 +340,7 @@ export default function PromptsPage() {
         skip_in_pipeline: !!data.skip_in_pipeline,
         effort: data.effort ?? "low",
         fast_mode: data.fast_mode ?? false,
+        provider: data.provider ?? "openrouter",
       });
     },
     onSuccess: (fullUpdatedPrompt) => {
@@ -483,42 +484,62 @@ export default function PromptsPage() {
                 models={groupedModels}
                 onChange={(m) => setEditState((prev) => (prev ? { ...prev, model: m } : prev))}
               />
-              {/* Effort + Fast mode — only for direct Claude models */}
-              {(editState.model || "").startsWith("claude-") && (
-                <div className="flex items-center gap-4 mt-2">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Effort (thinking)</label>
-                    <select
-                      value={editState.effort ?? "low"}
-                      onChange={(e) =>
-                        setEditState((prev) =>
-                          prev ? { ...prev, effort: e.target.value as Prompt["effort"] } : prev,
-                        )
-                      }
-                      className="border rounded-md px-2 py-1.5 text-sm bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    >
-                      <option value="low">Low (no thinking)</option>
-                      <option value="medium">Medium (5k tokens)</option>
-                      <option value="high">High (10k tokens)</option>
-                      <option value="extra_high">Extra High (20k tokens)</option>
-                    </select>
-                  </div>
-                  <div className="flex items-center gap-2 mt-4">
-                    <input
-                      type="checkbox"
-                      id="fast_mode"
-                      checked={editState.fast_mode ?? false}
-                      onChange={(e) =>
-                        setEditState((prev) => (prev ? { ...prev, fast_mode: e.target.checked } : prev))
-                      }
-                      className="w-4 h-4 rounded border-slate-300"
-                    />
-                    <label htmlFor="fast_mode" className="text-sm text-slate-700 cursor-pointer">
-                      Fast mode (skip thinking)
-                    </label>
-                  </div>
+              <div className="mt-2">
+                <label className="block text-xs font-medium text-slate-500 mb-1">Provider</label>
+                <select
+                  value={editState.provider || "openrouter"}
+                  onChange={(e) =>
+                    setEditState((prev) =>
+                      prev ? { ...prev, provider: e.target.value as Prompt["provider"] } : prev,
+                    )
+                  }
+                  className="w-[240px] border rounded-md px-2 py-1.5 text-sm bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="openrouter">OpenRouter</option>
+                  <option value="anthropic">Anthropic (Claude)</option>
+                  <option value="openai_codex">OpenAI Codex / ChatGPT</option>
+                  <option value="perplexity">Perplexity</option>
+                </select>
+              </div>
+              {/* Effort + Fast mode — only meaningful for direct Anthropic provider */}
+              <div className="flex items-center gap-4 mt-2">
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Effort (thinking)</label>
+                  <select
+                    value={editState.effort ?? "low"}
+                    onChange={(e) =>
+                      setEditState((prev) =>
+                        prev ? { ...prev, effort: e.target.value as Prompt["effort"] } : prev,
+                      )
+                    }
+                    disabled={editState.provider !== "anthropic"}
+                    className="border rounded-md px-2 py-1.5 text-sm bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400"
+                  >
+                    <option value="low">Low (no thinking)</option>
+                    <option value="medium">Medium (5k tokens)</option>
+                    <option value="high">High (10k tokens)</option>
+                    <option value="extra_high">Extra High (20k tokens)</option>
+                  </select>
                 </div>
-              )}
+                <div className="flex items-center gap-2 mt-4">
+                  <input
+                    type="checkbox"
+                    id="fast_mode"
+                    checked={editState.fast_mode ?? false}
+                    onChange={(e) =>
+                      setEditState((prev) => (prev ? { ...prev, fast_mode: e.target.checked } : prev))
+                    }
+                    disabled={editState.provider !== "anthropic"}
+                    className="w-4 h-4 rounded border-slate-300 disabled:opacity-50"
+                  />
+                  <label
+                    htmlFor="fast_mode"
+                    className={`text-sm cursor-pointer ${editState.provider !== "anthropic" ? "text-slate-400" : "text-slate-700"}`}
+                  >
+                    Fast mode (skip thinking)
+                  </label>
+                </div>
+              </div>
             </div>
 
             <div className="w-[170px] shrink-0">

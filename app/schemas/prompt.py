@@ -16,6 +16,7 @@ class PromptCreate(BaseModel):
     skip_in_pipeline: bool = False
     effort: str = "low"
     fast_mode: bool = False
+    provider: str | None = None
 
 
 class PromptUpdate(BaseModel):
@@ -37,6 +38,7 @@ class PromptUpdate(BaseModel):
     skip_in_pipeline: bool = False
     effort: str = "low"
     fast_mode: bool = False
+    provider: str | None = None
 
 
 class PromptTest(BaseModel):

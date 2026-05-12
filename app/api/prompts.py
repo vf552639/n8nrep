@@ -127,6 +127,7 @@ def _prompt_to_response(prompt: Prompt) -> dict[str, Any]:
         "top_p_enabled": bool(getattr(prompt, "top_p_enabled", False)),
         "effort": getattr(prompt, "effort", "low") or "low",
         "fast_mode": bool(getattr(prompt, "fast_mode", False)),
+        "provider": getattr(prompt, "provider", "openrouter") or "openrouter",
         "updated_at": prompt.updated_at.isoformat() if prompt.updated_at else None,
     }
 
@@ -160,6 +161,8 @@ def update_prompt_in_place(prompt_id: str, body: PromptUpdate, db: Session = Dep
     prompt.skip_in_pipeline = body.skip_in_pipeline
     prompt.effort = body.effort
     prompt.fast_mode = body.fast_mode
+    if body.provider is not None:
+        prompt.provider = body.provider
     db.commit()
     db.refresh(prompt)
     return _prompt_to_response(prompt)
@@ -202,6 +205,7 @@ def create_prompt(prompt_in: PromptCreate, db: Session = Depends(get_db)):
         top_p_enabled=abs(float(tp_val) - 1.0) > 0.0001,
         effort=prompt_in.effort,
         fast_mode=prompt_in.fast_mode,
+        provider=prompt_in.provider or "openrouter",
     )
     db.add(new_prompt)
     db.commit()

@@ -36,6 +36,7 @@ export const promptsApi = {
       skip_in_pipeline: boolean;
       effort: string;
       fast_mode: boolean;
+      provider?: string;
     }
   ) => api.put<Prompt>(`/prompts/${id}`, data).then((res) => res.data),
     
