@@ -41,6 +41,7 @@ export interface SiteProjectCreatePayload {
   use_site_template?: boolean;
   /** Merged into SERP organic URLs before scraping (max 50). */
   competitor_urls?: string[];
+  prompt_preset_id?: string | null;
 }
 
 /** Matches backend `SiteProjectDraftCreate` — only `name` is required. */
@@ -58,6 +59,7 @@ export interface SiteProjectDraftPayload {
   legal_template_map?: Record<string, string>;
   use_site_template?: boolean;
   competitor_urls?: string[];
+  prompt_preset_id?: string | null;
 }
 
 /** Matches backend `SiteProjectUpdate` — all fields optional (PATCH). */

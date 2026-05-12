@@ -13,6 +13,7 @@ import { formatApiErrorDetail } from "@/lib/apiErrorMessage";
 import { languageEquals, normalizeLanguageDisplay } from "@/lib/languageDisplay";
 import { sitesApi } from "@/api/sites";
 import { blueprintsApi } from "@/api/blueprints";
+import { promptPresetsApi } from "@/api/promptPresets";
 import { authorsLightListQueryOptions } from "@/api/authors";
 import { Author } from "@/types/author";
 import { Site } from "@/types/site";
@@ -768,6 +769,12 @@ function CreateProjectModal({
     legal_template_map: {} as Record<string, string>,
     use_site_template: true,
     markup_only: false,
+    prompt_preset_id: "" as string,
+  });
+
+  const { data: promptPresets = [] } = useQuery({
+    queryKey: ["prompt-presets"],
+    queryFn: () => promptPresetsApi.list(),
   });
   const [serpAdvancedOpen, setSerpAdvancedOpen] = useState(false);
   const [preview, setPreview] = useState<ProjectPreview | null>(null);
@@ -816,6 +823,7 @@ function CreateProjectModal({
           : {},
       use_site_template: p.use_site_template !== false,
       markup_only: markupOnly,
+      prompt_preset_id: p.prompt_preset_id || "",
     });
     const pk = p.project_keywords;
     if (pk?.clustered && Object.keys(pk.clustered).length > 0) {
@@ -1019,6 +1027,7 @@ function CreateProjectModal({
       ...(legal_template_map ? { legal_template_map } : {}),
       use_site_template: formData.markup_only ? false : formData.use_site_template,
       ...(competitor_urls ? { competitor_urls } : {}),
+      ...(formData.prompt_preset_id ? { prompt_preset_id: formData.prompt_preset_id } : {}),
     };
   };
 
@@ -1212,6 +1221,7 @@ function CreateProjectModal({
       ...(legal_template_map ? { legal_template_map } : {}),
       use_site_template: formData.markup_only ? false : formData.use_site_template,
       ...(competitor_urls ? { competitor_urls } : {}),
+      ...(formData.prompt_preset_id ? { prompt_preset_id: formData.prompt_preset_id } : {}),
     });
   };
 
@@ -1279,6 +1289,27 @@ function CreateProjectModal({
                   </option>
                 ))}
               </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Prompt preset</label>
+              <select
+                value={formData.prompt_preset_id}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, prompt_preset_id: e.target.value }))
+                }
+                className="w-full border outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-sm bg-white"
+              >
+                <option value="">(use globally active prompts)</option>
+                {promptPresets.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                    {p.is_default ? " — default" : ""}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-500 mt-1">
+                Optional. A preset can override which prompt is used per agent.
+              </p>
             </div>
             <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-3">
               <label className="flex items-start gap-2 text-sm text-slate-800 cursor-pointer">
