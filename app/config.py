@@ -31,6 +31,7 @@ class Settings(BaseSettings):
 
     # LLM
     OPENROUTER_API_KEY: str = ""
+    ANTHROPIC_API_KEY: str = ""
     OPENROUTER_HTTP_REFERER: str = "https://example.com"
     DEFAULT_MODEL: str = "openai/gpt-5"
     ANALYST_MODEL: str = "google/gemini-2.5-pro"
